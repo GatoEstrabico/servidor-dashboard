@@ -175,17 +175,34 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Volte ao Arduino IDE e carregue o sketch atualizado. O processo normal incorpora os assets no firmware; não é necessário enviar uma imagem LittleFS separadamente.
 
-## 9. Vincule o ESP32 ao servidor web
+## 9. Conecte o ESP32 à dashboard
 
-O vínculo do aparelho com a plataforma é opcional. Para uso real, publique API e painel sob o mesmo domínio HTTPS com certificado confiável. Na aba **Rede** do painel local do ESP32:
+Há dois logins diferentes nesse processo:
 
-1. Informe a URL pública HTTPS do sistema, o e-mail e a senha da conta do painel e, se desejar, a localização.
-2. Selecione **Vincular aparelho**. O servidor cria um token exclusivo para esse ESP32; o dispositivo envia as leituras periodicamente.
-3. Para desvincular, use **Remover vínculo** no aparelho.
+- **Login local do ESP32:** protege a interface servida pelo próprio aparelho. Em um firmware sem usuários previamente cadastrados, a conta inicial é `admin` com senha `admin`; altere essa senha na seção **Usuários** assim que entrar.
+- **Login LAB/MONITOR:** é o e-mail e a senha da conta criada pelo `npm.cmd run db:seed`. Esses dados são usados somente no formulário **Vincular ao LAB/MONITOR** para autorizar o aparelho no servidor. Não use aqui a senha local do ESP32 nem a senha do Wi-Fi.
 
-Não configure `localhost` no ESP32: esse nome apontaria para o próprio dispositivo, não para o computador servidor. Testes HTTP só devem ocorrer em uma rede privada confiável, com a opção de HTTP confirmada no aparelho. HTTP não protege senha, token ou leituras.
+### Conecte o aparelho ao Wi-Fi
 
-O firmware usa sincronização de horário por NTP e valida certificados HTTPS pelo bundle de CAs do ESP32. A rede precisa permitir DNS, NTP e conexões HTTPS de saída.
+1. Deixe PostgreSQL, API e dashboard em execução e carregue o firmware no ESP32.
+2. Se o aparelho ainda não estiver conectado, conecte-se ao ponto de acesso `MONITOR-CONFIGURAR` e abra o endereço/IP mostrado no Serial Monitor. Entre na interface do ESP32 com o login local.
+3. Abra o menu **Rede**, escolha a rede Wi-Fi e use **Salvar e conectar**. Depois que o ESP32 se conectar, o ponto de acesso de configuração será encerrado e o endereço local do aparelho poderá mudar; abra novamente o painel pelo IP informado no Serial Monitor ou pelo endereço `.local` exibido nele.
+
+### Faça o vínculo com o servidor
+
+Na interface local do ESP32, entre novamente com o usuário local, abra **Rede** e preencha o card **Vincular ao LAB/MONITOR**:
+
+1. **Endereço do LAB/MONITOR:** informe a URL base do servidor, sem acrescentar `/api`.
+	- Em produção, use o domínio HTTPS público, por exemplo `https://monitor.exemplo.com`.
+	- Para teste na mesma rede local, use o endereço IPv4 do computador que executa a API, por exemplo `http://192.168.1.50:3000`. Descubra o IPv4 com `ipconfig`. O ESP32 precisa alcançar esse computador pela rede, e o Firewall do Windows deve permitir conexões privadas de entrada na porta TCP 3000.
+	- Não use `localhost`, `127.0.0.1` nem a porta `5173`: `localhost` apontaria para o próprio ESP32 e a porta 5173 é apenas o servidor de desenvolvimento do painel. No teste local, o firmware conversa diretamente com a API na porta 3000.
+2. Informe o **e-mail e a senha da conta do painel web**, definidos em `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD` antes do seed (ou a senha atualizada posteriormente no painel).
+3. Informe uma localização, se desejar. Para HTTP local, marque a confirmação de segurança exibida; HTTP transmite credenciais e leituras sem criptografia e só deve ser usado em uma rede privada confiável.
+4. Selecione **Vincular aparelho**. A mensagem de sucesso confirma que o servidor autenticou a conta e salvou um token exclusivo no ESP32.
+
+Após o vínculo, o firmware envia temperatura, umidade e leitura do sensor de gás aproximadamente a cada 15 segundos. Entre na dashboard web em `http://localhost:5173` (ou no endereço anunciado pelo Vite), usando a conta LAB/MONITOR; o aparelho deverá aparecer na lista. Use **Remover vínculo** na interface do ESP32 para revogá-lo também no servidor.
+
+Em produção, publique API e painel sob o mesmo domínio HTTPS com certificado confiável. O firmware sincroniza a hora por NTP e valida o certificado HTTPS pelo bundle de CAs do ESP32; a rede precisa permitir DNS, NTP e conexões HTTPS de saída.
 
 ## 10. Publicação em produção
 
@@ -206,4 +223,5 @@ O procedimento acima é para desenvolvimento. Antes de publicar:
 - **Erro de autenticação no painel:** confira as variáveis `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD`; execute novamente `npm.cmd run db:seed` para redefinir a senha para o valor do `.env`.
 - **Porta 5173 ocupada:** encerre o Vite antigo ou abra a porta alternativa informada no terminal.
 - **ESP32 não conecta ao Wi-Fi:** apague ou atualize a rede salva pela página de configuração e confira a intensidade do sinal e o tipo de segurança selecionado.
+- **`Sketch too big` ou `text section exceeds available space on board`:** no Arduino IDE, confirme a placa **ESP32 Dev Module**, abra **Ferramentas > Partition Scheme > Custom** e mantenha `projeto/partitions.csv` na raiz do sketch `projeto/projeto.ino`. O esquema Custom reserva 3 MB para o programa; o esquema padrão limita o app a cerca de 1,3 MB.
 - **ESP32 não chega ao servidor:** use um domínio acessível pelo dispositivo; `localhost` não funciona. Em produção, confira DNS, certificado HTTPS, NTP e encaminhamento de `/api` pelo proxy.

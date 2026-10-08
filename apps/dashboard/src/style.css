@@ -102,7 +102,31 @@ button:disabled { cursor: wait; opacity: .7; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 .last-update { display: flex; align-items: center; gap: 8px; margin-right: 9px; color: #7d8981; font-size: 10px; }
 .last-update .live-dot, .table-footer .live-dot { width: 6px; height: 6px; flex-basis: 6px; }
-.notification-button i { position: absolute; top: 7px; right: 7px; width: 6px; height: 6px; border: 1px solid white; border-radius: 50%; background: #d69e56; }
+.notification-wrap { position: relative; }
+.notification-count { position: absolute; top: 1px; right: 0; display: grid; min-width: 16px; height: 16px; place-items: center; padding: 0 4px; border: 2px solid #fff; border-radius: 10px; color: #fff; background: #c65e4f; font-size: 8px; font-weight: 700; line-height: 1; }
+.notification-panel { position: absolute; z-index: 6; top: calc(100% + 10px); right: -44px; display: flex; width: min(370px, calc(100vw - 26px)); max-height: min(520px, calc(100vh - 76px)); flex-direction: column; overflow: hidden; border: 1px solid #e0e7e0; border-radius: 8px; color: #29352f; background: #fff; box-shadow: 0 14px 38px rgba(30, 51, 39, .18); }
+.notification-panel-header { display: flex; min-height: 66px; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #e9ede8; }
+.notification-panel-header h2 { margin: 0; color: #26352d; font-family: Manrope, sans-serif; font-size: 14px; font-weight: 700; }
+.notification-panel-header p { margin: 4px 0 0; color: #89948d; font-size: 10px; }
+.notification-read-all { flex: 0 0 auto; border: 0; padding: 4px 0; color: #287b65; background: transparent; font-size: 9px; font-weight: 700; }
+.notification-read-all:hover { color: #1d5948; text-decoration: underline; }
+.notification-list { overflow-y: auto; }
+.notification-item { display: flex; width: 100%; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 0; border-bottom: 1px solid #edf0ec; color: inherit; background: #fff; text-align: left; }
+.notification-item:last-child { border-bottom: 0; }
+.notification-item:hover { background: #f7f9f6; }
+.notification-item.notification-unread { background: #f4f8f3; }
+.notification-icon { display: grid; width: 29px; height: 29px; flex: 0 0 29px; place-items: center; border-radius: 50%; color: #a2692c; background: #faf1e2; }
+.notification-offline .notification-icon { color: #a85349; background: #f8e9e5; }
+.notification-online .notification-icon { color: #347751; background: #e8f3e9; }
+.notification-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }
+.notification-copy strong { color: #344139; font-size: 11px; }
+.notification-copy > span { color: #77837b; font-size: 10px; line-height: 1.45; }
+.notification-copy time { color: #9aa49d; font-size: 9px; }
+.notification-unread-dot { width: 7px; height: 7px; flex: 0 0 7px; margin-top: 5px; border-radius: 50%; background: #c65e4f; }
+.notification-empty { display: grid; justify-items: center; gap: 8px; padding: 32px 20px; color: #87938b; text-align: center; }
+.notification-empty > svg { color: #6e9b7d; }
+.notification-empty strong { color: #46544b; font-size: 11px; }
+.notification-empty span { max-width: 235px; font-size: 10px; line-height: 1.5; }
 .top-avatar { width: 28px; height: 28px; flex-basis: 28px; margin-left: 5px; border-color: #c7dbcb; color: #38634a; background: #e4f0e5; font-size: 11px; }
 .account-menu-button { display: grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; }
 .account-menu-button:focus-visible { outline: 2px solid #478d70; outline-offset: 2px; }
@@ -204,11 +228,13 @@ button:disabled { cursor: wait; opacity: .7; }
 .account-settings-form { display: grid; gap: 9px; }
 .password-settings-form { padding-top: 15px; border-top: 1px solid #e9ede8; }
 .settings-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 2px; }
+.notification-preferences-heading { margin-top: 8px; }
 .settings-section-heading h3 { margin: 0; color: #304037; font-family: Manrope, sans-serif; font-size: 14px; }
 .settings-section-heading > span { color: #87928b; font-size: 10px; text-align: right; }
 .account-settings-form > label { margin-top: 4px; color: #46534b; font-size: 11px; font-weight: 600; }
 .settings-input { width: 100%; height: 39px; padding: 0 11px; border: 1px solid #dfe5df; border-radius: 4px; outline: 0; color: #24312b; background: #fff; font-size: 12px; }
 .settings-input:focus { border-color: #478d70; box-shadow: 0 0 0 3px rgba(71, 141, 112, .12); }
+.settings-help { margin: -3px 0 4px; color: #818d85; font-size: 10px; line-height: 1.5; }
 .avatar-editor { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
 .settings-avatar { display: grid; width: 54px; height: 54px; flex: 0 0 54px; place-items: center; border: 1px solid #dfe8df; border-radius: 50%; object-fit: cover; }
 .settings-avatar-fallback { color: #34634a; background: #e8f2e9; font-family: Manrope, sans-serif; font-size: 19px; font-weight: 700; }
@@ -323,3 +349,103 @@ button:disabled { cursor: wait; opacity: .7; }
   body { background: white; }
   .device-section, .metric { border-color: #cfd5cf; }
 }
+
+:root.dark-mode {
+  color-scheme: dark;
+  color: #e3eae5;
+  background: #111917;
+  --ink: #e3eae5;
+  --muted: #a0aea5;
+  --line: #303b35;
+}
+:root.dark-mode body,
+:root.dark-mode .app-shell,
+:root.dark-mode .main-area { color: #e3eae5; background: #111917; }
+:root.dark-mode .login-layout { background: #111917; }
+:root.dark-mode .login-side { color: #e3eae5; }
+:root.dark-mode .login-form h2,
+:root.dark-mode .login-form label { color: #e3eae5; }
+:root.dark-mode .form-subtitle,
+:root.dark-mode .login-footer { color: #a0aea5; }
+:root.dark-mode .login-form input { border-color: #39463e; color: #e3eae5; background: #1b2420; }
+:root.dark-mode .login-form input:focus { border-color: #5ba77d; }
+:root.dark-mode .mobile-brand { color: #dce8df; }
+:root.dark-mode .topbar { border-color: #303b35; background: rgba(24, 33, 29, .96); }
+:root.dark-mode .breadcrumb strong,
+:root.dark-mode .page-heading h1,
+:root.dark-mode .section-heading h2,
+:root.dark-mode .metric-value,
+:root.dark-mode .device-cell,
+:root.dark-mode .device-identity-copy,
+:root.dark-mode .sensor-detail-card > strong { color: #e3eae5; }
+:root.dark-mode .dashboard-logo { border-color: #39463e; background: #202a25; }
+:root.dark-mode .secondary-button,
+:root.dark-mode .export-button { border-color: #3b4840; color: #c4d0c8; background: #202a25; }
+:root.dark-mode .secondary-button:hover,
+:root.dark-mode .export-button:hover { border-color: #5b886c; color: #a5d6b4; background: #26352c; }
+:root.dark-mode .notice-error { border-color: #644739; color: #edb99a; background: #30231e; }
+:root.dark-mode .metric,
+:root.dark-mode .device-section,
+:root.dark-mode .device-card { border-color: #303b35; background: #1a231f; }
+:root.dark-mode .metric-icon { color: #a6c9b0; background: #293a30; }
+:root.dark-mode .metric-icon.green { color: #8bd4a8; background: #203a2b; }
+:root.dark-mode .metric-icon.amber { color: #e1b66d; background: #3a3021; }
+:root.dark-mode .metric-icon.rose { color: #d89e93; background: #392826; }
+:root.dark-mode .section-heading,
+:root.dark-mode .table-footer,
+:root.dark-mode .device-details,
+:root.dark-mode .password-settings-form { border-color: #303b35; }
+:root.dark-mode .section-heading p,
+:root.dark-mode .table-count,
+:root.dark-mode .table-footer,
+:root.dark-mode .dashboard-footer,
+:root.dark-mode .device-meta > span,
+:root.dark-mode .device-meta strong,
+:root.dark-mode .sensor-detail-label,
+:root.dark-mode .sensor-reading-time,
+:root.dark-mode .empty-state > span:last-child { color: #a0aea5; }
+:root.dark-mode .search-field,
+:root.dark-mode .device-icon,
+:root.dark-mode .device-health-item,
+:root.dark-mode .sensor-detail-card,
+:root.dark-mode .empty-state .empty-icon { border-color: #354139; color: #aebbb2; background: #202a25; }
+:root.dark-mode .search-field input { color: #e3eae5; }
+:root.dark-mode .device-summary { color: #e3eae5; }
+:root.dark-mode .device-summary:hover { background: #222d27; }
+:root.dark-mode .device-health-item.health-warning { border-color: #56472e; color: #e1b66d; background: #30291f; }
+:root.dark-mode .device-health-item.health-offline,
+:root.dark-mode .device-health-item.health-missing { color: #a0aea5; }
+:root.dark-mode .status-badge.online { border-color: #34523d; color: #91d2a4; background: #203328; }
+:root.dark-mode .status-badge.warning { border-color: #5a482c; color: #e4bd78; background: #342b1e; }
+:root.dark-mode .status-badge.offline { border-color: #4b3b37; color: #d2a098; background: #302523; }
+:root.dark-mode .empty-state strong { color: #d6e1d9; }
+:root.dark-mode .settings-dialog { border-color: #3a463f; color: #e3eae5; background: #1a231f; }
+:root.dark-mode .theme-setting { border-color: #354139; background: #222d27; }
+:root.dark-mode .theme-setting-icon { color: #a6d0b2; background: #2a3a30; }
+:root.dark-mode .theme-setting-copy { color: #e3eae5; }
+:root.dark-mode .theme-setting-copy small,
+:root.dark-mode .settings-section-heading > span { color: #a0aea5; }
+:root.dark-mode .settings-section-heading h3,
+:root.dark-mode .account-settings-form > label { color: #d6e1d9; }
+:root.dark-mode .settings-input { border-color: #39463e; color: #e3eae5; background: #202a25; }
+:root.dark-mode .settings-help { color: #a0aea5; }
+:root.dark-mode .mobile-nav { border-color: #303b35; background: rgba(24, 33, 29, .97); }
+:root.dark-mode .mobile-nav-item { color: #a0aea5; }
+:root.dark-mode .mobile-nav-item.active,
+:root.dark-mode .mobile-nav-item:active { color: #a5d6b4; background: #26372d; }
+:root.dark-mode .notification-count { border-color: #18211d; }
+:root.dark-mode .notification-panel { border-color: #354139; color: #e3eae5; background: #1a231f; box-shadow: 0 14px 38px rgba(0, 0, 0, .4); }
+:root.dark-mode .notification-panel-header { border-color: #303b35; }
+:root.dark-mode .notification-panel-header h2,
+:root.dark-mode .notification-copy strong,
+:root.dark-mode .notification-empty strong { color: #e3eae5; }
+:root.dark-mode .notification-panel-header p,
+:root.dark-mode .notification-copy > span,
+:root.dark-mode .notification-copy time,
+:root.dark-mode .notification-empty { color: #a0aea5; }
+:root.dark-mode .notification-item { border-color: #303b35; color: #e3eae5; background: #1a231f; }
+:root.dark-mode .notification-item:hover { background: #222d27; }
+:root.dark-mode .notification-item.notification-unread { background: #202d25; }
+:root.dark-mode .notification-icon { color: #e1b66d; background: #3a3021; }
+:root.dark-mode .notification-offline .notification-icon { color: #d89e93; background: #392826; }
+:root.dark-mode .notification-online .notification-icon { color: #8bd4a8; background: #203a2b; }

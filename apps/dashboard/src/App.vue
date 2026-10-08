@@ -3,11 +3,19 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import {
   Activity, AlertTriangle, ArrowDownToLine, Bell, Check, ChevronDown, CircleHelp,
   CircleAlert, CircleCheck, CircleMinus, Clock3, Cpu, Flame, LayoutDashboard,
-  LoaderCircle, LogOut, MapPin, Moon, RefreshCw, Search, Settings, ShieldCheck,
-  Signal, Sun, Thermometer, Waves, X
+  LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, RefreshCw, Search,
+  Settings, ShieldCheck, Signal, Sun, Thermometer, Waves, X
 } from 'lucide-vue-next';
 
-type User = { id: string; email: string; displayName: string; avatarDataUrl: string | null };
+type User = {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarDataUrl: string | null;
+  whatsappNumber: string | null;
+  emailNotifications: boolean;
+  whatsappNotifications: boolean;
+};
 type Reading = { id: string; type: string; value: number; unit: string; recordedAt: string };
 type Device = {
   id: string;
@@ -18,9 +26,21 @@ type Device = {
   lastSeenAt: string;
   readings: Reading[];
 };
+type DeviceNotification = {
+  id: number;
+  deviceId: string;
+  deviceName: string;
+  status: Device['status'];
+  title: string;
+  message: string;
+  createdAt: string;
+  read: boolean;
+};
 
 const user = ref<User | null>(null);
 const devices = ref<Device[]>([]);
+const notifications = ref<DeviceNotification[]>([]);
+const notificationOpen = ref(false);
 const csrfToken = ref('');
 const email = ref('');
 const password = ref('');
@@ -49,12 +69,18 @@ const accountSaving = ref(false);
 const profileName = ref('');
 const profileEmail = ref('');
 const profileAvatar = ref<string | null>(null);
+const profileWhatsappNumber = ref('');
+const profileEmailNotifications = ref(true);
+const profileWhatsappNotifications = ref(false);
 const avatarError = ref('');
 const refreshedAt = ref(new Date());
 const activeMobileTab = ref('home');
 const expandedDeviceIds = ref<string[]>([]);
 const reportDate = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
+let knownDeviceStatuses: Map<string, Device['status']> | undefined;
+let notificationSequence = 0;
+let deviceRefreshInProgress = false;
 
 const filteredDevices = computed(() => {
   const query = search.value.trim().toLocaleLowerCase('pt-BR');
@@ -67,12 +93,16 @@ const onlineCount = computed(() => devices.value.filter((device) => device.statu
 const warningCount = computed(() => devices.value.filter((device) => device.status === 'warning').length);
 const offlineCount = computed(() => devices.value.filter((device) => device.status === 'offline').length);
 const latestReadings = computed(() => devices.value.reduce((total, device) => total + device.readings.length, 0));
+const unreadNotificationCount = computed(() => notifications.value.filter((notification) => !notification.read).length);
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options.headers }
+    headers: {
+      ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers
+    }
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -82,15 +112,74 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 async function loadDevices() {
-  if (!user.value) return;
+  if (!user.value || deviceRefreshInProgress) return;
+  deviceRefreshInProgress = true;
   try {
     const result = await api<{ devices: Device[] }>('/api/devices');
+    const newNotifications: DeviceNotification[] = [];
+    if (knownDeviceStatuses) {
+      for (const device of result.devices) {
+        const previousStatus = knownDeviceStatuses.get(device.id);
+        if (previousStatus === device.status || (previousStatus === undefined && device.status === 'online')) continue;
+        const title = device.status === 'online'
+          ? 'Alarme normalizado'
+          : device.status === 'warning'
+            ? 'Aparelho em atenção'
+            : 'Aparelho offline';
+        const message = device.status === 'online'
+          ? `O aparelho ${device.name} voltou a ficar online.`
+          : `O aparelho ${device.name} está ${deviceStatusLabel(device.status).toLocaleLowerCase('pt-BR')}.`;
+        newNotifications.push({
+          id: ++notificationSequence,
+          deviceId: device.id,
+          deviceName: device.name,
+          status: device.status,
+          title,
+          message,
+          createdAt: new Date().toISOString(),
+          read: false
+        });
+      }
+    }
+    if (newNotifications.length) {
+      notifications.value = [...newNotifications.reverse(), ...notifications.value].slice(0, 50);
+    }
+    knownDeviceStatuses = new Map(result.devices.map((device) => [device.id, device.status]));
     devices.value = result.devices;
     refreshedAt.value = new Date();
     pageError.value = '';
   } catch (error) {
     pageError.value = error instanceof Error ? error.message : 'Falha ao atualizar aparelhos.';
+  } finally {
+    deviceRefreshInProgress = false;
   }
+}
+
+function markAllNotificationsRead() {
+  notifications.value = notifications.value.map((notification) => ({ ...notification, read: true }));
+}
+
+function openDeviceNotification(notification: DeviceNotification) {
+  notification.read = true;
+  notificationOpen.value = false;
+  if (!devices.value.some((device) => device.id === notification.deviceId)) return;
+  search.value = '';
+  if (!expandedDeviceIds.value.includes(notification.deviceId)) {
+    expandedDeviceIds.value = [...expandedDeviceIds.value, notification.deviceId];
+  }
+  window.setTimeout(() => {
+    document.getElementById(`device-${notification.deviceId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 0);
+}
+
+function handleNotificationOutsideClick(event: MouseEvent) {
+  if (!(event.target instanceof Element) || !event.target.closest('.notification-wrap')) {
+    notificationOpen.value = false;
+  }
+}
+
+function handleNotificationKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') notificationOpen.value = false;
 }
 
 async function checkSession() {
@@ -172,6 +261,9 @@ function syncProfileForm() {
   profileName.value = user.value.displayName;
   profileEmail.value = user.value.email;
   profileAvatar.value = user.value.avatarDataUrl;
+  profileWhatsappNumber.value = user.value.whatsappNumber ?? '';
+  profileEmailNotifications.value = user.value.emailNotifications;
+  profileWhatsappNotifications.value = user.value.whatsappNotifications;
 }
 
 function openSettings() {
@@ -195,6 +287,9 @@ async function updateProfile() {
         displayName: profileName.value,
         email: profileEmail.value,
         avatarDataUrl: profileAvatar.value,
+        whatsappNumber: profileWhatsappNumber.value,
+        emailNotifications: profileEmailNotifications.value,
+        whatsappNotifications: profileWhatsappNotifications.value,
         currentPassword: currentPassword.value
       })
     });
@@ -271,10 +366,15 @@ function toggleDarkMode() {
 async function logout() {
   try {
     await api('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken.value } });
-  } finally {
     user.value = null;
     devices.value = [];
+    notifications.value = [];
+    notificationOpen.value = false;
+    knownDeviceStatuses = undefined;
     csrfToken.value = '';
+    pageError.value = '';
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Nao foi possivel encerrar a sessao. Tente novamente.';
   }
 }
 
@@ -367,11 +467,15 @@ onMounted(() => {
   refreshTimer = setInterval(() => void loadDevices(), 30_000);
   window.addEventListener('scroll', syncMobileTab, { passive: true });
   window.addEventListener('hashchange', syncMobileTab);
+  document.addEventListener('click', handleNotificationOutsideClick);
+  window.addEventListener('keydown', handleNotificationKeydown);
 });
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer);
   window.removeEventListener('scroll', syncMobileTab);
   window.removeEventListener('hashchange', syncMobileTab);
+  document.removeEventListener('click', handleNotificationOutsideClick);
+  window.removeEventListener('keydown', handleNotificationKeydown);
 });
 </script>
 
@@ -460,7 +564,54 @@ onUnmounted(() => {
     <section class="main-area">
       <header class="topbar">
         <div class="breadcrumb"><img class="dashboard-logo" src="/logo.jpg" alt="UERJ" /><span>Monitoramento</span><span>/</span><strong>Visao geral</strong></div>
-        <div class="top-actions"><span class="last-update"><span class="live-dot"></span> Atualizado {{ formatRefreshTime() }}</span><button class="icon-button" title="Ajuda" aria-label="Ajuda"><CircleHelp :size="18" /></button><button class="icon-button notification-button" title="Notificacoes" aria-label="Notificacoes"><Bell :size="18" /><i></i></button><button class="account-menu-button" type="button" title="Configuracoes da conta" aria-label="Abrir configuracoes da conta" @click="openSettings"><img v-if="user.avatarDataUrl" class="top-avatar-image" :src="user.avatarDataUrl" alt="" /><span v-else class="top-avatar">{{ user.displayName.slice(0, 1).toUpperCase() }}</span></button></div>
+        <div class="top-actions">
+          <span class="last-update"><span class="live-dot"></span> Atualizado {{ formatRefreshTime() }}</span>
+          <button class="icon-button" title="Ajuda" aria-label="Ajuda"><CircleHelp :size="18" /></button>
+          <div class="notification-wrap">
+            <button
+              class="icon-button notification-button"
+              type="button"
+              :title="`Notificações${unreadNotificationCount ? `: ${unreadNotificationCount} não lidas` : ''}`"
+              :aria-label="`Notificações${unreadNotificationCount ? `, ${unreadNotificationCount} não lidas` : ''}`"
+              :aria-expanded="notificationOpen"
+              aria-haspopup="dialog"
+              @click="notificationOpen = !notificationOpen"
+            >
+              <Bell :size="18" />
+              <span v-if="unreadNotificationCount" class="notification-count">{{ unreadNotificationCount > 99 ? '99+' : unreadNotificationCount }}</span>
+            </button>
+            <section v-if="notificationOpen" class="notification-panel" role="dialog" aria-label="Notificações">
+              <header class="notification-panel-header">
+                <div><h2>Notificações</h2><p>{{ unreadNotificationCount ? `${unreadNotificationCount} não lidas` : 'Todas as notificações foram lidas' }}</p></div>
+                <button v-if="unreadNotificationCount" class="notification-read-all" type="button" @click="markAllNotificationsRead">Marcar todas como lidas</button>
+              </header>
+              <div v-if="notifications.length" class="notification-list" role="list">
+                <div v-for="notification in notifications" :key="notification.id" role="listitem">
+                  <button
+                    class="notification-item"
+                    :class="[{ 'notification-unread': !notification.read }, `notification-${notification.status}`]"
+                    type="button"
+                    @click="openDeviceNotification(notification)"
+                  >
+                    <span class="notification-icon"><CircleCheck v-if="notification.status === 'online'" :size="17" /><AlertTriangle v-else :size="17" /></span>
+                    <span class="notification-copy">
+                      <strong>{{ notification.title }}</strong>
+                      <span>{{ notification.message }}</span>
+                      <time :datetime="notification.createdAt">{{ formatTime(notification.createdAt) }}</time>
+                    </span>
+                    <i v-if="!notification.read" class="notification-unread-dot" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </div>
+              <div v-else class="notification-empty">
+                <Bell :size="22" />
+                <strong>Nenhuma notificação</strong>
+                <span>Alterações nos estados dos aparelhos aparecerão aqui.</span>
+              </div>
+            </section>
+          </div>
+          <button class="account-menu-button" type="button" title="Configurações da conta" aria-label="Abrir configurações da conta" @click="openSettings"><img v-if="user.avatarDataUrl" class="top-avatar-image" :src="user.avatarDataUrl" alt="" /><span v-else class="top-avatar">{{ user.displayName.slice(0, 1).toUpperCase() }}</span></button>
+        </div>
       </header>
 
       <main id="inicio" class="dashboard-content">
@@ -482,7 +633,7 @@ onUnmounted(() => {
           <div class="section-heading"><div><h2>Aparelhos</h2><p>Inventario e leituras mais recentes</p></div><button class="export-button" title="Exportar lista" @click="exportList"><ArrowDownToLine :size="16" /><span>Exportar</span></button></div>
           <div class="table-toolbar"><div class="table-count"><span class="count-dot"></span>{{ devices.length }} aparelhos registrados</div><label class="search-field"><Search :size="16" /><input v-model="search" type="search" placeholder="Buscar aparelho..." aria-label="Buscar aparelho" /></label></div>
           <div v-if="filteredDevices.length" class="device-list">
-            <article v-for="device in filteredDevices" :key="device.id" class="device-card" :class="`device-card-${device.status}`">
+            <article v-for="device in filteredDevices" :id="`device-${device.id}`" :key="device.id" class="device-card" :class="`device-card-${device.status}`">
               <button
                 class="device-summary"
                 type="button"
@@ -580,6 +731,20 @@ onUnmounted(() => {
           <input id="profileName" v-model="profileName" class="settings-input" type="text" maxlength="80" autocomplete="name" />
           <label for="profileEmail">E-mail</label>
           <input id="profileEmail" v-model="profileEmail" class="settings-input" type="email" maxlength="254" autocomplete="email" />
+          <div class="settings-section-heading notification-preferences-heading"><h3>Alertas de alarmes</h3><span>Preferências de envio</span></div>
+          <label class="theme-setting">
+            <span class="theme-setting-icon"><Mail :size="18" /></span>
+            <span class="theme-setting-copy"><strong>Notificações por e-mail</strong><small>Enviadas para {{ profileEmail || 'o e-mail da conta' }}</small></span>
+            <input v-model="profileEmailNotifications" class="theme-switch" type="checkbox" />
+          </label>
+          <label class="theme-setting">
+            <span class="theme-setting-icon"><MessageCircle :size="18" /></span>
+            <span class="theme-setting-copy"><strong>Notificações por WhatsApp</strong><small>É necessário cadastrar o número e ativar o canal</small></span>
+            <input v-model="profileWhatsappNotifications" class="theme-switch" type="checkbox" />
+          </label>
+          <label for="profileWhatsappNumber">WhatsApp (formato internacional)</label>
+          <input id="profileWhatsappNumber" v-model="profileWhatsappNumber" class="settings-input" type="tel" maxlength="24" autocomplete="tel" placeholder="+5521999999999" />
+          <p class="settings-help">Use o formato E.164, incluindo o código do país (por exemplo, +55...). O WhatsApp requer uma conta Meta Cloud API configurada pelo administrador.</p>
           <label for="currentPassword">Senha atual</label>
           <input id="currentPassword" v-model="currentPassword" class="settings-input" type="password" autocomplete="current-password" />
           <div v-if="accountError" class="error-message" role="alert">{{ accountError }}</div>

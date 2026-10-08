@@ -60,7 +60,25 @@ node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'
 
 Substitua os valores de exemplo de `SESSION_SECRET` e `INGESTION_API_KEY` pelo resultado de duas execuções separadas. Nunca publique o `.env`: ele está excluído pelo `.gitignore`.
 
-As variáveis `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` e `SMTP_FROM` são opcionais. Configure-as com credenciais reais para habilitar o envio de links de redefinição de senha. Sem SMTP configurado, o restante do sistema funciona, mas os e-mails de recuperação não são enviados.
+As variáveis `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` e `SMTP_FROM` são opcionais. Configure-as com credenciais reais para habilitar links de redefinição de senha e notificações de alarmes por e-mail.
+
+Para notificações por WhatsApp, configure estas variáveis opcionais com as credenciais do app da Meta Cloud API (mantenha os tokens somente no `.env` do servidor):
+
+| Variável | Uso |
+| --- | --- |
+| `WHATSAPP_ACCESS_TOKEN` | Token de acesso permanente/servidor da Meta |
+| `WHATSAPP_PHONE_NUMBER_ID` | ID do número de telefone habilitado para Cloud API |
+| `WHATSAPP_API_VERSION` | Versão Graph API; padrão `v23.0` |
+| `WHATSAPP_TEMPLATE_NAME` | Nome do modelo aprovado; padrão `lab_monitor_alarm` |
+| `WHATSAPP_TEMPLATE_LANGUAGE` | Idioma aprovado do modelo; padrão `pt_BR` |
+
+Configure ambas `WHATSAPP_ACCESS_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID` ou deixe ambas vazias. No WhatsApp Manager, crie e aprove um modelo da categoria Utility com idioma `pt_BR` e este corpo, que corresponde aos três parâmetros enviados pela API:
+
+```text
+Alerta de monitoramento: {{1}} está {{2}}. Localização: {{3}}.
+```
+
+Cada pessoa informa o telefone internacional (E.164, como `+5521999999999`) e ativa o canal no perfil. Alertas de e-mail usam o endereço da conta e também podem ser desativados pelo perfil. A Cloud API oficial não requer um intermediário pago, mas a Meta pode aplicar preços e limites conforme a conta, o país e a política vigente.
 
 ## 4. Prepare o PostgreSQL
 
@@ -95,6 +113,8 @@ npm.cmd run db:seed
 - `db:push` cria ou atualiza as tabelas do banco conforme `apps/api/prisma/schema.prisma`.
 - `db:seed` cria ou atualiza a conta definida em `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD`.
 
+Ao atualizar para esta versão, execute `db:generate` e `db:push` para adicionar à tabela de usuários o número de WhatsApp e as preferências dos canais. A mudança preserva os usuários atuais; notificações por e-mail ficam ativadas por padrão e WhatsApp desativado até adesão no perfil.
+
 O seed pode ser executado novamente, mas isso redefine a senha da conta para o valor atual em `.env`.
 
 ## 6. Inicie a aplicação
@@ -112,6 +132,8 @@ Esse comando inicia API e painel juntos. Mantenha o terminal aberto enquanto est
 - Verificação da API: http://localhost:3000/health
 
 Acesse o painel e entre com o e-mail e a senha definidos em `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD`.
+
+Para testar com um aparelho ficticio que envia novas leituras a cada 15 segundos, execute `npm.cmd run demo` no lugar de `npm.cmd run dev`. O sensor de demonstracao aparece no painel e varia temperatura, umidade e gas. Pressione Ctrl+C para encerrar API, painel e simulador. Se API e painel ja estiverem rodando com `npm.cmd run dev`, abra outro terminal e execute `npm.cmd run simulate:device`; pressione Ctrl+C nesse terminal para parar somente o simulador.
 
 Para iniciar os serviços em terminais separados, use a raiz do projeto e execute um comando em cada terminal:
 

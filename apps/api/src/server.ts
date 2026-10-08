@@ -35,7 +35,20 @@ const envSchema = z.object({
   SMTP_SECURE: z.enum(['true', 'false']).default('false'),
   SMTP_USER: z.string().min(1).optional(),
   SMTP_PASSWORD: z.string().min(1).optional(),
-  SMTP_FROM: z.string().min(1).max(254).optional()
+  SMTP_FROM: z.string().min(1).max(254).optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
+  WHATSAPP_API_VERSION: z.string().regex(/^v\d+\.\d+$/).default('v23.0'),
+  WHATSAPP_TEMPLATE_NAME: z.string().regex(/^[a-z0-9_]+$/).default('lab_monitor_alarm'),
+  WHATSAPP_TEMPLATE_LANGUAGE: z.string().regex(/^[a-z]{2}_[A-Z]{2}$/).default('pt_BR')
+}).superRefine((value, context) => {
+  if (Boolean(value.WHATSAPP_ACCESS_TOKEN) !== Boolean(value.WHATSAPP_PHONE_NUMBER_ID)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['WHATSAPP_PHONE_NUMBER_ID'],
+      message: 'Configure WHATSAPP_ACCESS_TOKEN e WHATSAPP_PHONE_NUMBER_ID juntos.'
+    });
+  }
 });
 const env = envSchema.parse(process.env);
 const app = Fastify({ logger: true, bodyLimit: 512 * 1024 });
@@ -51,9 +64,94 @@ const mailer = env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD && env.SMTP_F
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD }
   })
   : null;
+const whatsappConfigured = Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID);
 
 function hash(value: string): string {
   return createHmac('sha256', env.SESSION_SECRET).update(value).digest('hex');
+}
+
+function alarmStatusLabel(status: string): string {
+  if (status === 'online') return 'normalizado';
+  if (status === 'warning') return 'em atenção';
+  return 'offline';
+}
+
+async function sendAlarmNotifications(device: { name: string; externalId: string; location: string | null }, status: string) {
+  const recipients = await prisma.user.findMany({
+    select: { email: true, emailNotifications: true, whatsappNumber: true, whatsappNotifications: true }
+  });
+  const emailRecipients = recipients.filter((recipient) => recipient.emailNotifications);
+  const whatsappRecipients = recipients.filter((recipient) => recipient.whatsappNotifications && recipient.whatsappNumber);
+  const message = `O aparelho ${device.name} está ${alarmStatusLabel(status)}. Localização: ${device.location || 'não informada'}.`;
+  const deliveries: Promise<void>[] = [];
+
+  if (emailRecipients.length && mailer && env.SMTP_FROM) {
+    for (const recipient of emailRecipients) {
+      deliveries.push(mailer.sendMail({
+        from: env.SMTP_FROM,
+        to: recipient.email,
+        subject: `Alerta de monitoramento: ${device.name}`,
+        text: `${message}\nIdentificador: ${device.externalId}`
+      }).then(() => undefined).catch((error: unknown) => {
+        app.log.error({ err: error, deviceId: device.externalId, channel: 'email' }, 'Falha ao enviar notificacao de alarme');
+      }));
+    }
+  } else if (emailRecipients.length) {
+    app.log.warn({ deviceId: device.externalId }, 'Notificacoes por e-mail indisponiveis: configure as variaveis SMTP.');
+  }
+
+  if (whatsappRecipients.length && whatsappConfigured && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
+    const endpoint = `https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    for (const recipient of whatsappRecipients) {
+      const phone = recipient.whatsappNumber;
+      if (!phone) continue;
+      deliveries.push(fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone.slice(1),
+          type: 'template',
+          template: {
+            name: env.WHATSAPP_TEMPLATE_NAME,
+            language: { code: env.WHATSAPP_TEMPLATE_LANGUAGE },
+            components: [{
+              type: 'body',
+              parameters: [
+                { type: 'text', text: device.name },
+                { type: 'text', text: alarmStatusLabel(status) },
+                { type: 'text', text: device.location || 'não informada' }
+              ]
+            }]
+          }
+        }),
+        signal: AbortSignal.timeout(10_000)
+      }).then((response) => {
+        if (!response.ok) throw new Error(`WhatsApp Cloud API retornou HTTP ${response.status}.`);
+      }).catch((error: unknown) => {
+        app.log.error({ err: error, deviceId: device.externalId, channel: 'whatsapp' }, 'Falha ao enviar notificacao de alarme');
+      }));
+    }
+  } else if (whatsappRecipients.length) {
+    app.log.warn({ deviceId: device.externalId }, 'Notificacoes por WhatsApp indisponiveis: configure as credenciais da Meta Cloud API.');
+  }
+
+  await Promise.all(deliveries);
+}
+
+async function notifyAlarmStatusChange(device: { name: string; externalId: string; location: string | null }, status: string) {
+  try {
+    await sendAlarmNotifications(device, status);
+  } catch (error) {
+    app.log.error({ err: error, deviceId: device.externalId }, 'Falha ao processar notificacoes de alarme');
+  }
+}
+
+function createCsrfToken(sessionToken: string): string {
+  return createHmac('sha256', env.SESSION_SECRET).update('csrf:').update(sessionToken).digest('base64url');
 }
 
 function safeEqual(left: string, right: string): boolean {
@@ -71,13 +169,16 @@ async function getSession(request: FastifyRequest) {
   if (!rawToken) return null;
   const session = await prisma.session.findUnique({
     where: { tokenHash: hash(rawToken) },
-    include: { user: { select: { id: true, email: true, displayName: true, avatarDataUrl: true } } }
+    include: { user: { select: {
+      id: true, email: true, displayName: true, avatarDataUrl: true, whatsappNumber: true,
+      emailNotifications: true, whatsappNotifications: true
+    } } }
   });
   if (!session || session.expiresAt <= new Date()) {
     if (session) await prisma.session.delete({ where: { id: session.id } });
     return null;
   }
-  return { session, user: session.user };
+  return { session, user: session.user, rawToken };
 }
 
 async function requireSession(request: FastifyRequest, reply: FastifyReply) {
@@ -117,7 +218,7 @@ app.post('/api/auth/login', { config: { rateLimit: { max: 5, timeWindow: '15 min
   if (!user || !passwordMatches) return reply.code(401).send({ error: 'Email ou senha incorretos.' });
 
   const rawToken = randomBytes(32).toString('base64url');
-  const csrfToken = randomBytes(32).toString('base64url');
+  const csrfToken = createCsrfToken(rawToken);
   await prisma.session.create({
     data: { tokenHash: hash(rawToken), csrfHash: hash(csrfToken), userId: user.id, expiresAt: new Date(Date.now() + sessionDurationMs) }
   });
@@ -129,7 +230,11 @@ app.post('/api/auth/login', { config: { rateLimit: { max: 5, timeWindow: '15 min
     path: '/',
     maxAge: sessionDurationMs / 1000
   }).send({
-    user: { id: user.id, email: user.email, displayName: user.displayName, avatarDataUrl: user.avatarDataUrl },
+    user: {
+      id: user.id, email: user.email, displayName: user.displayName, avatarDataUrl: user.avatarDataUrl,
+      whatsappNumber: user.whatsappNumber, emailNotifications: user.emailNotifications,
+      whatsappNotifications: user.whatsappNotifications
+    },
     csrfToken
   });
 });
@@ -137,7 +242,7 @@ app.post('/api/auth/login', { config: { rateLimit: { max: 5, timeWindow: '15 min
 app.get('/api/auth/me', async (request, reply) => {
   const auth = await requireSession(request, reply);
   if (!auth) return;
-  const csrfToken = randomBytes(32).toString('base64url');
+  const csrfToken = createCsrfToken(auth.rawToken);
   await prisma.session.update({ where: { id: auth.session.id }, data: { csrfHash: hash(csrfToken) } });
   return { user: auth.user, csrfToken };
 });
@@ -199,7 +304,7 @@ app.post('/api/account/profile', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
   const parsed = updateProfileSchema.safeParse(request.body);
-  if (!parsed.success) return reply.code(400).send({ error: 'Confira o nome, e-mail, foto e senha atual.' });
+  if (!parsed.success) return reply.code(400).send({ error: 'Confira nome, e-mail, foto, número de WhatsApp e preferências de notificação.' });
 
   const currentUser = await prisma.user.findUnique({ where: { id: auth.user.id } });
   if (!currentUser || !(await argon2.verify(currentUser.passwordHash, parsed.data.currentPassword))) {
@@ -212,8 +317,18 @@ app.post('/api/account/profile', async (request, reply) => {
   try {
     const updatedUser = await prisma.user.update({
       where: { id: auth.user.id },
-      data: { displayName: parsed.data.displayName, email, avatarDataUrl: parsed.data.avatarDataUrl },
-      select: { id: true, email: true, displayName: true, avatarDataUrl: true }
+      data: {
+        displayName: parsed.data.displayName,
+        email,
+        avatarDataUrl: parsed.data.avatarDataUrl,
+        whatsappNumber: parsed.data.whatsappNumber,
+        emailNotifications: parsed.data.emailNotifications,
+        whatsappNotifications: parsed.data.whatsappNotifications
+      },
+      select: {
+        id: true, email: true, displayName: true, avatarDataUrl: true, whatsappNumber: true,
+        emailNotifications: true, whatsappNotifications: true
+      }
     });
     return { user: updatedUser };
   } catch (error) {
@@ -270,6 +385,9 @@ app.post('/api/device-links/login', { config: { rateLimit: { max: 5, timeWindow:
     update: { name, ...(location !== undefined ? { location } : {}), status: 'online', lastSeenAt: new Date() },
     create: { externalId, name, location: location ?? null, status: 'online', lastSeenAt: new Date() }
   });
+  if (existingDevice && existingDevice.status !== device.status) {
+    await notifyAlarmStatusChange(device, device.status);
+  }
   const deviceToken = randomBytes(32).toString('base64url');
   await prisma.deviceLink.upsert({
     where: { deviceId: device.id },
@@ -289,6 +407,9 @@ app.post('/api/device-links/logout', async (request, reply) => {
     prisma.deviceLink.delete({ where: { id: link.id } }),
     prisma.device.update({ where: { id: link.deviceId }, data: { status: 'offline' } })
   ]);
+  if (link.device.status !== 'offline') {
+    await notifyAlarmStatusChange(link.device, 'offline');
+  }
   return { ok: true };
 });
 
@@ -335,6 +456,10 @@ app.post('/api/ingest/devices', async (request, reply) => {
     return timestamp > latest ? timestamp : latest;
   }, new Date(0));
   const lastSeenAt = payload.readings.length ? latestReadingAt : new Date();
+  const previousDevice = await prisma.device.findUnique({
+    where: { externalId: payload.externalId },
+    select: { status: true }
+  });
 
   const device = await prisma.device.upsert({
     where: { externalId: payload.externalId },
@@ -356,6 +481,9 @@ app.post('/api/ingest/devices', async (request, reply) => {
         recordedAt: reading.recordedAt ? new Date(reading.recordedAt) : new Date()
       }))
     });
+  }
+  if ((previousDevice && previousDevice.status !== device.status) || (!previousDevice && device.status !== 'online')) {
+    await notifyAlarmStatusChange(device, device.status);
   }
   return reply.code(201).send({ device, readingsStored: payload.readings.length });
 });

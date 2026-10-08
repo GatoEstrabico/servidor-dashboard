@@ -9,6 +9,7 @@
     "db:generate": "dotenv -e ../../.env -- prisma generate",
     "db:push": "dotenv -e ../../.env -- prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "simulate:device": "tsx src/scripts/simulate-device.ts",
     "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {

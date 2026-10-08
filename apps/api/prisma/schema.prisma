@@ -12,6 +12,9 @@ model User {
   email          String               @unique
   displayName    String               @default("Usuario")
   avatarDataUrl  String?              @db.Text
+  whatsappNumber String?
+  emailNotifications    Boolean       @default(true)
+  whatsappNotifications Boolean       @default(false)
   passwordHash   String
   createdAt      DateTime             @default(now())
   sessions       Session[]

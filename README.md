@@ -27,6 +27,8 @@ Para clonar, configurar e executar todos os componentes, consulte o [guia de ins
 
 Painel: http://localhost:5173. API: http://localhost:3000. Em producao, configure HTTPS, `COOKIE_SECURE=true`, origens explicitas e segredos fortes; sirva o build Vue pelo proxy/reverse proxy escolhido.
 
+Para executar o painel com um aparelho ficticio enviando leituras a cada 15 segundos, use `npm.cmd run demo` no lugar de `npm.cmd run dev`. O sensor de demonstracao aparece no painel e varia temperatura, umidade e gas; mantenha o terminal aberto enquanto quiser a simulacao. Se API e painel ja estiverem rodando com `npm.cmd run dev`, abra outro terminal e execute `npm.cmd run simulate:device`. Para parar, pressione Ctrl+C no terminal do simulador. A simulacao usa `INGESTION_API_KEY` somente no processo local e envia dados pela API.
+
 O Docker Compose incluído é opcional e não é necessário para executar o projeto no Windows.
 
 ## Hospedagem publica
@@ -45,8 +47,11 @@ O Docker Compose incluído é opcional e não é necessário para executar o pro
 - Login tem limite de tentativas. Login e painel aceitam apenas a origem configurada em `DASHBOARD_ORIGIN`.
 - A ingestao entre servidores usa `Authorization: Bearer <INGESTION_API_KEY>`, segredo diferente da chave de sessao. Use TLS e rotacione a chave em producao.
 - O seed e idempotente para o email configurado. Altere a senha inicial logo apos o primeiro acesso.
-- Para habilitar **Esqueci a senha**, configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` e `SMTP_FROM`. O link expira em 30 minutos e pode ser usado uma vez. Sem SMTP, a API responde de forma generica, mas nao consegue entregar a mensagem.
-- O perfil permite alterar nome, e-mail e foto (redimensionada no navegador); essas alteracoes e a troca de senha exigem a senha atual. A redefinicao pelo link encerra todas as sessoes existentes.
+- Configure as variáveis SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`) para recuperação de senha e alertas de alarme por e-mail.
+- Alertas de alarme são disparados quando o estado do aparelho muda. E-mail vai para contas com essa opção ativada; WhatsApp é opcional e configurado individualmente no perfil.
+- Para WhatsApp, configure `WHATSAPP_ACCESS_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID` da Meta Cloud API no `.env`, crie/aprove um modelo Utility chamado `lab_monitor_alarm` com o corpo `Alerta de monitoramento: {{1}} está {{2}}. Localização: {{3}}.` e idioma `pt_BR`. O usuário precisa informar o número internacional e ativar WhatsApp no perfil. A Meta pode aplicar preços/limites conforme a conta e a política vigente.
+- Depois de alterar o schema Prisma, execute `npm.cmd run db:generate` e `npm.cmd run db:push`. A atualização adiciona os campos de número e preferência de notificação às contas existentes.
+- O perfil permite alterar nome, e-mail, foto e preferências de notificação; essas alterações e a troca de senha exigem a senha atual. A redefinição pelo link encerra todas as sessões existentes.
 
 ## API
 

@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String               @id @default(cuid())
+  email          String               @unique
+  displayName    String               @default("Usuario")
+  avatarDataUrl  String?              @db.Text
+  passwordHash   String
+  createdAt      DateTime             @default(now())
+  sessions       Session[]
+  deviceLinks    DeviceLink[]
+  resetTokens    PasswordResetToken[]
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  csrfHash   String
+  userId     String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Device {
+  id         String    @id @default(cuid())
+  externalId String    @unique
+  name       String
+  location   String?
+  status     String    @default("online")
+  lastSeenAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  readings   Reading[]
+  deviceLink DeviceLink?
+
+  @@index([status, lastSeenAt])
+}
+
+model DeviceLink {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  deviceId  String   @unique
+  userId    String
+  createdAt DateTime @default(now())
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Reading {
+  id         String   @id @default(cuid())
+  deviceId   String
+  type       String
+  value      Float
+  unit       String
+  recordedAt DateTime
+  createdAt  DateTime @default(now())
+  device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, recordedAt(sort: Desc)])
+}

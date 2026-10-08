@@ -49,8 +49,29 @@ test('valida perfil, troca de senha e recuperacao', () => {
     displayName: 'Pessoa Usuaria',
     email: 'pessoa@example.com',
     currentPassword: 'senha-atual',
-    avatarDataUrl: null
+    avatarDataUrl: null,
+    whatsappNumber: '+55 (21) 99999-9999',
+    emailNotifications: true,
+    whatsappNotifications: true
   }).success, true);
+  assert.equal(updateProfileSchema.safeParse({
+    displayName: 'Pessoa Usuaria',
+    email: 'pessoa@example.com',
+    currentPassword: 'senha-atual',
+    avatarDataUrl: null,
+    whatsappNumber: '21999999999',
+    emailNotifications: true,
+    whatsappNotifications: true
+  }).success, false);
+  assert.equal(updateProfileSchema.safeParse({
+    displayName: 'Pessoa Usuaria',
+    email: 'pessoa@example.com',
+    currentPassword: 'senha-atual',
+    avatarDataUrl: null,
+    whatsappNumber: null,
+    emailNotifications: true,
+    whatsappNotifications: true
+  }).success, false);
   assert.equal(changePasswordSchema.safeParse({ currentPassword: 'senha-atual', newPassword: 'senha-nova-com-12' }).success, true);
   assert.equal(forgotPasswordSchema.safeParse({ email: 'pessoa@example.com' }).success, true);
   assert.equal(resetPasswordSchema.safeParse({ token: 'a'.repeat(32), password: 'senha-nova-com-12' }).success, true);

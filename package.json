@@ -5,8 +5,8 @@
   "engines": { "node": ">=22.0.0" },
   "workspaces": ["apps/*"],
   "scripts": {
-    "dev": "concurrently -k -n api,dashboard -c cyan,green \"npm run dev -w @monitoramento/api\" \"npm run dev -w @monitoramento/dashboard\"",
-    "demo": "concurrently -k -n api,dashboard,simulator -c cyan,green,yellow \"npm run dev -w @monitoramento/api\" \"npm run dev -w @monitoramento/dashboard\" \"npm run simulate:device -w @monitoramento/api\"",
+    "dev": "concurrently -k -n api-servidor,dashboard -c cyan,green \"npm run dev -w @monitoramento/api\" \"npm run dev -w @monitoramento/dashboard\"",
+    "demo": "concurrently -k -n api-servidor,dashboard,simulator -c cyan,green,yellow \"npm run dev -w @monitoramento/api\" \"npm run dev -w @monitoramento/dashboard\" \"npm run simulate:device -w @monitoramento/api\"",
     "build": "npm run build -w @monitoramento/api && npm run build -w @monitoramento/dashboard",
     "db:generate": "npm run db:generate -w @monitoramento/api",
     "db:push": "npm run db:push -w @monitoramento/api",

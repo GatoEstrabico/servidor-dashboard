@@ -212,7 +212,17 @@ button:disabled { cursor: wait; opacity: .7; }
 .device-expand-icon { color: #89958d; transition: transform .18s ease; }
 .device-expand-icon.expanded { transform: rotate(180deg); }
 .device-details { display: grid; gap: 13px; padding: 13px 15px 15px; border-top: 1px solid #edf0ec; background: #fbfcfa; }
+.device-alias-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 11px; border: 1px solid #e5e9e3; border-radius: 4px; background: #fff; }
+.device-alias-copy { display: grid; min-width: 0; gap: 4px; }
+.device-alias-copy > strong { color: #77847d; font-size: 9px; font-weight: 600; }
+.device-alias-copy > span { overflow-wrap: anywhere; color: #293630; font-size: 12px; font-weight: 700; }
+.device-alias-copy > .settings-input { width: min(100%, 360px); }
+.device-alias-actions { display: flex; flex: 0 0 auto; gap: 4px; }
 .device-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .device-alias-row { align-items: flex-start; }
+:root.dark-mode .device-alias-row { border-color: #354139; background: #202a25; }
+:root.dark-mode .device-alias-copy > strong { color: #a0aea5; }
+:root.dark-mode .device-alias-copy > span { color: #e3eae5; }
 .device-meta > span { display: grid; min-width: 0; grid-template-columns: 16px minmax(0, 1fr); gap: 3px 7px; align-items: center; color: #78847d; font-size: 10px; overflow-wrap: anywhere; }
 .device-meta > span svg { grid-row: span 2; color: #718f7b; }
 .device-meta strong { color: #87918b; font-size: 9px; font-weight: 500; }
@@ -232,6 +242,7 @@ button:disabled { cursor: wait; opacity: .7; }
 .sensor-detail-label { display: flex; align-items: center; gap: 6px; color: #77847c; font-size: 10px; }
 .sensor-detail-label svg { color: #698876; }
 .sensor-detail-card > strong { color: #293630; font-family: Manrope, sans-serif; font-size: 16px; overflow-wrap: anywhere; }
+.sensor-detail-card > strong.sensor-reading-alert { color: #c0392b; }
 .sensor-reading-time { color: #9aa39d; font-size: 9px; }
 .empty-state { display: grid; min-height: 190px; align-content: center; justify-items: center; padding: 24px 12px; text-align: center; white-space: normal; }
 .empty-state > span, .empty-state > strong { display: block; }
@@ -360,11 +371,39 @@ button:disabled { cursor: wait; opacity: .7; }
 .whatsapp-qr-placeholder { color: #648471; }
 .invite-form { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: 10px; align-items: center; }
 .member-list { display: grid; gap: 10px; margin-top: 14px; }
-.member-row { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: 10px; align-items: center; padding: 12px 14px; border: 1px solid #e5e9e3; border-radius: 5px; background: #f9fbf9; }
+.member-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 36px; gap: 10px; align-items: center; padding: 12px 14px; border: 1px solid #e5e9e3; border-radius: 5px; background: #f9fbf9; }
 .member-row strong { display: block; color: #2b3732; font-size: 12px; }
 .member-row small { color: #7a8680; font-size: 10px; }
+.admin-account-identity { display: grid; min-width: 0; gap: 3px; }
+.admin-account-status { color: #64736a; font-size: 10px; font-weight: 700; }
+.admin-account-actions { width: 220px; }
+.member-role-label { color: #64736a; font-size: 10px; font-weight: 700; }
 .protected-member-role { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 6px; padding: 0 8px; border: 1px solid #d8e4da; border-radius: 4px; color: #42644c; background: #f2f7f2; font-size: 10px; font-weight: 700; white-space: nowrap; }
-.member-row .text-button { justify-self: end; }
+.member-actions { position: relative; justify-self: end; }
+.member-actions-button { width: 32px; height: 32px; }
+.member-actions-button:hover, .member-actions-button[aria-expanded="true"] { color: #245d44; background: #e9f1e9; }
+.member-actions-menu { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; display: grid; width: 176px; gap: 2px; padding: 4px; border: 1px solid #dfe5df; border-radius: 4px; background: #fff; box-shadow: 0 8px 22px rgba(26, 43, 33, .16); }
+.member-actions-menu button { display: flex; min-height: 34px; align-items: center; gap: 8px; padding: 0 9px; border: 0; border-radius: 3px; color: #34443a; background: transparent; cursor: pointer; font: inherit; font-size: 11px; text-align: left; }
+.member-actions-menu button:hover { background: #f0f5f0; }
+.member-actions-menu .member-remove-action { color: #a64b43; }
+.member-actions-menu .member-remove-action:hover { background: #fff0ee; }
+.member-edit-controls { display: flex; grid-column: 2 / 4; align-items: center; justify-content: flex-end; gap: 5px; }
+.member-edit-controls .settings-input { width: 150px; }
+.member-save-button, .member-cancel-button { width: 32px; height: 32px; }
+.member-save-button { color: #26704d; }
+.member-cancel-button { color: #78847c; }
+.workspace-notification-settings { display: grid; gap: 8px; padding: 12px; border: 1px solid #e4eae3; border-radius: 5px; background: #f8faf7; }
+.workspace-notification-settings .settings-section-heading { margin: 0; }
+.notification-device-list { display: grid; border-top: 1px solid #e4eae3; }
+.notification-device-row { display: grid; grid-template-columns: minmax(0, 1fr) 100px 100px; align-items: center; gap: 10px; min-height: 42px; padding: 6px 4px; border-bottom: 1px solid #e8ede8; }
+.notification-device-row > strong { min-width: 0; overflow-wrap: anywhere; color: #34443a; font-size: 11px; }
+.notification-device-row > label { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: #68766e; font-size: 10px; }
+.workspace-invited-members { max-height: min(48vh, 420px); overflow-y: auto; }
+.workspace-member-remove { justify-self: end; color: #a64b43; }
+.workspace-member-remove:hover { color: #8e342e; }
+.user-deletion-dialog { display: grid; gap: 13px; }
+.user-deletion-dialog .form-subtitle { margin: 0; line-height: 1.55; }
+.user-deletion-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .invitation-row { grid-template-columns: minmax(0, 1fr) auto; }
 .invitation-row span { color: #77847d; font-size: 10px; }
 .language-setting { display: grid; gap: 12px; padding: 12px; border: 1px solid #e6ebe5; border-radius: 5px; background: #f8faf7; }
@@ -436,16 +475,25 @@ button:disabled { cursor: wait; opacity: .7; }
   .user-management-card { gap: 14px; padding: 12px; }
   .invite-form { grid-template-columns: minmax(0, 1fr); }
   .member-list { gap: 8px; }
-  .member-row, .invitation-row { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px; }
+  .member-row { grid-template-columns: minmax(0, 1fr) 36px; gap: 8px; padding: 10px; }
+  .invitation-row { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px; }
   .member-row .settings-input { width: 100%; }
+  .admin-account-actions { width: min(220px, calc(100vw - 60px)); }
   .whatsapp-phone-fields { grid-template-columns: minmax(0, 1fr); gap: 9px; }
-  .member-row .text-button { justify-self: start; }
+  .member-role-label, .protected-member-role { grid-column: 1; justify-self: start; }
+  .member-actions { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+  .member-edit-controls { grid-column: 1 / -1; justify-content: flex-start; }
+  .member-edit-controls .settings-input { width: min(100%, 180px); }
+  .workspace-member-remove { justify-self: start; }
+  .user-deletion-actions { flex-direction: column-reverse; }
+  .user-deletion-actions > button { width: 100%; }
   .protected-member-role { justify-self: start; max-width: 100%; white-space: normal; }
   .workspace-manager-dialog, .workspace-selector-dialog { max-height: calc(100vh - 32px); padding: 18px; }
   .workspace-remove-panel { align-items: stretch; flex-direction: column; }
   .danger-button { width: 100%; }
   .workspace-manager-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace-device-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .notification-device-row { grid-template-columns: minmax(0, 1fr) 74px 74px; gap: 6px; }
   .workspace-device-action { width: 100%; font-size: 10px; }
   .main-area { margin-left: 0; }
   .topbar { height: 53px; padding: 0 13px; }
@@ -571,6 +619,7 @@ button:disabled { cursor: wait; opacity: .7; }
 :root.dark-mode .device-cell,
 :root.dark-mode .device-identity-copy,
 :root.dark-mode .sensor-detail-card > strong { color: #e3eae5; }
+:root.dark-mode .sensor-detail-card > strong.sensor-reading-alert { color: #ff8a80; }
 :root.dark-mode .demo-simulation-panel { border-color: #405749; border-top-color: #74bb8b; background: #1c2821; }
 :root.dark-mode .demo-simulation-heading { color: #a5d6b4; }
 :root.dark-mode .demo-simulation-heading strong { color: #d6e1d9; }
@@ -644,6 +693,18 @@ button:disabled { cursor: wait; opacity: .7; }
 :root.dark-mode .member-row { border-color: #354139; background: #202a25; }
 :root.dark-mode .member-row strong { color: #e3eae5; }
 :root.dark-mode .member-row small, :root.dark-mode .invitation-row span { color: #a0aea5; }
+:root.dark-mode .admin-account-status { color: #bac8be; }
+:root.dark-mode .member-role-label { color: #bac8be; }
+:root.dark-mode .member-actions-button:hover, :root.dark-mode .member-actions-button[aria-expanded="true"] { color: #c4dfcc; background: #2b3a30; }
+:root.dark-mode .member-actions-menu { border-color: #39463e; background: #1a231f; box-shadow: 0 8px 22px rgba(0, 0, 0, .36); }
+:root.dark-mode .member-actions-menu button { color: #e3eae5; }
+:root.dark-mode .member-actions-menu button:hover { background: #2b3a30; }
+:root.dark-mode .member-actions-menu .member-remove-action { color: #e1a39a; }
+:root.dark-mode .member-actions-menu .member-remove-action:hover { background: #392825; }
+:root.dark-mode .workspace-notification-settings { border-color: #354139; background: #202a25; }
+:root.dark-mode .notification-device-list, :root.dark-mode .notification-device-row { border-color: #354139; }
+:root.dark-mode .notification-device-row > strong { color: #e3eae5; }
+:root.dark-mode .notification-device-row > label { color: #b7c3bb; }
 :root.dark-mode .protected-member-role { border-color: #405749; color: #b6d9bf; background: #222d27; }
 :root.dark-mode .workspace-admin-panel { border-color: #354139; background: #1a231f; }
 :root.dark-mode .workspace-admin-panel .settings-section-heading h3 { color: #d6e1d9; }

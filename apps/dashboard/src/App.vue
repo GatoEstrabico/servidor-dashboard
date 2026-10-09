@@ -3,8 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { AsYouType, getCountries, getCountryCallingCode, parsePhoneNumberFromString, type CountryCode } from 'libphonenumber-js';
 import MessageTemplateEditor from './components/MessageTemplateEditor.vue';
 import {
-  Activity, AlertTriangle, ArrowDownToLine, Bell, Building2, Check, ChevronDown,
-  CircleAlert, CircleCheck, CircleMinus, Clock3, Copy, Cpu, Flame, ImagePlus, LayoutDashboard, LockKeyhole,
+  Activity, AlertTriangle, ArrowDownToLine, Bell, Building2, Check, ChevronDown, EllipsisVertical,
+  Bot, CircleAlert, CircleCheck, CircleMinus, Clock3, Copy, Cpu, Flame, ImagePlus, LayoutDashboard, LockKeyhole,
   List, LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, Pencil, Plus, RefreshCw, Search, Trash2,
   Settings, Share2, ShieldCheck, Signal, Sun, Thermometer, UsersRound, Waves, X
 } from 'lucide-vue-next';
@@ -36,6 +36,7 @@ type AccountLinkedDevice = {
   canAssign: boolean;
 };
 type WorkspaceMember = { id: string; email: string; displayName: string; role: string; emailVerifiedAt: string | null; isPlatformAdmin: boolean; createdAt: string };
+type AdminUser = { id: string; email: string; displayName: string; isPlatformAdmin: boolean; emailVerifiedAt: string | null; passwordResetRequired: boolean; createdAt: string; workspaces: Workspace[] };
 type WorkspaceInvitation = { id: string; email: string; role: string; expiresAt: string; createdAt: string };
 type WhatsAppWebStatus = { state: 'disconnected' | 'connecting' | 'qr' | 'connected'; qrDataUrl: string | null; phoneNumber: string | null };
 type WhatsAppWebLogEntry = { id: number; createdAt: string; level: 'info' | 'success' | 'error'; event: string; details: string };
@@ -45,16 +46,18 @@ type EmailNotificationSettings = {
   onlineMessage: string; warningMessage: string; offlineMessage: string; passwordConfigured: boolean;
 };
 type EmailLogEntry = { id: number; createdAt: string; level: 'info' | 'success' | 'error'; event: string; details: string };
-type Reading = { id: string; type: string; value: number; unit: string; recordedAt: string };
+type Reading = { id: string; type: string; value: number; unit: string; alert: boolean; recordedAt: string };
 type Device = {
   id: string;
   externalId: string;
   name: string;
+  alias: string | null;
   location: string | null;
   status: 'online' | 'offline' | 'warning';
   lastSeenAt: string;
   readings: Reading[];
   canSimulate?: boolean;
+  canEditAlias: boolean;
 };
 type DemoSimulationForm = { status: Device['status']; temperature: number; humidity: number; gas: number };
 type DeviceNotification = {
@@ -67,6 +70,8 @@ type DeviceNotification = {
   createdAt: string;
   read: boolean;
 };
+type WorkspaceDeviceAlertPreference = { deviceId: string; name: string; emailEnabled: boolean; whatsappEnabled: boolean };
+type WorkspaceAlertPreferences = { notifyAllDevices: boolean; devices: WorkspaceDeviceAlertPreference[] };
 type Language = 'pt-BR' | 'en';
 
 const user = ref<User | null>(null);
@@ -82,9 +87,13 @@ const password = ref('');
 const registerName = ref('');
 const registerEmail = ref('');
 const registerPassword = ref('');
-const registerWorkspaceName = ref('');
 const registerMessage = ref('');
 const registerError = ref('');
+const invitationToken = ref('');
+const invitationWorkspaceName = ref('');
+const invitationError = ref('');
+const activationMessage = ref('');
+const activationError = ref('');
 const inviteEmail = ref('');
 const inviteRole = ref('member');
 const inviteError = ref('');
@@ -99,6 +108,9 @@ const workspaceName = ref('');
 const workspaceIconDataUrl = ref<string | null>(null);
 const workspaceIconError = ref('');
 const workspaceSaving = ref(false);
+const editingDeviceAliasId = ref<string | null>(null);
+const deviceAliasDraft = ref('');
+const deviceAliasSavingId = ref<string | null>(null);
 const importWorkspaceCode = ref('');
 const workspaceShareMessage = ref('');
 const workspaces = ref<Workspace[]>([]);
@@ -113,10 +125,30 @@ const activeWorkspaceCode = computed(() => activeWorkspace.value?.accessCode ?? 
 const canManageActiveWorkspace = computed(() => ['owner', 'admin'].includes(activeWorkspace.value?.role ?? ''));
 const workspaceMembers = ref<WorkspaceMember[]>([]);
 const workspaceInvitations = ref<WorkspaceInvitation[]>([]);
+const adminUsers = ref<AdminUser[]>([]);
+const adminUsersLoading = ref(false);
+const adminUsersError = ref('');
+const adminUsersMessage = ref('');
+const adminUserActionId = ref<string | null>(null);
+const memberActionsOpenId = ref<string | null>(null);
+const editingMemberId = ref<string | null>(null);
+const editingMemberRole = ref('member');
+const memberSavingId = ref<string | null>(null);
+const userDeletionTarget = ref<Pick<WorkspaceMember, 'id' | 'email' | 'displayName' | 'isPlatformAdmin'> | AdminUser | null>(null);
+const userDeletionConfirmation = ref('');
+const userDeletionError = ref('');
+const userDeletionSaving = ref(false);
+const userDeletionMessage = ref('');
+const accountEditTarget = ref<AdminUser | null>(null);
+const accountEditName = ref('');
+const accountEditEmail = ref('');
+const accountEditSaving = ref(false);
+const accountEditError = ref('');
 const registrationEnabled = ref(false);
 const isWhatsAppDashboardAdmin = computed(() => Boolean(user.value?.isBootstrapAdmin));
+const canManageUserAccounts = computed(() => Boolean(user.value?.isPlatformAdmin));
 const managementTab = ref<'overview' | 'users' | 'whatsapp' | 'email'>('overview');
-const userManagementTab = ref<'members' | 'registration'>('members');
+const userManagementTab = ref<'members' | 'accounts' | 'registration'>('members');
 const whatsappTab = ref<'log' | 'configuration' | 'connection'>('log');
 const emailTab = ref<'log' | 'configuration' | 'connection'>('log');
 const whatsappStatus = ref<WhatsAppWebStatus>({ state: 'disconnected', qrDataUrl: null, phoneNumber: null });
@@ -174,7 +206,7 @@ const settingsTab = ref<'preferences' | 'account' | 'notifications'>('preference
 const workspaceMenuOpen = ref(false);
 const mobileWorkspaceSelectorOpen = ref(false);
 const workspaceDialogOpen = ref(false);
-const workspaceDialogAction = ref<'create' | 'edit' | 'import' | 'share' | 'devices'>('create');
+const workspaceDialogAction = ref<'create' | 'edit' | 'import' | 'share' | 'devices' | 'members'>('create');
 const language = ref<Language>('pt-BR');
 const whatsappCountries = computed(() => {
   const displayNames = new Intl.DisplayNames([language.value === 'en' ? 'en' : 'pt-BR'], { type: 'region' });
@@ -201,6 +233,10 @@ const profileWhatsappNotifications = ref(false);
 const notificationCurrentPassword = ref('');
 const notificationMessage = ref('');
 const notificationError = ref('');
+const workspaceAlertPreferences = ref<WorkspaceAlertPreferences>({ notifyAllDevices: true, devices: [] });
+const workspaceAlertPreferencesSaving = ref(false);
+const workspaceAlertPreferencesMessage = ref('');
+const workspaceAlertPreferencesError = ref('');
 const avatarError = ref('');
 const refreshedAt = ref(new Date());
 const activeMobileTab = ref('home');
@@ -222,6 +258,8 @@ const englishText: Record<string, string> = {
   'ACESSO RESTRITO': 'RESTRICTED ACCESS',
   'Bem-vindo de volta': 'Welcome back',
   'Entre para acompanhar os aparelhos do laboratório.': 'Sign in to monitor laboratory devices.',
+  'Nenhum ambiente selecionado': 'No workspace selected',
+  'Crie ou importe um ambiente': 'Create or import a workspace',
   'E-mail': 'Email',
   'Senha': 'Password',
   'Sua senha': 'Your password',
@@ -446,6 +484,31 @@ const englishText: Record<string, string> = {
   'Isso remove sua participação, mas mantém o ambiente para os outros membros.': 'This removes your membership but keeps the workspace for other members.',
   'Usuários': 'Users',
   'Membros': 'Members',
+  'Contas': 'Accounts',
+  'Contas cadastradas': 'Registered accounts',
+  'Usuários cadastrados': 'Registered users',
+  'Editar usuário': 'Edit user',
+  'A senha não pode ser alterada por aqui. Use a ação de redefinição para exigir uma nova senha.': 'The password cannot be changed here. Use the reset action to require a new password.',
+  'Usuário atualizado.': 'User updated.',
+  'Usuário atualizado. O e-mail de acesso foi alterado.': 'User updated. The sign-in email was changed.',
+  'Não foi possível atualizar o usuário.': 'Could not update the user.',
+  'Informe um nome e um e-mail válidos.': 'Enter a valid name and email address.',
+  'Este e-mail já está sendo usado por outra conta.': 'This email address is already used by another account.',
+  'Contas administradoras da plataforma não podem ser editadas por esta ação.': 'Platform administrator accounts cannot be edited with this action.',
+  'Edite sua própria conta nas configurações do perfil.': 'Edit your own account in profile settings.',
+  'Senha removida. O usuário deverá criar uma nova senha usando Esqueci a senha antes de entrar novamente.': 'Password removed. The user must create a new password using Forgot password before signing in again.',
+  'Sua senha foi removida. Use Esqueci a senha para criar uma nova antes de entrar.': 'Your password was removed. Use Forgot password to create a new one before signing in.',
+  'contas': 'accounts',
+  'Redefinição de senha exigida': 'Password reset required',
+  'Conta ativa': 'Active account',
+  'E-mail pendente': 'Email pending',
+  'Carregando contas...': 'Loading accounts...',
+  'Nenhuma conta cadastrada.': 'No registered accounts.',
+  'Abrir ações da conta': 'Open account actions',
+  'Exigir redefinição de senha': 'Require password reset',
+  'Remover senha e exigir nova senha': 'Remove password and require a new one',
+  'Redefinição já exigida': 'Reset already required',
+  'Excluindo...': 'Deleting...',
   'WhatsApp API': 'WhatsApp API',
   'E-mail API': 'Email API',
   'Servidor SMTP': 'SMTP server',
@@ -516,6 +579,16 @@ const englishText: Record<string, string> = {
   'O papel da conta administradora da plataforma não pode ser alterado.': 'The platform administrator account role cannot be changed.',
   'Convites pendentes': 'Pending invitations',
   'Remover': 'Remove',
+  'Remover acesso': 'Remove access',
+  'Este ambiente ainda não tem membros convidados.': 'This workspace has no invited members yet.',
+  'Membros com acesso ao ambiente ativo.': 'Members with access to the active workspace.',
+  'Remover alguém daqui não exclui a conta.': 'Removing someone here does not delete their account.',
+  'Excluir usuário permanentemente': 'Permanently delete user',
+  'AÇÃO IRREVERSÍVEL': 'IRREVERSIBLE ACTION',
+  'A conta será removida permanentemente.': 'This account will be permanently deleted.',
+  'Dispositivos vinculados e leituras serão apagados. Workspaces compartilhados serão preservados e transferidos a outro membro quando necessário.': 'Linked devices and readings will be deleted. Shared workspaces will be preserved and transferred to another member when necessary.',
+  'Digite o e-mail do usuário para confirmar': 'Type the user email to confirm',
+  'Excluir conta e dados': 'Delete account and data',
   'usuario@empresa.com': 'user@company.com'
 };
 
@@ -533,12 +606,16 @@ const reportDate = computed(() => new Intl.DateTimeFormat(dateLocale.value, {
   weekday: 'long', day: 'numeric', month: 'long'
 }).format(new Date()));
 
+function deviceDisplayName(device: Device): string {
+  return device.alias?.trim() || device.name;
+}
+
 const filteredDevices = computed(() => {
   const query = search.value.trim().toLocaleLowerCase('pt-BR');
-  if (!query) return devices.value;
-  return devices.value.filter((device) =>
-    `${device.name} ${device.externalId} ${device.location ?? ''}`.toLocaleLowerCase('pt-BR').includes(query)
-  );
+  const matchingDevices = query
+    ? devices.value.filter((device) => `${deviceDisplayName(device)} ${device.name} ${device.externalId} ${device.location ?? ''}`.toLocaleLowerCase('pt-BR').includes(query))
+    : devices.value;
+  return [...matchingDevices].sort((left, right) => Number(Boolean(left.canSimulate)) - Number(Boolean(right.canSimulate)));
 });
 const onlineCount = computed(() => devices.value.filter((device) => device.status === 'online').length);
 const warningCount = computed(() => devices.value.filter((device) => device.status === 'warning').length);
@@ -563,7 +640,10 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 async function loadDevices() {
-  if (!user.value || deviceRefreshInProgress) return;
+  if (!user.value || !activeWorkspaceId.value || deviceRefreshInProgress) {
+    if (!activeWorkspaceId.value) devices.value = [];
+    return;
+  }
   deviceRefreshInProgress = true;
   try {
     const result = await api<{ devices: Device[] }>('/api/devices');
@@ -578,12 +658,12 @@ async function loadDevices() {
             ? 'Aparelho em atenção'
             : 'Aparelho offline';
         const message = device.status === 'online'
-          ? `O aparelho ${device.name} voltou a ficar online.`
-          : `O aparelho ${device.name} está ${deviceStatusLabel(device.status).toLocaleLowerCase('pt-BR')}.`;
+          ? `O aparelho ${deviceDisplayName(device)} voltou a ficar online.`
+          : `O aparelho ${deviceDisplayName(device)} está ${deviceStatusLabel(device.status).toLocaleLowerCase('pt-BR')}.`;
         newNotifications.push({
           id: ++notificationSequence,
           deviceId: device.id,
-          deviceName: device.name,
+          deviceName: deviceDisplayName(device),
           status: device.status,
           title,
           message,
@@ -655,7 +735,7 @@ async function loadWorkspaces() {
     return;
   }
   try {
-    const result = await api<{ workspaces: Workspace[]; activeWorkspaceId: string | null; isPlatformAdmin: boolean; isBootstrapAdmin: boolean }>('/api/workspaces');
+    const result = await api<{ workspaces: Workspace[]; activeWorkspaceId: string | null; isPlatformAdmin: boolean; isBootstrapAdmin: boolean; showWorkspaceSetupWhenEmpty: boolean }>('/api/workspaces');
     workspaces.value = result.workspaces;
     activeWorkspaceId.value = result.activeWorkspaceId;
     user.value = { ...user.value, activeWorkspaceId: result.activeWorkspaceId, workspaces: result.workspaces, isPlatformAdmin: result.isPlatformAdmin, isBootstrapAdmin: result.isBootstrapAdmin };
@@ -664,6 +744,8 @@ async function loadWorkspaces() {
     } else {
       workspaceMembers.value = [];
       workspaceInvitations.value = [];
+      if (result.workspaces.length) workspaceMenuOpen.value = true;
+      else if (result.showWorkspaceSetupWhenEmpty) openWorkspaceManager('create');
     }
   } catch (error) {
     pageError.value = error instanceof Error ? error.message : 'Nao foi possivel carregar os ambientes.';
@@ -671,7 +753,7 @@ async function loadWorkspaces() {
 }
 
 async function loadWorkspaceMembers() {
-  if (!user.value || !activeWorkspaceId.value || !isWhatsAppDashboardAdmin.value) {
+  if (!user.value || !activeWorkspaceId.value || !canManageActiveWorkspace.value) {
     workspaceMembers.value = [];
     workspaceInvitations.value = [];
     return;
@@ -687,6 +769,26 @@ async function loadWorkspaceMembers() {
     workspaceMembers.value = [];
     workspaceInvitations.value = [];
   }
+}
+
+async function loadAdminUsers() {
+  if (!canManageUserAccounts.value) return;
+  adminUsersLoading.value = true;
+  adminUsersError.value = '';
+  try {
+    const result = await api<{ users: AdminUser[] }>('/api/admin/users');
+    adminUsers.value = result.users;
+  } catch (error) {
+    adminUsersError.value = error instanceof Error ? t(error.message) : t('Não foi possível carregar as contas cadastradas.');
+  } finally {
+    adminUsersLoading.value = false;
+  }
+}
+
+function openUserManagement() {
+  managementTab.value = 'users';
+  userManagementTab.value = canManageUserAccounts.value ? 'accounts' : 'members';
+  if (canManageUserAccounts.value) void loadAdminUsers();
 }
 
 async function loadAccountDevices() {
@@ -743,7 +845,7 @@ async function createWorkspace() {
   }
 }
 
-function openWorkspaceManager(action: 'create' | 'edit' | 'import' | 'share' | 'devices' = 'create') {
+function openWorkspaceManager(action: 'create' | 'edit' | 'import' | 'share' | 'devices' | 'members' = 'create') {
   workspaceDialogAction.value = action;
   workspaceName.value = action === 'edit' ? activeWorkspace.value?.name ?? '' : '';
   workspaceIconDataUrl.value = action === 'edit' ? activeWorkspace.value?.iconDataUrl ?? null : null;
@@ -755,6 +857,7 @@ function openWorkspaceManager(action: 'create' | 'edit' | 'import' | 'share' | '
     workspaceDeviceTargetId.value = activeWorkspaceId.value;
     void loadAccountDevices();
   }
+  if (action === 'members') void loadWorkspaceMembers();
   workspaceDialogOpen.value = true;
 }
 
@@ -1131,19 +1234,49 @@ async function registerAccount() {
         displayName: registerName.value.trim(),
         email: registerEmail.value.trim(),
         password: registerPassword.value,
-        workspaceName: registerWorkspaceName.value.trim() || undefined
+        invitationToken: invitationToken.value || undefined
       })
     });
-    registerMessage.value = result.message;
+    activationMessage.value = result.message;
+    email.value = registerEmail.value.trim();
     registerName.value = '';
     registerEmail.value = '';
     registerPassword.value = '';
-    registerWorkspaceName.value = '';
+    invitationToken.value = '';
     loginMode.value = 'login';
   } catch (error) {
     registerError.value = error instanceof Error ? error.message : 'Nao foi possivel criar a conta.';
   } finally {
     submitting.value = false;
+  }
+}
+
+async function activateAccount(token: string) {
+  try {
+    const result = await api<{ message: string; user: { email: string } }>('/api/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token })
+    });
+    activationMessage.value = result.message;
+    email.value = result.user.email;
+  } catch (error) {
+    activationError.value = error instanceof Error ? error.message : 'Link de ativação inválido ou expirado.';
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function prepareInvitation(token: string) {
+  invitationToken.value = token;
+  try {
+    const invitation = await api<{ email: string; workspaceName: string }>(`/api/auth/invitations/${encodeURIComponent(token)}`);
+    registerEmail.value = invitation.email;
+    invitationWorkspaceName.value = invitation.workspaceName;
+    loginMode.value = 'register';
+  } catch (error) {
+    invitationError.value = error instanceof Error ? error.message : 'Convite inválido ou expirado.';
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -1341,6 +1474,51 @@ async function updateNotificationPreferences() {
   }
 }
 
+async function loadWorkspaceAlertPreferences() {
+  workspaceAlertPreferencesMessage.value = '';
+  workspaceAlertPreferencesError.value = '';
+  if (!activeWorkspaceId.value) {
+    workspaceAlertPreferences.value = { notifyAllDevices: true, devices: [] };
+    return;
+  }
+  try {
+    workspaceAlertPreferences.value = await api<WorkspaceAlertPreferences>(`/api/workspaces/${activeWorkspaceId.value}/notification-preferences`);
+  } catch (error) {
+    workspaceAlertPreferencesError.value = error instanceof Error ? t(error.message) : t('Não foi possível carregar as preferências deste ambiente.');
+  }
+}
+
+async function saveWorkspaceAlertPreferences() {
+  if (!activeWorkspaceId.value) return;
+  workspaceAlertPreferencesSaving.value = true;
+  workspaceAlertPreferencesMessage.value = '';
+  workspaceAlertPreferencesError.value = '';
+  try {
+    await api(`/api/workspaces/${activeWorkspaceId.value}/notification-preferences`, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify(workspaceAlertPreferences.value)
+    });
+    workspaceAlertPreferencesMessage.value = 'Preferências deste ambiente salvas.';
+  } catch (error) {
+    workspaceAlertPreferencesError.value = error instanceof Error ? t(error.message) : t('Não foi possível salvar as preferências deste ambiente.');
+  } finally {
+    workspaceAlertPreferencesSaving.value = false;
+  }
+}
+
+function toggleWorkspaceAlertMode(event: Event) {
+  workspaceAlertPreferences.value.notifyAllDevices = (event.target as HTMLInputElement).checked;
+  void saveWorkspaceAlertPreferences();
+}
+
+function toggleDeviceAlertChannel(deviceId: string, channel: 'emailEnabled' | 'whatsappEnabled', event: Event) {
+  const preference = workspaceAlertPreferences.value.devices.find((device) => device.deviceId === deviceId);
+  if (!preference) return;
+  preference[channel] = (event.target as HTMLInputElement).checked;
+  void saveWorkspaceAlertPreferences();
+}
+
 async function updatePassword() {
   accountSaving.value = true;
   accountMessage.value = '';
@@ -1425,22 +1603,43 @@ async function inviteUser() {
   }
 }
 
-async function updateMemberRole(memberId: string, newRole: string) {
+function toggleMemberActions(memberId: string) {
+  memberActionsOpenId.value = memberActionsOpenId.value === memberId ? null : memberId;
+}
+
+function editMemberRole(member: WorkspaceMember) {
+  editingMemberId.value = member.id;
+  editingMemberRole.value = member.role;
+  memberActionsOpenId.value = null;
+}
+
+function cancelMemberRoleEdit() {
+  editingMemberId.value = null;
+}
+
+async function updateMemberRole(memberId: string) {
   if (!activeWorkspaceId.value) return;
+  if (editingMemberRole.value !== 'admin' && editingMemberRole.value !== 'member') return;
+  memberSavingId.value = memberId;
   try {
     await api('/api/workspaces/' + activeWorkspaceId.value + '/members', {
       method: 'PATCH',
       headers: { 'X-CSRF-Token': csrfToken.value },
-      body: JSON.stringify({ userId: memberId, role: newRole })
+      body: JSON.stringify({ userId: memberId, role: editingMemberRole.value })
     });
+    editingMemberId.value = null;
     await loadWorkspaceMembers();
   } catch (error) {
     pageError.value = error instanceof Error ? error.message : 'Nao foi possivel atualizar o papel do usuário.';
+  } finally {
+    memberSavingId.value = null;
   }
 }
 
-async function removeMember(memberId: string) {
+async function removeMember(memberId: string, displayName: string) {
   if (!activeWorkspaceId.value) return;
+  if (!window.confirm(`Remover ${displayName} do ambiente ativo?`)) return;
+  memberActionsOpenId.value = null;
   try {
     await api('/api/workspaces/' + activeWorkspaceId.value + '/members/' + memberId, {
       method: 'DELETE',
@@ -1449,6 +1648,104 @@ async function removeMember(memberId: string) {
     await loadWorkspaceMembers();
   } catch (error) {
     pageError.value = error instanceof Error ? error.message : 'Nao foi possivel remover o usuário.';
+  }
+}
+
+function requestUserDeletion(member: WorkspaceMember | AdminUser) {
+  if (!canManageUserAccounts.value || member.isPlatformAdmin || member.email === user.value?.email) return;
+  memberActionsOpenId.value = null;
+  userDeletionTarget.value = member;
+  userDeletionConfirmation.value = '';
+  userDeletionError.value = '';
+}
+
+function cancelUserDeletion() {
+  if (userDeletionSaving.value) return;
+  userDeletionTarget.value = null;
+  userDeletionConfirmation.value = '';
+  userDeletionError.value = '';
+}
+
+async function deleteUserPermanently() {
+  const target = userDeletionTarget.value;
+  if (!target || !canManageUserAccounts.value || userDeletionConfirmation.value.trim().toLowerCase() !== target.email.toLowerCase()) return;
+  userDeletionSaving.value = true;
+  userDeletionError.value = '';
+  userDeletionMessage.value = '';
+  try {
+    const result = await api<{ deletedDevices: number; deletedWorkspaces: number }>(`/api/admin/users/${target.id}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken.value }
+    });
+    userDeletionTarget.value = null;
+    userDeletionConfirmation.value = '';
+    userDeletionMessage.value = `Conta excluída definitivamente. ${result.deletedDevices} aparelho(s) vinculado(s) removido(s).`;
+    await loadAdminUsers();
+    await loadWorkspaces();
+    await loadDevices();
+  } catch (error) {
+    userDeletionError.value = error instanceof Error ? error.message : 'Não foi possível excluir a conta.';
+  } finally {
+    userDeletionSaving.value = false;
+  }
+}
+
+async function requireUserPasswordReset(account: AdminUser) {
+  if (!canManageUserAccounts.value || account.isPlatformAdmin || account.email === user.value?.email) return;
+  if (!window.confirm(`Remover a senha de ${account.displayName || account.email} e exigir uma nova? As sessões ativas serão encerradas.`)) return;
+  adminUserActionId.value = account.id;
+  adminUsersError.value = '';
+  adminUsersMessage.value = '';
+  try {
+    const result = await api<{ message: string }>(`/api/admin/users/${account.id}/require-password-reset`, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value }
+    });
+    adminUsersMessage.value = result.message;
+    await loadAdminUsers();
+  } catch (error) {
+    adminUsersError.value = error instanceof Error ? t(error.message) : t('Não foi possível exigir a redefinição de senha.');
+  } finally {
+    adminUserActionId.value = null;
+  }
+}
+
+function editAdminUser(account: AdminUser) {
+  if (!canManageUserAccounts.value || account.isPlatformAdmin || account.email === user.value?.email) return;
+  memberActionsOpenId.value = null;
+  accountEditTarget.value = account;
+  accountEditName.value = account.displayName;
+  accountEditEmail.value = account.email;
+  accountEditError.value = '';
+}
+
+function cancelAdminUserEdit() {
+  if (accountEditSaving.value) return;
+  accountEditTarget.value = null;
+  accountEditError.value = '';
+}
+
+async function saveAdminUserEdit() {
+  const target = accountEditTarget.value;
+  if (!target || !canManageUserAccounts.value) return;
+  accountEditSaving.value = true;
+  accountEditError.value = '';
+  adminUsersMessage.value = '';
+  try {
+    const result = await api<{ emailChanged: boolean }>(`/api/admin/users/${target.id}`, {
+      method: 'PATCH',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ displayName: accountEditName.value, email: accountEditEmail.value })
+    });
+    accountEditTarget.value = null;
+    adminUsersMessage.value = result.emailChanged
+      ? 'Usuário atualizado. O e-mail de acesso foi alterado.'
+      : 'Usuário atualizado.';
+    await loadAdminUsers();
+  } catch (error) {
+    accountEditError.value = error instanceof Error ? t(error.message) : t('Não foi possível atualizar o usuário.');
+  } finally {
+    accountEditSaving.value = false;
   }
 }
 
@@ -1478,12 +1775,40 @@ function formatTime(value: string) {
 function formatRefreshTime() {
   return new Intl.DateTimeFormat(dateLocale.value, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(refreshedAt.value);
 }
+function editDeviceAlias(device: Device) {
+  if (!device.canEditAlias) return;
+  editingDeviceAliasId.value = device.id;
+  deviceAliasDraft.value = device.alias ?? '';
+  pageError.value = '';
+}
+function cancelDeviceAliasEdit() {
+  editingDeviceAliasId.value = null;
+  deviceAliasDraft.value = '';
+}
+async function saveDeviceAlias(device: Device) {
+  if (!device.canEditAlias || !activeWorkspaceId.value || deviceAliasDraft.value.length > 80) return;
+  deviceAliasSavingId.value = device.id;
+  pageError.value = '';
+  try {
+    const result = await api<{ device: { id: string; alias: string | null } }>(`/api/devices/${device.id}/alias`, {
+      method: 'PATCH',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ alias: deviceAliasDraft.value.trim() || null })
+    });
+    devices.value = devices.value.map((current) => current.id === device.id ? { ...current, alias: result.device.alias } : current);
+    cancelDeviceAliasEdit();
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Não foi possível salvar o apelido do aparelho.';
+  } finally {
+    deviceAliasSavingId.value = null;
+  }
+}
 function exportList() {
   const columns = language.value === 'en'
     ? ['Device', 'Identifier', 'Location', 'Status', 'Last reading']
     : ['Aparelho', 'Identificador', 'Localizacao', 'Status', 'Ultima leitura'];
   const rows = filteredDevices.value.map((device) => [
-    device.name,
+    deviceDisplayName(device),
     device.externalId,
     device.location ?? '',
     device.status,
@@ -1577,6 +1902,10 @@ watch([managementTab, whatsappTab], ([tab, subtab]) => {
   }
 });
 
+watch([activeWorkspaceId, settingsTab], ([, tab]) => {
+  if (tab === 'notifications') void loadWorkspaceAlertPreferences();
+});
+
 watch([managementTab, emailTab], ([tab, subtab], [previousTab]) => {
   if (emailRefreshTimer) clearInterval(emailRefreshTimer);
   emailRefreshTimer = undefined;
@@ -1594,10 +1923,18 @@ onMounted(() => {
   darkMode.value = localStorage.getItem('lab-monitor-dark-mode') === 'true';
   document.documentElement.classList.toggle('dark-mode', darkMode.value);
   language.value = localStorage.getItem('lab-monitor-language') === 'en' ? 'en' : 'pt-BR';
-  resetToken.value = new URLSearchParams(window.location.search).get('resetToken') ?? '';
+  const query = new URLSearchParams(window.location.search);
+  resetToken.value = query.get('resetToken') ?? '';
+  const activationToken = query.get('activationToken');
+  const rawInvitationToken = query.get('invitationToken');
+  if (activationToken || rawInvitationToken) window.history.replaceState({}, '', window.location.pathname);
   if (resetToken.value) {
     loginMode.value = 'reset';
     loading.value = false;
+  } else if (activationToken) {
+    void activateAccount(activationToken);
+  } else if (rawInvitationToken) {
+    void prepareInvitation(rawInvitationToken);
   } else {
     void checkSession();
   }
@@ -1642,6 +1979,8 @@ onUnmounted(() => {
           <p class="eyebrow">{{ t('ACESSO RESTRITO') }}</p>
           <h2>{{ t('Bem-vindo de volta') }}</h2>
           <p class="form-subtitle">{{ t('Entre para acompanhar os aparelhos do laboratório.') }}</p>
+          <p v-if="activationMessage" class="success-message" role="status">{{ activationMessage }}</p>
+          <p v-if="activationError || invitationError" class="error-message" role="alert">{{ activationError || invitationError }}</p>
           <label for="email">{{ t('E-mail') }}</label>
           <input id="email" v-model="email" type="email" autocomplete="username" :placeholder="language === 'en' ? 'you@laboratory.com' : 'voce@laboratorio.com'" required />
           <label for="password">{{ t('Senha') }}</label>
@@ -1661,15 +2000,13 @@ onUnmounted(() => {
           <button class="back-link" type="button" @click="loginMode = 'login'; registerError = ''; registerMessage = ''"><ChevronDown :size="16" /> {{ t('Voltar ao login') }}</button>
           <p class="eyebrow">NOVA CONTA</p>
           <h2>Criar conta</h2>
-          <p class="form-subtitle">Crie sua conta e comece com seu primeiro ambiente.</p>
+          <p class="form-subtitle">{{ invitationToken ? `Convite para ${invitationWorkspaceName}. O ambiente aparecerá na sua lista após a confirmação do e-mail.` : 'Crie sua conta; depois você poderá criar ou importar um ambiente.' }}</p>
           <label for="registerName">{{ t('Nome') }}</label>
           <input id="registerName" v-model="registerName" type="text" maxlength="80" autocomplete="name" placeholder="Seu nome" required />
           <label for="registerEmail">{{ t('E-mail') }}</label>
-          <input id="registerEmail" v-model="registerEmail" type="email" autocomplete="email" placeholder="voce@laboratorio.com" required />
+          <input id="registerEmail" v-model="registerEmail" type="email" autocomplete="email" placeholder="voce@laboratorio.com" :readonly="!!invitationToken" required />
           <label for="registerPassword">{{ t('Senha') }}</label>
           <input id="registerPassword" v-model="registerPassword" type="password" minlength="12" autocomplete="new-password" placeholder="Pelo menos 12 caracteres" required />
-          <label for="registerWorkspaceName">Nome do ambiente</label>
-          <input id="registerWorkspaceName" v-model="registerWorkspaceName" type="text" maxlength="80" placeholder="Laboratório Central" />
           <p v-if="registerError" class="error-message" role="alert">{{ registerError }}</p>
           <p v-if="registerMessage" class="success-message" role="status">{{ registerMessage }}</p>
           <button class="primary-button login-button" type="button" :disabled="submitting" @click="registerAccount">
@@ -1716,7 +2053,7 @@ onUnmounted(() => {
       <div class="workspace-label">{{ t('AMBIENTE') }}</div>
       <div class="workspace-switch" @click="workspaceMenuOpen = !workspaceMenuOpen" style="cursor:pointer;">
         <span class="workspace-avatar"><img v-if="activeWorkspace?.iconDataUrl" :src="activeWorkspace.iconDataUrl" :alt="''" /><span v-else>{{ activeWorkspace?.name.slice(0, 1).toUpperCase() || 'L' }}</span></span>
-        <span class="workspace-name">{{ activeWorkspace?.name || t('Laboratorio Central') }}<small>{{ t('Plano operacional') }}</small></span>
+        <span class="workspace-name">{{ activeWorkspace?.name || t('Nenhum ambiente selecionado') }}<small>{{ activeWorkspace ? t('Plano operacional') : t('Crie ou importe um ambiente') }}</small></span>
         <ChevronDown :size="15" />
       </div>
       <div v-if="workspaceMenuOpen" class="workspace-dropdown">
@@ -1731,7 +2068,7 @@ onUnmounted(() => {
       <div class="nav-label">{{ t('GERENCIAMENTO') }}</div>
       <nav>
         <a class="nav-link" :class="{ active: managementTab === 'overview' }" href="#inicio" @click="managementTab = 'overview'"><LayoutDashboard :size="17" /><span>{{ t('Visao geral') }}</span><span class="nav-count">{{ devices.length }}</span></a>
-        <button v-if="isWhatsAppDashboardAdmin" class="nav-link" :class="{ active: managementTab === 'users' }" type="button" @click="managementTab = 'users'">
+        <button v-if="canManageActiveWorkspace" class="nav-link" :class="{ active: managementTab === 'users' }" type="button" @click="openUserManagement">
           <Settings :size="17" /><span>{{ t('Usuários') }}</span>
         </button>
         <button v-if="isWhatsAppDashboardAdmin" class="nav-link" :class="{ active: managementTab === 'whatsapp' }" type="button" @click="managementTab = 'whatsapp'">
@@ -1804,16 +2141,17 @@ onUnmounted(() => {
       </header>
 
       <main id="inicio" class="dashboard-content">
-        <div v-if="managementTab === 'users' && isWhatsAppDashboardAdmin" class="user-management-panel">
+        <div v-if="managementTab === 'users' && canManageActiveWorkspace" class="user-management-panel">
           <div class="page-heading">
             <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h1>{{ t('Usuários') }}</h1><p class="heading-sub">{{ t('Gerencie membros, papéis e convites do ambiente ativo.') }}</p></div>
             <button class="secondary-button" type="button" @click="managementTab = 'overview'">{{ t('Voltar') }}</button>
           </div>
           <nav class="settings-tabs whatsapp-tabs user-management-tabs" role="tablist" :aria-label="t('Usuários')">
             <button class="settings-tab" :class="{ active: userManagementTab === 'members' }" type="button" role="tab" :aria-selected="userManagementTab === 'members'" @click="userManagementTab = 'members'"><UsersRound :size="15" />{{ t('Membros') }}</button>
-            <button class="settings-tab" :class="{ active: userManagementTab === 'registration' }" type="button" role="tab" :aria-selected="userManagementTab === 'registration'" @click="userManagementTab = 'registration'"><ShieldCheck :size="15" />{{ t('Cadastro público') }}</button>
+            <button v-if="canManageUserAccounts" class="settings-tab" :class="{ active: userManagementTab === 'accounts' }" type="button" role="tab" :aria-selected="userManagementTab === 'accounts'" @click="userManagementTab = 'accounts'; void loadAdminUsers()"><UsersRound :size="15" />{{ t('Usuários cadastrados') }}</button>
+            <button v-if="isWhatsAppDashboardAdmin" class="settings-tab" :class="{ active: userManagementTab === 'registration' }" type="button" role="tab" :aria-selected="userManagementTab === 'registration'" @click="userManagementTab = 'registration'"><ShieldCheck :size="15" />{{ t('Cadastro público') }}</button>
           </nav>
-          <section v-if="userManagementTab === 'registration'" class="settings-pane user-management-card">
+          <section v-if="userManagementTab === 'registration' && isWhatsAppDashboardAdmin" class="settings-pane user-management-card">
             <div class="settings-section-heading"><h3>{{ t('Cadastro público') }}</h3></div>
             <label class="theme-setting">
               <span class="theme-setting-icon"><ShieldCheck :size="18" /></span>
@@ -1821,7 +2159,34 @@ onUnmounted(() => {
               <input class="theme-switch" type="checkbox" :checked="registrationEnabled" @change="toggleRegistrationSetting" />
             </label>
           </section>
-          <section v-else class="settings-pane user-management-card">
+          <section v-else-if="userManagementTab === 'accounts' && canManageUserAccounts" class="settings-pane user-management-card">
+            <div class="settings-section-heading"><h3>{{ t('Contas cadastradas') }}</h3><span>{{ adminUsers.length }} {{ t('contas') }}</span></div>
+            <p v-if="adminUsersMessage" class="success-message" role="status">{{ t(adminUsersMessage) }}</p>
+            <p v-if="adminUsersError" class="error-message" role="alert">{{ t(adminUsersError) }}</p>
+            <p v-if="userDeletionMessage" class="success-message" role="status">{{ userDeletionMessage }}</p>
+            <div v-if="adminUsersLoading" class="workspace-device-empty">{{ t('Carregando contas...') }}</div>
+            <div v-else-if="adminUsers.length" class="member-list admin-account-list">
+              <div v-for="account in adminUsers" :key="account.id" class="member-row admin-account-row">
+                <div class="admin-account-identity">
+                  <strong>{{ account.displayName || account.email }}</strong>
+                  <small>{{ account.email }}</small>
+                  <small>{{ account.workspaces.length ? account.workspaces.map((workspace) => workspace.name).join(', ') : t('Sem ambiente') }}</small>
+                </div>
+                <span v-if="account.isPlatformAdmin" class="protected-member-role"><LockKeyhole :size="14" />{{ t('Administrador da plataforma') }}</span>
+                <span v-else class="admin-account-status">{{ account.passwordResetRequired ? t('Redefinição de senha exigida') : account.emailVerifiedAt ? t('Conta ativa') : t('E-mail pendente') }}</span>
+                <div v-if="!account.isPlatformAdmin && account.email !== user?.email" class="member-actions">
+                  <button class="icon-button member-actions-button" type="button" :aria-label="t('Abrir ações da conta')" :aria-expanded="memberActionsOpenId === `account-${account.id}`" :title="t('Ações')" @click="toggleMemberActions(`account-${account.id}`)"><EllipsisVertical :size="18" /></button>
+                  <div v-if="memberActionsOpenId === `account-${account.id}`" class="member-actions-menu admin-account-actions" role="menu">
+                    <button type="button" role="menuitem" @click="editAdminUser(account)"><Pencil :size="14" />{{ t('Editar usuário') }}</button>
+                    <button type="button" role="menuitem" :disabled="adminUserActionId === account.id || account.passwordResetRequired" @click="memberActionsOpenId = null; requireUserPasswordReset(account)"><LockKeyhole :size="14" />{{ account.passwordResetRequired ? t('Redefinição já exigida') : t('Remover senha e exigir nova senha') }}</button>
+                    <button class="member-remove-action" type="button" role="menuitem" @click="requestUserDeletion(account)"><Trash2 :size="14" />{{ t('Excluir usuário permanentemente') }}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="!adminUsersError" class="workspace-device-empty">{{ t('Nenhuma conta cadastrada.') }}</div>
+          </section>
+          <section v-else-if="userManagementTab === 'members'" class="settings-pane user-management-card">
             <div class="settings-section-heading"><h3>{{ t('Convidar usuário') }}</h3></div>
             <div class="invite-form">
               <input v-model="inviteEmail" class="settings-input" type="email" :placeholder="t('usuario@empresa.com')" />
@@ -1833,6 +2198,7 @@ onUnmounted(() => {
             </div>
             <p v-if="inviteMessage" class="success-message" role="status">{{ t(inviteMessage) }}</p>
             <p v-if="inviteError" class="error-message" role="alert">{{ t(inviteError) }}</p>
+            <p v-if="userDeletionMessage" class="success-message" role="status">{{ userDeletionMessage }}</p>
             <div class="member-list" v-if="workspaceMembers.length">
               <div v-for="member in workspaceMembers" :key="member.id" class="member-row">
                 <div>
@@ -1842,12 +2208,25 @@ onUnmounted(() => {
                 <span v-if="member.isPlatformAdmin" class="protected-member-role" :title="t('O papel deste administrador da plataforma não pode ser alterado.')" :aria-label="t('Administrador da plataforma')">
                   <LockKeyhole :size="14" /> {{ t('Administrador da plataforma') }}
                 </span>
-                <select v-else :value="member.role" class="settings-input select-input small" @change="updateMemberRole(member.id, ($event.target as HTMLSelectElement).value)">
-                  <option value="member">{{ t('Membro') }}</option>
-                  <option value="admin">{{ t('Administrador') }}</option>
-                  <option value="owner" :disabled="member.email === user?.email">{{ t('Proprietário') }}</option>
-                </select>
-                <button v-if="member.email !== user?.email" class="text-button" type="button" @click="removeMember(member.id)">{{ t('Remover') }}</button>
+                <template v-else-if="editingMemberId === member.id">
+                  <div class="member-edit-controls">
+                    <select v-model="editingMemberRole" class="settings-input select-input small" :aria-label="`${t('Papel de')} ${member.displayName || member.email}`">
+                      <option value="member">{{ t('Membro') }}</option>
+                      <option value="admin">{{ t('Administrador') }}</option>
+                      <option value="owner" disabled>{{ t('Proprietário') }}</option>
+                    </select>
+                    <button class="icon-button member-save-button" type="button" :disabled="memberSavingId === member.id || editingMemberRole === 'owner'" :title="t('Salvar')" :aria-label="t('Salvar')" @click="updateMemberRole(member.id)"><Check :size="16" /></button>
+                    <button class="icon-button member-cancel-button" type="button" :disabled="memberSavingId === member.id" :title="t('Cancelar')" :aria-label="t('Cancelar')" @click="cancelMemberRoleEdit"><X :size="16" /></button>
+                  </div>
+                </template>
+                <span v-else class="member-role-label">{{ workspaceRoleLabel(member.role) }}</span>
+                <div v-if="!member.isPlatformAdmin && member.email !== user?.email && editingMemberId !== member.id" class="member-actions">
+                  <button class="icon-button member-actions-button" type="button" :aria-label="t('Abrir ações do membro')" :aria-expanded="memberActionsOpenId === member.id" :title="t('Ações')" @click="toggleMemberActions(member.id)"><EllipsisVertical :size="18" /></button>
+                  <div v-if="memberActionsOpenId === member.id" class="member-actions-menu" role="menu">
+                    <button type="button" role="menuitem" @click="editMemberRole(member)"><Pencil :size="14" />{{ t('Editar papel') }}</button>
+                    <button v-if="isWhatsAppDashboardAdmin" class="member-remove-action" type="button" role="menuitem" @click="requestUserDeletion(member)"><Trash2 :size="14" />{{ t('Excluir usuário permanentemente') }}</button>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="member-list" v-if="workspaceInvitations.length">
@@ -2015,8 +2394,8 @@ onUnmounted(() => {
                 @click="toggleDevice(device.id)"
               >
                 <span class="device-identity">
-                  <span class="device-icon"><Cpu :size="17" /></span>
-                  <span class="device-identity-copy">{{ device.name }}</span>
+                  <span class="device-icon"><Bot v-if="device.canSimulate" :size="17" /><Cpu v-else :size="17" /></span>
+                  <span class="device-identity-copy">{{ deviceDisplayName(device) }}</span>
                 </span>
                 <span class="status-badge" :class="device.status"><i></i>{{ deviceStatusLabel(device.status) }}</span>
                 <span class="device-health-overview" :aria-label="t('Estado dos sensores')">
@@ -2024,18 +2403,32 @@ onUnmounted(() => {
                     v-for="sensor in latestSensorReadings(device.readings)"
                     :key="sensor.key"
                     class="device-health-item"
-                    :class="sensor.reading ? `health-${device.status}` : 'health-missing'"
-                    :title="`${sensor.name}: ${sensor.reading ? deviceStatusLabel(device.status) : t('sem leitura recebida')}`"
+                    :class="sensor.reading ? (sensor.reading.alert ? 'health-warning' : device.status === 'offline' ? 'health-offline' : 'health-online') : 'health-missing'"
+                    :title="`${sensor.name}: ${sensor.reading ? sensor.reading.alert ? t('Em atenção') : device.status === 'offline' ? deviceStatusLabel('offline') : deviceStatusLabel('online') : t('sem leitura recebida')}`"
                   >
                     <component :is="readingIcon(sensor.key)" :size="15" />
                     <span>{{ sensor.shortName }}</span>
-                    <component :is="sensor.reading ? deviceStatusIcon(device.status) : CircleMinus" :size="15" />
+                    <component :is="sensor.reading ? sensor.reading.alert ? AlertTriangle : deviceStatusIcon(device.status === 'offline' ? 'offline' : 'online') : CircleMinus" :size="15" />
                   </span>
                 </span>
                 <ChevronDown class="device-expand-icon" :class="{ expanded: isDeviceExpanded(device.id) }" :size="18" />
               </button>
 
               <div v-if="isDeviceExpanded(device.id)" :id="`device-details-${device.id}`" class="device-details">
+                <div class="device-alias-row">
+                  <div class="device-alias-copy">
+                    <strong>{{ t('Nome na dashboard') }}</strong>
+                    <input v-if="editingDeviceAliasId === device.id" v-model="deviceAliasDraft" class="settings-input" type="text" maxlength="80" :placeholder="device.name" :aria-label="t('Apelido do aparelho')" @keydown.enter.prevent="saveDeviceAlias(device)" @keydown.esc="cancelDeviceAliasEdit" />
+                    <span v-else>{{ deviceDisplayName(device) }}</span>
+                  </div>
+                  <div v-if="device.canEditAlias" class="device-alias-actions">
+                    <template v-if="editingDeviceAliasId === device.id">
+                      <button class="icon-button" type="button" :disabled="deviceAliasSavingId === device.id" :title="t('Salvar apelido')" :aria-label="t('Salvar apelido')" @click="saveDeviceAlias(device)"><LoaderCircle v-if="deviceAliasSavingId === device.id" class="spin" :size="15" /><Check v-else :size="16" /></button>
+                      <button class="icon-button" type="button" :disabled="deviceAliasSavingId === device.id" :title="t('Cancelar')" :aria-label="t('Cancelar')" @click="cancelDeviceAliasEdit"><X :size="16" /></button>
+                    </template>
+                    <button v-else class="icon-button" type="button" :title="t('Editar apelido')" :aria-label="t('Editar apelido')" @click="editDeviceAlias(device)"><Pencil :size="15" /></button>
+                  </div>
+                </div>
                 <div class="device-meta">
                   <span><MapPin :size="14" /><strong>{{ t('Localizacao') }}</strong>{{ device.location || t('Nao informado') }}</span>
                   <span><Cpu :size="14" /><strong>{{ t('Identificador') }}</strong>{{ device.externalId }}</span>
@@ -2044,12 +2437,12 @@ onUnmounted(() => {
                 <div class="device-readings-detail">
                   <article v-for="sensor in latestSensorReadings(device.readings)" :key="sensor.key" class="sensor-detail-card">
                     <div class="sensor-detail-label"><component :is="readingIcon(sensor.key)" :size="15" />{{ sensor.name }}</div>
-                    <strong>{{ sensor.reading ? `${sensor.reading.value} ${sensor.reading.unit}` : t('Sem leitura') }}</strong>
+                    <strong :class="{ 'sensor-reading-alert': sensor.reading?.alert }">{{ sensor.reading ? `${sensor.reading.value} ${sensor.reading.unit}` : t('Sem leitura') }}</strong>
                     <span v-if="sensor.reading" class="sensor-reading-time">{{ formatTime(sensor.reading.recordedAt) }}</span>
                   </article>
                 </div>
                 <section v-if="device.canSimulate && simulationValues[device.id]" class="demo-simulation-panel" :aria-label="t('Simular leituras')">
-                  <div class="demo-simulation-heading"><div><strong>{{ t('Simular leituras') }}</strong><small>{{ device.name }}</small></div><Cpu :size="17" /></div>
+                  <div class="demo-simulation-heading"><div><strong>{{ t('Simular leituras') }}</strong><small>{{ deviceDisplayName(device) }}</small></div><Cpu :size="17" /></div>
                   <div class="demo-simulation-fields">
                     <label><span>{{ t('Temperatura (°C)') }}</span><input v-model.number="simulationValues[device.id].temperature" class="settings-input" type="number" min="-50" max="150" step="0.1" /></label>
                     <label><span>{{ t('Umidade (%)') }}</span><input v-model.number="simulationValues[device.id].humidity" class="settings-input" type="number" min="0" max="100" step="0.1" /></label>
@@ -2086,7 +2479,7 @@ onUnmounted(() => {
       <a class="mobile-nav-item" :class="{ active: managementTab === 'overview' && activeMobileTab === 'devices' }" href="#aparelhos" :aria-current="activeMobileTab === 'devices' ? 'page' : undefined" @click.prevent="navigateMobileSection('devices')">
         <Cpu :size="20" /><span>{{ t('Aparelhos') }}</span>
       </a>
-      <button v-if="isWhatsAppDashboardAdmin" class="mobile-nav-item" :class="{ active: managementTab === 'users' }" type="button" @click="managementTab = 'users'; activeMobileTab = 'users'">
+      <button v-if="canManageActiveWorkspace" class="mobile-nav-item" :class="{ active: managementTab === 'users' }" type="button" @click="managementTab = 'users'; activeMobileTab = 'users'">
         <UsersRound :size="19" /><span>{{ t('Usuários') }}</span>
       </button>
       <button v-if="isWhatsAppDashboardAdmin" class="mobile-nav-item" :class="{ active: managementTab === 'whatsapp' }" type="button" @click="managementTab = 'whatsapp'; activeMobileTab = 'whatsapp'">
@@ -2130,6 +2523,7 @@ onUnmounted(() => {
           <button class="settings-tab" :class="{ active: workspaceDialogAction === 'import' }" type="button" role="tab" :aria-selected="workspaceDialogAction === 'import'" @click="openWorkspaceManager('import')"><ArrowDownToLine :size="14" /> {{ t('Importar') }}</button>
           <button class="settings-tab" :class="{ active: workspaceDialogAction === 'devices' }" type="button" role="tab" :aria-selected="workspaceDialogAction === 'devices'" @click="openWorkspaceManager('devices')"><Cpu :size="14" /> {{ t('Aparelhos') }}</button>
           <button class="settings-tab" :class="{ active: workspaceDialogAction === 'share' }" type="button" role="tab" :aria-selected="workspaceDialogAction === 'share'" @click="openWorkspaceManager('share')"><Share2 :size="14" /> {{ t('Compartilhar') }}</button>
+          <button v-if="canManageActiveWorkspace" class="settings-tab" :class="{ active: workspaceDialogAction === 'members' }" type="button" role="tab" :aria-selected="workspaceDialogAction === 'members'" @click="openWorkspaceManager('members')"><UsersRound :size="14" /> {{ t('Membros') }}</button>
         </nav>
 
         <div v-if="workspaceDialogAction === 'create' || workspaceDialogAction === 'edit'" class="settings-pane workspace-manager-pane">
@@ -2165,6 +2559,19 @@ onUnmounted(() => {
           <label for="importWorkspaceCode">{{ t('Código do ambiente') }}</label>
           <input id="importWorkspaceCode" v-model="importWorkspaceCode" class="settings-input workspace-code-input" type="text" maxlength="24" placeholder="LAB-ABC123" @keydown.enter.prevent="joinWorkspaceByCode" />
           <button class="primary-button settings-save-button" type="button" :disabled="!importWorkspaceCode.trim()" @click="joinWorkspaceByCode">{{ t('Importar ambiente') }}</button>
+        </div>
+
+        <div v-else-if="workspaceDialogAction === 'members'" class="settings-pane workspace-manager-pane">
+          <p class="form-subtitle">{{ t('Membros com acesso ao ambiente ativo.') }} {{ t('Remover alguém daqui não exclui a conta.') }}</p>
+          <div v-if="workspaceMembers.length" class="member-list workspace-invited-members">
+            <div v-for="member in workspaceMembers" :key="member.id" class="member-row">
+              <div><strong>{{ member.displayName || member.email }}</strong><small>{{ member.email }}</small></div>
+              <span v-if="member.isPlatformAdmin" class="protected-member-role"><LockKeyhole :size="14" />{{ t('Administrador da plataforma') }}</span>
+              <span v-else class="member-role-label">{{ workspaceRoleLabel(member.role) }}</span>
+              <button v-if="member.role !== 'owner' && !member.isPlatformAdmin && member.email !== user?.email" class="text-button workspace-member-remove" type="button" @click="removeMember(member.id, member.displayName || member.email)">{{ t('Remover acesso') }}</button>
+            </div>
+          </div>
+          <div v-else class="workspace-device-empty">{{ t('Este ambiente ainda não tem membros convidados.') }}</div>
         </div>
 
         <div v-else-if="workspaceDialogAction === 'devices'" class="settings-pane workspace-manager-pane">
@@ -2205,6 +2612,43 @@ onUnmounted(() => {
             <p class="form-subtitle">{{ t('Envie este código para outro usuário importar o ambiente e acompanhar os mesmos aparelhos.') }}</p>
           </template>
           <p v-else class="form-subtitle">{{ t('Selecione ou crie um ambiente antes de compartilhar.') }}</p>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="userDeletionTarget" class="settings-overlay" @click.self="cancelUserDeletion">
+      <section class="settings-dialog user-deletion-dialog" role="alertdialog" aria-modal="true" aria-labelledby="userDeletionTitle">
+        <header class="settings-header">
+          <div><p class="eyebrow">{{ t('AÇÃO IRREVERSÍVEL') }}</p><h2 id="userDeletionTitle">{{ t('Excluir usuário permanentemente') }}</h2></div>
+          <button class="icon-button" type="button" :disabled="userDeletionSaving" :aria-label="t('Fechar')" @click="cancelUserDeletion"><X :size="19" /></button>
+        </header>
+        <p class="form-subtitle">{{ userDeletionTarget.displayName }} ({{ userDeletionTarget.email }}). {{ t('A conta será removida permanentemente.') }}</p>
+        <p class="form-subtitle">{{ t('Dispositivos vinculados e leituras serão apagados. Workspaces compartilhados serão preservados e transferidos a outro membro quando necessário.') }}</p>
+        <label for="userDeletionConfirmation">{{ t('Digite o e-mail do usuário para confirmar') }}</label>
+        <input id="userDeletionConfirmation" v-model="userDeletionConfirmation" class="settings-input" type="email" autocomplete="off" />
+        <p v-if="userDeletionError" class="error-message" role="alert">{{ userDeletionError }}</p>
+        <div class="user-deletion-actions">
+          <button class="secondary-button" type="button" :disabled="userDeletionSaving" @click="cancelUserDeletion">{{ t('Cancelar') }}</button>
+          <button class="danger-button" type="button" :disabled="userDeletionSaving || userDeletionConfirmation.trim().toLowerCase() !== userDeletionTarget.email.toLowerCase()" @click="deleteUserPermanently">{{ userDeletionSaving ? t('Excluindo...') : t('Excluir conta e dados') }}</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="accountEditTarget" class="settings-overlay" @click.self="cancelAdminUserEdit">
+      <section class="settings-dialog user-deletion-dialog" role="dialog" aria-modal="true" aria-labelledby="accountEditTitle">
+        <header class="settings-header">
+          <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h2 id="accountEditTitle">{{ t('Editar usuário') }}</h2></div>
+          <button class="icon-button" type="button" :disabled="accountEditSaving" :aria-label="t('Fechar')" @click="cancelAdminUserEdit"><X :size="19" /></button>
+        </header>
+        <label for="accountEditName">{{ t('Nome') }}</label>
+        <input id="accountEditName" v-model="accountEditName" class="settings-input" type="text" maxlength="80" autocomplete="off" required />
+        <label for="accountEditEmail">{{ t('E-mail') }}</label>
+        <input id="accountEditEmail" v-model="accountEditEmail" class="settings-input" type="email" maxlength="254" autocomplete="off" required />
+        <p class="form-subtitle">{{ t('A senha não pode ser alterada por aqui. Use a ação de redefinição para exigir uma nova senha.') }}</p>
+        <p v-if="accountEditError" class="error-message" role="alert">{{ accountEditError }}</p>
+        <div class="user-deletion-actions">
+          <button class="secondary-button" type="button" :disabled="accountEditSaving" @click="cancelAdminUserEdit">{{ t('Cancelar') }}</button>
+          <button class="primary-button" type="button" :disabled="accountEditSaving || !accountEditName.trim() || !accountEditEmail.trim()" @click="saveAdminUserEdit">{{ accountEditSaving ? t('Salvando...') : t('Salvar alterações') }}</button>
         </div>
       </section>
     </div>
@@ -2291,6 +2735,26 @@ onUnmounted(() => {
             </label>
           </div>
           <p class="settings-help">{{ t('Digite o número local com DDD.') }} {{ t('O WhatsApp requer uma conta conectada pelo administrador.') }}</p>
+          <section v-if="activeWorkspace" class="workspace-notification-settings">
+            <div class="settings-section-heading"><h3>{{ t('Escopo dos alertas') }}</h3><span>{{ activeWorkspace.name }}</span></div>
+            <label class="theme-setting">
+              <span class="theme-setting-icon"><Bell :size="18" /></span>
+              <span class="theme-setting-copy"><strong>{{ t('Receber alertas de todos os aparelhos') }}</strong><small>{{ t('Usa os canais de e-mail e WhatsApp ativados acima.') }}</small></span>
+              <input class="theme-switch" type="checkbox" :checked="workspaceAlertPreferences.notifyAllDevices" :disabled="workspaceAlertPreferencesSaving" @change="toggleWorkspaceAlertMode" />
+            </label>
+            <div v-if="!workspaceAlertPreferences.notifyAllDevices" class="notification-device-list">
+              <div v-for="device in workspaceAlertPreferences.devices" :key="device.deviceId" class="notification-device-row">
+                <strong>{{ device.name }}</strong>
+                <label><span>{{ t('E-mail') }}</span><input class="theme-switch" type="checkbox" :checked="device.emailEnabled" :disabled="workspaceAlertPreferencesSaving" @change="toggleDeviceAlertChannel(device.deviceId, 'emailEnabled', $event)" /></label>
+                <label><span>{{ t('WhatsApp') }}</span><input class="theme-switch" type="checkbox" :checked="device.whatsappEnabled" :disabled="workspaceAlertPreferencesSaving" @change="toggleDeviceAlertChannel(device.deviceId, 'whatsappEnabled', $event)" /></label>
+              </div>
+              <div v-if="!workspaceAlertPreferences.devices.length" class="workspace-device-empty">{{ t('Nenhum aparelho neste ambiente.') }}</div>
+            </div>
+            <p v-if="workspaceAlertPreferencesError" class="error-message" role="alert">{{ t(workspaceAlertPreferencesError) }}</p>
+            <p v-if="workspaceAlertPreferencesMessage" class="success-message" role="status">{{ t(workspaceAlertPreferencesMessage) }}</p>
+            <p v-if="workspaceAlertPreferencesSaving" class="settings-help">{{ t('Salvando...') }}</p>
+          </section>
+          <p v-else class="settings-help">{{ t('Crie ou importe um ambiente para configurar alertas dos aparelhos.') }}</p>
           <label for="notificationCurrentPassword">{{ t('Senha atual') }}</label>
           <input id="notificationCurrentPassword" v-model="notificationCurrentPassword" class="settings-input" type="password" autocomplete="current-password" required />
           <div v-if="notificationError" class="error-message" role="alert">{{ t(notificationError) }}</div>

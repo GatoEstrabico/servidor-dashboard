@@ -28,11 +28,7 @@ export const registrationSchema = z.object({
   password: z.string().min(12).max(128),
   workspaceName: z.string().trim().min(2).max(80).optional(),
   invitationToken: z.string().min(32).max(128).optional()
-}).strict().superRefine((registration, context) => {
-  if (!registration.invitationToken && !registration.workspaceName) {
-    context.addIssue({ code: 'custom', path: ['workspaceName'], message: 'Informe o nome do primeiro ambiente.' });
-  }
-});
+}).strict();
 
 export const tokenSchema = z.object({ token: z.string().min(32).max(128) }).strict();
 export const createWorkspaceSchema = z.object({
@@ -100,6 +96,15 @@ export const updateProfileSchema = z.object({
   }
 });
 
+export const workspaceNotificationPreferencesSchema = z.object({
+  notifyAllDevices: z.boolean(),
+  devices: z.array(z.object({
+    deviceId: trimmed(64),
+    emailEnabled: z.boolean(),
+    whatsappEnabled: z.boolean()
+  }).strict()).max(250)
+}).strict();
+
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1).max(128),
   newPassword: z.string().min(12).max(128)
@@ -123,6 +128,7 @@ export const readingSchema = z.object({
   type: trimmed(64),
   value: z.number().finite().min(-1_000_000_000).max(1_000_000_000),
   unit: trimmed(24),
+  alert: z.boolean().default(false),
   recordedAt: z.string().datetime({ offset: true }).optional()
 }).strict();
 
@@ -139,6 +145,10 @@ export const simulateDemoDeviceSchema = z.object({
   temperature: z.number().finite().min(-50).max(150),
   humidity: z.number().finite().min(0).max(100),
   gas: z.number().finite().min(0).max(100_000)
+}).strict();
+
+export const updateDeviceAliasSchema = z.object({
+  alias: z.preprocess((value) => typeof value === 'string' && !value.trim() ? null : value, z.string().trim().max(80).nullable())
 }).strict();
 
 export type IngestionPayload = z.infer<typeof ingestionSchema>;

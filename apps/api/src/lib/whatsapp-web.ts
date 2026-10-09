@@ -6,12 +6,49 @@ import { pino } from 'pino';
 import QRCode from 'qrcode';
 import sharp from 'sharp';
 import { whatsappNotificationSettingsSchema } from './schemas.js';
+import { getAppLogger } from './app-logger.js';
 
 const authDirectory = resolve(process.cwd(), '.data/whatsapp-auth');
 const notificationSettingsPath = resolve(process.cwd(), '.data/whatsapp-settings.json');
 const alertStickerPath = resolve(process.cwd(), '../../figurinha.webp');
 const successStickerPath = resolve(process.cwd(), '../../sucesso.webp');
 const logger = pino({ level: 'silent' });
+const whatsappLogger = getAppLogger('api-whatsapp');
+const libsignalLogger = getAppLogger('api-libsignal');
+const libsignalSessionInfoMessages = new Map([
+  ['Closing session:', 'Sessao criptografica encerrada.'],
+  ['Opening session:', 'Sessao criptografica aberta.'],
+  ['Removing old closed session:', 'Sessao criptografica antiga removida.']
+]);
+const originalConsoleInfo = console.info.bind(console);
+console.info = (...args: Parameters<typeof console.info>) => {
+  if (typeof args[0] === 'string') {
+    const message = libsignalSessionInfoMessages.get(args[0]);
+    if (message) {
+      libsignalLogger.info({ event: args[0].slice(0, -1) }, message);
+      return;
+    }
+  }
+  originalConsoleInfo(...args);
+};
+const originalConsoleWarn = console.warn.bind(console);
+console.warn = (...args: Parameters<typeof console.warn>) => {
+  if (args[0] === 'Session already closed' || args[0] === 'Session already open') {
+    libsignalLogger.warn({ event: 'session_warning' }, 'Aviso de estado de sessao criptografica.');
+    return;
+  }
+  originalConsoleWarn(...args);
+};
+const originalConsoleError = console.error.bind(console);
+console.error = (...args: Parameters<typeof console.error>) => {
+  const message = args[0];
+  if (message === 'Failed to decrypt message with any known session...') {
+    libsignalLogger.warn({ event: 'decrypt_failed' }, 'Falha ao descriptografar mensagem com as sessoes conhecidas.');
+    return;
+  }
+  if (typeof message === 'string' && message.startsWith('Session error:') && message.includes('Bad MAC')) return;
+  originalConsoleError(...args);
+};
 
 export type WhatsAppNotificationSettings = {
   senderName: string;
@@ -78,6 +115,8 @@ async function loadWhatsAppNotificationSettings(): Promise<void> {
 function addLog(level: WhatsAppWebLogEntry['level'], event: string, details: string): void {
   logs.unshift({ id: nextLogId++, createdAt: new Date().toISOString(), level, event, details });
   logs.length = Math.min(logs.length, 100);
+  if (level === 'error') whatsappLogger.error({ event, details }, event);
+  else whatsappLogger.info({ event, details }, event);
 }
 
 function maskPhone(phone: string): string {

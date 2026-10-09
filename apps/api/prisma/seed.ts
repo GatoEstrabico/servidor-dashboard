@@ -38,7 +38,7 @@ async function main() {
     const workspace = await prisma.workspace.create({
       data: { name: 'Laboratório Central', accessCode, memberships: { create: { userId: admin.id, role: 'owner' } } }
     });
-    membership = { workspaceId: workspace.id, userId: admin.id, role: 'owner', createdAt: workspace.createdAt };
+    membership = { workspaceId: workspace.id, userId: admin.id, role: 'owner', notifyAllDevices: true, createdAt: workspace.createdAt };
   } else if (membership.role !== 'owner') {
     membership = await prisma.workspaceMember.update({
       where: { workspaceId_userId: { workspaceId: membership.workspaceId, userId: admin.id } },

@@ -10,6 +10,7 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from './lib/prisma.js';
+import { getAppLogger } from './lib/app-logger.js';
 import {
   assignWorkspaceDeviceSchema,
   activeWorkspaceSchema,
@@ -31,7 +32,9 @@ import {
   whatsappNotificationSettingsSchema,
   updateProfileSchema,
   updateWorkspaceSchema,
-  updateWorkspaceMemberSchema
+  updateWorkspaceMemberSchema,
+  updateDeviceAliasSchema,
+  workspaceNotificationPreferencesSchema
 } from './lib/schemas.js';
 import {
   clearWhatsAppWebLogs,
@@ -62,7 +65,9 @@ dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../..
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  SHOW_WORKSPACE_SETUP_WHEN_EMPTY: z.enum(['true', 'false']).default('true'),
   DASHBOARD_ORIGIN: z.string().url(),
+  DASHBOARD_PUBLIC_URL: z.string().url().refine((value) => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
   SESSION_SECRET: z.string().min(32),
   INGESTION_API_KEY: z.string().min(32),
   COOKIE_SECURE: z.enum(['true', 'false']).default('true'),
@@ -96,6 +101,7 @@ const envSchema = z.object({
   }
 });
 const env = envSchema.parse(process.env);
+const dashboardOrigins = [...new Set([env.DASHBOARD_ORIGIN, env.DASHBOARD_PUBLIC_URL].filter((value): value is string => Boolean(value)).map((value) => new URL(value).origin))];
 const parsedSmtpFrom = env.SMTP_FROM?.match(/^(.*?)\s*<([^<>]+)>$/);
 await initializeEmailService({
   smtpHost: env.SMTP_HOST ?? '',
@@ -108,7 +114,7 @@ await initializeEmailService({
   ...defaultEmailNotificationMessages
 }, env.SESSION_SECRET);
 const bootstrapAdminEmail = env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
-const app = Fastify({ logger: true, bodyLimit: 512 * 1024 });
+const app = Fastify({ loggerInstance: getAppLogger('api-servidor'), bodyLimit: 512 * 1024 });
 const cookieName = env.COOKIE_SECURE === 'true' ? '__Host-monitor_session' : 'monitor_session';
 const sessionDurationMs = 12 * 60 * 60 * 1000;
 const secureCookie = env.COOKIE_SECURE === 'true';
@@ -172,11 +178,25 @@ function formatEmailAlarmMessage(settings: ReturnType<typeof getEmailNotificatio
   return template.replace(/\{\{([^{}]+)\}\}/g, (_placeholder, key: string) => values[key] ?? '');
 }
 
-async function sendAlarmNotifications(device: { name: string; externalId: string; location: string | null; workspaceId: string | null }, status: string) {
+async function sendAlarmNotifications(device: { id: string; name: string; externalId: string; location: string | null; workspaceId: string | null }, status: string) {
   if (!device.workspaceId) return;
-  const recipients = await prisma.user.findMany({
-    where: { memberships: { some: { workspaceId: device.workspaceId } } },
-    select: { email: true, emailNotifications: true, whatsappNumber: true, whatsappNotifications: true }
+  const memberships = await prisma.workspaceMember.findMany({
+    where: { workspaceId: device.workspaceId },
+    include: {
+      user: { select: { email: true, emailNotifications: true, whatsappNumber: true, whatsappNotifications: true } },
+      deviceNotificationPreferences: {
+        where: { deviceId: device.id },
+        select: { emailEnabled: true, whatsappEnabled: true }
+      }
+    }
+  });
+  const recipients = memberships.map(({ user, notifyAllDevices, deviceNotificationPreferences }) => {
+    const preference = deviceNotificationPreferences[0];
+    return {
+      ...user,
+      emailNotifications: user.emailNotifications && (notifyAllDevices || preference?.emailEnabled === true),
+      whatsappNotifications: user.whatsappNotifications && (notifyAllDevices || preference?.whatsappEnabled === true)
+    };
   });
   const emailRecipients = recipients.filter((recipient) => recipient.emailNotifications);
   const whatsappRecipients = recipients.filter((recipient) => recipient.whatsappNotifications && recipient.whatsappNumber);
@@ -256,7 +276,7 @@ async function sendAlarmNotifications(device: { name: string; externalId: string
   await Promise.all(deliveries);
 }
 
-async function notifyAlarmStatusChange(device: { name: string; externalId: string; location: string | null; workspaceId: string | null }, status: string) {
+async function notifyAlarmStatusChange(device: { id: string; name: string; externalId: string; location: string | null; workspaceId: string | null }, status: string) {
   try {
     await sendAlarmNotifications(device, status);
   } catch (error) {
@@ -294,7 +314,7 @@ async function getUserContext(userId: string) {
   })));
   const activeWorkspaceId = workspaces.some((workspace) => workspace.id === user.activeWorkspaceId)
     ? user.activeWorkspaceId
-    : workspaces[0]?.id ?? null;
+    : null;
   if (activeWorkspaceId !== user.activeWorkspaceId) {
     await prisma.user.update({ where: { id: user.id }, data: { activeWorkspaceId } });
   }
@@ -362,7 +382,7 @@ async function requireCsrf(request: FastifyRequest, reply: FastifyReply) {
 }
 
 app.register(helmet);
-app.register(cors, { origin: env.DASHBOARD_ORIGIN, credentials: true, methods: ['GET', 'POST', 'OPTIONS'] });
+app.register(cors, { origin: dashboardOrigins, credentials: true, methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'] });
 app.register(cookie);
 app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
 
@@ -377,7 +397,7 @@ async function getRegistrationSetting() {
 }
 
 function buildDashboardUrl(params: Record<string, string>) {
-  const url = new URL('/', env.DASHBOARD_ORIGIN);
+  const url = new URL('/', env.DASHBOARD_PUBLIC_URL ?? env.DASHBOARD_ORIGIN);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   return url.href;
 }
@@ -513,7 +533,7 @@ app.post('/api/admin/whatsapp/disconnect', async (request, reply) => {
   return disconnectWhatsAppWeb();
 });
 
-app.get<{ Params: { token: string } }>('/api/auth/invitations/:token', async (request, reply) => {
+app.get<{ Params: { token: string } }>('/api/auth/invitations/:token', { logLevel: 'silent' }, async (request, reply) => {
   const invitation = await prisma.workspaceInvitation.findUnique({
     where: { tokenHash: hash(request.params.token) },
     include: { workspace: { select: { name: true } } }
@@ -560,7 +580,7 @@ app.post('/api/auth/register', { config: { rateLimit: { max: 5, timeWindow: '15 
       email,
       displayName: parsed.data.displayName,
       passwordHash: await argon2.hash(parsed.data.password, { type: argon2.argon2id }),
-      workspaceName: invitation ? null : parsed.data.workspaceName,
+      workspaceName: parsed.data.workspaceName,
       workspaceId: invitation?.workspaceId,
       invitationId: invitation?.id,
       tokenHash: hash(rawToken),
@@ -568,10 +588,13 @@ app.post('/api/auth/register', { config: { rateLimit: { max: 5, timeWindow: '15 
     }
   });
   try {
+    const activationUrl = buildDashboardUrl({ activationToken: rawToken });
     await sendEmailMessage('Ativação de conta', {
       to: email,
       subject: 'Confirme sua conta - LAB/MONITOR',
-      text: `Olá, ${parsed.data.displayName}. Confirme seu e-mail em até 24 horas pelo link abaixo:\n\n${buildDashboardUrl({ activationToken: rawToken })}`
+      text: `Olá, ${parsed.data.displayName}. Confirme seu e-mail em até 24 horas pelo link abaixo:\n\n${activationUrl}`,
+      htmlText: `Olá, ${parsed.data.displayName}. Confirme seu e-mail em até 24 horas pelo botão abaixo.`,
+      action: { label: 'Confirmar e-mail', url: activationUrl }
     });
   } catch (error) {
     await prisma.pendingRegistration.deleteMany({ where: { email } });
@@ -589,6 +612,13 @@ app.post('/api/auth/verify-email', async (request, reply) => {
     if (pending) await prisma.pendingRegistration.delete({ where: { id: pending.id } });
     return reply.code(400).send({ error: 'Link de ativação inválido ou expirado. Cadastre-se novamente.' });
   }
+  const invitation = pending.invitationId
+    ? await prisma.workspaceInvitation.findUnique({ where: { id: pending.invitationId } })
+    : null;
+  if (pending.invitationId && (!invitation || invitation.acceptedAt || invitation.expiresAt <= new Date() || invitation.email !== pending.email)) {
+    await prisma.pendingRegistration.delete({ where: { id: pending.id } });
+    return reply.code(400).send({ error: 'O convite expirou ou já foi utilizado. Solicite um novo convite.' });
+  }
   if (await prisma.user.findUnique({ where: { email: pending.email }, select: { id: true } })) {
     await prisma.pendingRegistration.delete({ where: { id: pending.id } });
     return reply.code(409).send({ error: 'Este e-mail já possui uma conta.' });
@@ -603,18 +633,14 @@ app.post('/api/auth/verify-email', async (request, reply) => {
         emailVerifiedAt: new Date()
       }
     });
-    const workspace = pending.workspaceId
-      ? await tx.workspace.findUniqueOrThrow({ where: { id: pending.workspaceId } })
-      : await tx.workspace.create({ data: { name: pending.workspaceName ?? 'Meu ambiente' } });
-    const invitation = pending.invitationId
-      ? await tx.workspaceInvitation.findUniqueOrThrow({ where: { id: pending.invitationId } })
-      : null;
-    await tx.workspaceMember.create({
-      data: { workspaceId: workspace.id, userId: createdUser.id, role: invitation?.role ?? 'owner' }
-    });
+    if (invitation) {
+      await tx.workspaceMember.create({
+        data: { workspaceId: invitation.workspaceId, userId: createdUser.id, role: invitation.role }
+      });
+    }
     const updatedUser = await tx.user.update({
       where: { id: createdUser.id },
-      data: { activeWorkspaceId: workspace.id },
+      data: { activeWorkspaceId: null },
       select: { id: true, email: true, displayName: true }
     });
     if (invitation) await tx.workspaceInvitation.update({ where: { id: invitation.id }, data: { acceptedAt: new Date() } });
@@ -630,13 +656,12 @@ app.post('/api/auth/login', { config: { rateLimit: { max: 5, timeWindow: '15 min
 
   const email = parsed.data.email.toLowerCase();
   const user = await prisma.user.findUnique({ where: { email } });
+  if (user?.passwordResetRequired) return reply.code(403).send({ error: 'Sua senha foi removida. Use Esqueci a senha para criar uma nova antes de entrar.' });
   const passwordMatches = await argon2.verify(user?.passwordHash ?? dummyPasswordHash, parsed.data.password);
   if (!user || !passwordMatches) return reply.code(401).send({ error: 'Email ou senha incorretos.' });
   const isBootstrapAdmin = Boolean(bootstrapAdminEmail && user.email.toLowerCase() === bootstrapAdminEmail);
   if (!user.emailVerifiedAt && !user.isPlatformAdmin && !isBootstrapAdmin) return reply.code(403).send({ error: 'Confirme seu e-mail antes de entrar.' });
   const userContext = await getUserContext(user.id);
-  if (!userContext?.activeWorkspaceId) return reply.code(403).send({ error: 'Sua conta ainda não pertence a um ambiente.' });
-
   const rawToken = randomBytes(32).toString('base64url');
   const csrfToken = createCsrfToken(rawToken);
   await prisma.session.create({
@@ -672,7 +697,8 @@ app.get('/api/workspaces', async (request, reply) => {
     workspaces: auth.user.workspaces,
     activeWorkspaceId: auth.user.activeWorkspaceId,
     isPlatformAdmin: auth.user.isPlatformAdmin,
-    isBootstrapAdmin: auth.user.isBootstrapAdmin
+    isBootstrapAdmin: auth.user.isBootstrapAdmin,
+    showWorkspaceSetupWhenEmpty: env.SHOW_WORKSPACE_SETUP_WHEN_EMPTY === 'true'
   };
 });
 
@@ -799,7 +825,6 @@ app.post('/api/workspaces/active', async (request, reply) => {
 app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/members', async (request, reply) => {
   const auth = await requireSession(request, reply);
   if (!auth) return;
-  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   const role = getWorkspaceRole(auth.user, request.params.workspaceId);
   if (!canManageWorkspace(role)) return reply.code(403).send({ error: 'Sem permissão para gerenciar este ambiente.' });
   const members = await prisma.workspaceMember.findMany({
@@ -817,10 +842,88 @@ app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/membe
   };
 });
 
+app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/notification-preferences', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: request.params.workspaceId, userId: auth.user.id } },
+    select: { notifyAllDevices: true }
+  });
+  if (!membership) return reply.code(403).send({ error: 'Você não pertence a este ambiente.' });
+
+  const [devices, preferences] = await Promise.all([
+    prisma.device.findMany({ where: { workspaceId: request.params.workspaceId }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    prisma.deviceNotificationPreference.findMany({
+      where: { workspaceId: request.params.workspaceId, userId: auth.user.id },
+      select: { deviceId: true, emailEnabled: true, whatsappEnabled: true }
+    })
+  ]);
+  const preferenceByDevice = new Map(preferences.map((preference) => [preference.deviceId, preference]));
+  return {
+    notifyAllDevices: membership.notifyAllDevices,
+    devices: devices.map((device) => ({
+      ...device,
+      emailEnabled: preferenceByDevice.get(device.id)?.emailEnabled ?? false,
+      whatsappEnabled: preferenceByDevice.get(device.id)?.whatsappEnabled ?? false
+    }))
+  };
+});
+
+app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/notification-preferences', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: request.params.workspaceId, userId: auth.user.id } },
+    select: { userId: true }
+  });
+  if (!membership) return reply.code(403).send({ error: 'Você não pertence a este ambiente.' });
+  const parsed = workspaceNotificationPreferencesSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Preferências de notificação inválidas.' });
+
+  const deviceIds = [...new Set(parsed.data.devices.map(({ deviceId }) => deviceId))];
+  const validDevices = deviceIds.length
+    ? await prisma.device.findMany({ where: { workspaceId: request.params.workspaceId, id: { in: deviceIds } }, select: { id: true } })
+    : [];
+  if (validDevices.length !== deviceIds.length) return reply.code(400).send({ error: 'Um ou mais aparelhos não pertencem a este ambiente.' });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.workspaceMember.update({
+      where: { workspaceId_userId: { workspaceId: request.params.workspaceId, userId: auth.user.id } },
+      data: { notifyAllDevices: parsed.data.notifyAllDevices }
+    });
+    if (deviceIds.length) {
+      await tx.deviceNotificationPreference.deleteMany({
+        where: { workspaceId: request.params.workspaceId, userId: auth.user.id, deviceId: { notIn: deviceIds } }
+      });
+    } else {
+      await tx.deviceNotificationPreference.deleteMany({ where: { workspaceId: request.params.workspaceId, userId: auth.user.id } });
+    }
+    for (const preference of parsed.data.devices) {
+      await tx.deviceNotificationPreference.upsert({
+        where: {
+          workspaceId_userId_deviceId: {
+            workspaceId: request.params.workspaceId,
+            userId: auth.user.id,
+            deviceId: preference.deviceId
+          }
+        },
+        update: { emailEnabled: preference.emailEnabled, whatsappEnabled: preference.whatsappEnabled },
+        create: {
+          workspaceId: request.params.workspaceId,
+          userId: auth.user.id,
+          deviceId: preference.deviceId,
+          emailEnabled: preference.emailEnabled,
+          whatsappEnabled: preference.whatsappEnabled
+        }
+      });
+    }
+  });
+  return { ok: true };
+});
+
 app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/invitations', async (request, reply) => {
   const auth = await requireSession(request, reply);
   if (!auth) return;
-  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   if (!canManageWorkspace(getWorkspaceRole(auth.user, request.params.workspaceId))) {
     return reply.code(403).send({ error: 'Sem permissão para gerenciar este ambiente.' });
   }
@@ -835,7 +938,6 @@ app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/invit
 app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/invitations', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
-  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   if (!canManageWorkspace(getWorkspaceRole(auth.user, request.params.workspaceId))) {
     return reply.code(403).send({ error: 'Sem permissão para convidar pessoas para este ambiente.' });
   }
@@ -871,10 +973,13 @@ app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/invi
     select: { id: true, email: true, role: true, expiresAt: true }
   });
   try {
+    const invitationUrl = buildDashboardUrl({ invitationToken: rawToken });
     await sendEmailMessage('Convite de ambiente', {
       to: email,
       subject: `Convite para ${workspace.name} - LAB/MONITOR`,
-      text: `Você foi convidado para o ambiente ${workspace.name}. Aceite o convite em até 7 dias:\n\n${buildDashboardUrl({ invitationToken: rawToken })}`
+      text: `Você foi convidado para o ambiente ${workspace.name}. Aceite o convite em até 7 dias:\n\n${invitationUrl}`,
+      htmlText: `Você foi convidado para o ambiente ${workspace.name}. Aceite o convite em até 7 dias usando o botão abaixo.`,
+      action: { label: 'Aceitar convite', url: invitationUrl }
     });
   } catch (error) {
     await prisma.workspaceInvitation.delete({ where: { id: invitation.id } });
@@ -914,7 +1019,6 @@ app.post('/api/workspaces/invitations/accept', async (request, reply) => {
 app.patch<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/members', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
-  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   const callerRole = getWorkspaceRole(auth.user, request.params.workspaceId);
   if (!canManageWorkspace(callerRole)) return reply.code(403).send({ error: 'Sem permissão para alterar membros.' });
   const parsed = updateWorkspaceMemberSchema.safeParse(request.body);
@@ -938,13 +1042,16 @@ app.patch<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/mem
 app.delete<{ Params: { workspaceId: string; userId: string } }>('/api/workspaces/:workspaceId/members/:userId', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
-  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   const callerRole = getWorkspaceRole(auth.user, request.params.workspaceId);
   if (!canManageWorkspace(callerRole)) return reply.code(403).send({ error: 'Sem permissão para remover membros.' });
   const target = await prisma.workspaceMember.findUnique({
-    where: { workspaceId_userId: { workspaceId: request.params.workspaceId, userId: request.params.userId } }
+    where: { workspaceId_userId: { workspaceId: request.params.workspaceId, userId: request.params.userId } },
+    include: { user: { select: { email: true, isPlatformAdmin: true } } }
   });
   if (!target) return reply.code(404).send({ error: 'Usuário não encontrado neste ambiente.' });
+  if (target.user.isPlatformAdmin || Boolean(bootstrapAdminEmail && target.user.email.toLowerCase() === bootstrapAdminEmail)) {
+    return reply.code(403).send({ error: 'A conta administradora da plataforma não pode ser removida deste ambiente.' });
+  }
   if (target.role === 'owner') {
     const owners = await prisma.workspaceMember.count({ where: { workspaceId: request.params.workspaceId, role: 'owner' } });
     if (owners <= 1) return reply.code(409).send({ error: 'O ambiente precisa manter pelo menos um dono.' });
@@ -958,6 +1065,160 @@ app.delete<{ Params: { workspaceId: string; userId: string } }>('/api/workspaces
     await prisma.user.update({ where: { id: auth.user.id }, data: { activeWorkspaceId: nextMembership?.workspaceId ?? null } });
   }
   return { ok: true };
+});
+
+app.delete<{ Params: { userId: string } }>('/api/admin/users/:userId', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!auth.user.isPlatformAdmin && !canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Apenas o administrador da plataforma pode excluir contas.' });
+  if (request.params.userId === auth.user.id) return reply.code(400).send({ error: 'Não é possível excluir a própria conta por esta ação.' });
+
+  const target = await prisma.user.findUnique({
+    where: { id: request.params.userId },
+    select: { id: true, email: true, isPlatformAdmin: true }
+  });
+  if (!target) return reply.code(404).send({ error: 'Usuário não encontrado.' });
+  if (target.isPlatformAdmin || Boolean(bootstrapAdminEmail && target.email.toLowerCase() === bootstrapAdminEmail)) {
+    return reply.code(403).send({ error: 'Contas administradoras da plataforma não podem ser excluídas por esta ação.' });
+  }
+
+  const deleted = await prisma.$transaction(async (tx) => {
+    const ownedWorkspaces = await tx.workspaceMember.findMany({
+      where: { userId: target.id, role: 'owner' },
+      select: { workspaceId: true }
+    });
+    const linkedDevices = await tx.deviceLink.findMany({ where: { userId: target.id }, select: { deviceId: true } });
+    const ownedDevices = await tx.device.findMany({ where: { ownerUserId: target.id }, select: { id: true } });
+    const targetDeviceIds = [...new Set([...linkedDevices.map(({ deviceId }) => deviceId), ...ownedDevices.map(({ id }) => id)])];
+    let deletedDeviceCount = 0;
+    if (targetDeviceIds.length) {
+      const result = await tx.device.deleteMany({ where: { id: { in: targetDeviceIds } } });
+      deletedDeviceCount += result.count;
+    }
+
+    const workspacesToDelete: string[] = [];
+    for (const { workspaceId } of ownedWorkspaces) {
+      const remainingMembers = await tx.workspaceMember.findMany({
+        where: { workspaceId, userId: { not: target.id } },
+        orderBy: { createdAt: 'asc' },
+        select: { userId: true, role: true }
+      });
+      if (remainingMembers.some(({ role }) => role === 'owner')) continue;
+      const successor = remainingMembers.find(({ role }) => role === 'admin') ?? remainingMembers[0];
+      if (successor) {
+        await tx.workspaceMember.update({
+          where: { workspaceId_userId: { workspaceId, userId: successor.userId } },
+          data: { role: 'owner' }
+        });
+      } else {
+        workspacesToDelete.push(workspaceId);
+      }
+    }
+
+    if (workspacesToDelete.length) {
+      const result = await tx.device.deleteMany({ where: { workspaceId: { in: workspacesToDelete } } });
+      deletedDeviceCount += result.count;
+      await tx.workspace.deleteMany({ where: { id: { in: workspacesToDelete } } });
+    }
+
+    await tx.pendingRegistration.deleteMany({ where: { email: target.email } });
+    await tx.user.delete({ where: { id: target.id } });
+    return { devices: deletedDeviceCount, workspaces: workspacesToDelete.length };
+  });
+
+  app.log.warn({ userId: target.id, deletedDevices: deleted.devices, deletedWorkspaces: deleted.workspaces }, 'Conta excluida permanentemente');
+  return { ok: true, deletedDevices: deleted.devices, deletedWorkspaces: deleted.workspaces };
+});
+
+app.get('/api/admin/users', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!auth.user.isPlatformAdmin && !canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Apenas o administrador da plataforma pode listar contas.' });
+  const users = await prisma.user.findMany({
+    select: {
+      id: true,
+      email: true,
+      displayName: true,
+      isPlatformAdmin: true,
+      emailVerifiedAt: true,
+      passwordResetRequired: true,
+      createdAt: true,
+      memberships: { select: { role: true, workspace: { select: { id: true, name: true } } } }
+    },
+    orderBy: [{ createdAt: 'asc' }, { email: 'asc' }]
+  });
+  return { users: users.map((listedUser) => ({
+    ...listedUser,
+    isPlatformAdmin: listedUser.isPlatformAdmin || Boolean(bootstrapAdminEmail && listedUser.email.toLowerCase() === bootstrapAdminEmail),
+    workspaces: listedUser.memberships.map(({ role, workspace }) => ({ ...workspace, role }))
+  })) };
+});
+
+app.patch<{ Params: { userId: string } }>('/api/admin/users/:userId', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!auth.user.isPlatformAdmin && !canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Apenas o administrador da plataforma pode editar contas.' });
+  if (request.params.userId === auth.user.id) return reply.code(400).send({ error: 'Edite sua própria conta nas configurações do perfil.' });
+
+  const parsed = z.object({
+    displayName: z.string().trim().min(1).max(80),
+    email: z.string().trim().email().max(254)
+  }).strict().safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Informe um nome e um e-mail válidos.' });
+
+  const target = await prisma.user.findUnique({
+    where: { id: request.params.userId },
+    select: { id: true, email: true, isPlatformAdmin: true }
+  });
+  if (!target) return reply.code(404).send({ error: 'Usuário não encontrado.' });
+  if (target.isPlatformAdmin || Boolean(bootstrapAdminEmail && target.email.toLowerCase() === bootstrapAdminEmail)) {
+    return reply.code(403).send({ error: 'Contas administradoras da plataforma não podem ser editadas por esta ação.' });
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const emailChanged = email !== target.email.toLowerCase();
+  const emailInUse = await prisma.user.findFirst({ where: { email, id: { not: target.id } }, select: { id: true } });
+  if (emailInUse) return reply.code(409).send({ error: 'Este e-mail já está sendo usado por outra conta.' });
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: target.id },
+      data: { displayName: parsed.data.displayName, email }
+    }),
+    ...(emailChanged ? [
+      prisma.session.deleteMany({ where: { userId: target.id } }),
+      prisma.passwordResetToken.deleteMany({ where: { userId: target.id } })
+    ] : [])
+  ]);
+  return { ok: true, emailChanged };
+});
+
+app.post<{ Params: { userId: string } }>('/api/admin/users/:userId/require-password-reset', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!auth.user.isPlatformAdmin && !canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Apenas o administrador da plataforma pode exigir redefinição de senha.' });
+  if (!emailIsConfigured()) return reply.code(503).send({ error: 'Configure o SMTP antes de exigir a redefinição de senha.' });
+  if (request.params.userId === auth.user.id) return reply.code(400).send({ error: 'Não é possível exigir redefinição da própria senha por esta ação.' });
+  const target = await prisma.user.findUnique({
+    where: { id: request.params.userId },
+    select: { id: true, isPlatformAdmin: true, email: true }
+  });
+  if (!target) return reply.code(404).send({ error: 'Usuário não encontrado.' });
+  if (target.isPlatformAdmin || Boolean(bootstrapAdminEmail && target.email.toLowerCase() === bootstrapAdminEmail)) {
+    return reply.code(403).send({ error: 'Não é possível exigir redefinição da conta administradora da plataforma.' });
+  }
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: target.id },
+      data: {
+        passwordHash: await argon2.hash(randomBytes(32).toString('base64url'), { type: argon2.argon2id }),
+        passwordResetRequired: true
+      }
+    }),
+    prisma.session.deleteMany({ where: { userId: target.id } }),
+    prisma.passwordResetToken.deleteMany({ where: { userId: target.id } })
+  ]);
+  return { ok: true, message: 'Senha removida. O usuário deverá criar uma nova senha usando Esqueci a senha antes de entrar novamente.' };
 });
 
 app.post('/api/auth/forgot-password', { config: { rateLimit: { max: 3, timeWindow: '15 minutes' } } }, async (request, reply) => {
@@ -978,7 +1239,9 @@ app.post('/api/auth/forgot-password', { config: { rateLimit: { max: 3, timeWindo
       await sendEmailMessage('Recuperação de senha', {
         to: user.email,
         subject: 'Redefinicao de senha - LAB/MONITOR',
-        text: `Recebemos um pedido para redefinir a senha da sua conta. Acesse este link em ate 30 minutos:\n\n${resetUrl.href}\n\nSe voce nao solicitou a redefinicao, ignore esta mensagem.`
+        text: `Recebemos um pedido para redefinir a senha da sua conta. Acesse este link em ate 30 minutos:\n\n${resetUrl.href}\n\nSe voce nao solicitou a redefinicao, ignore esta mensagem.`,
+        htmlText: 'Recebemos um pedido para redefinir a senha da sua conta. O link é válido por até 30 minutos. Se você não solicitou a redefinição, ignore esta mensagem.',
+        action: { label: 'Redefinir senha', url: resetUrl.href }
       });
     } catch (error) {
       await prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
@@ -1004,7 +1267,7 @@ app.post('/api/auth/reset-password', { config: { rateLimit: { max: 5, timeWindow
   await prisma.$transaction([
     prisma.user.update({
       where: { id: resetToken.userId },
-      data: { passwordHash: await argon2.hash(parsed.data.password, { type: argon2.argon2id }) }
+      data: { passwordHash: await argon2.hash(parsed.data.password, { type: argon2.argon2id }), passwordResetRequired: false }
     }),
     prisma.passwordResetToken.deleteMany({ where: { userId: resetToken.userId } }),
     prisma.session.deleteMany({ where: { userId: resetToken.userId } })
@@ -1152,17 +1415,41 @@ app.get('/api/devices', async (request, reply) => {
   const auth = await requireSession(request, reply);
   if (!auth) return;
   if (!auth.user.activeWorkspaceId) return reply.code(409).send({ error: 'Selecione ou crie um ambiente.' });
+  const activeWorkspaceRole = getWorkspaceRole(auth.user, auth.user.activeWorkspaceId);
   const devices = await prisma.device.findMany({
     where: { workspaceId: auth.user.activeWorkspaceId },
     orderBy: [{ status: 'asc' }, { name: 'asc' }],
-    include: { readings: { orderBy: { recordedAt: 'desc' }, take: 15 } }
+    include: {
+      readings: { orderBy: { recordedAt: 'desc' }, take: 15 },
+      deviceLink: { select: { userId: true } }
+    }
   });
   return {
-    devices: devices.map(({ ownerUserId, ...device }) => ({
+    devices: devices.map(({ ownerUserId, deviceLink, ...device }) => ({
       ...device,
-      canSimulate: device.externalId === simulatedDeviceExternalId && ownerUserId === auth.user.id
+      canSimulate: device.externalId === simulatedDeviceExternalId && ownerUserId === auth.user.id,
+      canEditAlias: ownerUserId === auth.user.id || deviceLink?.userId === auth.user.id || canManageWorkspace(activeWorkspaceRole)
     }))
   };
+});
+
+app.patch<{ Params: { id: string } }>('/api/devices/:id/alias', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!auth.user.activeWorkspaceId) return reply.code(409).send({ error: 'Selecione ou crie um ambiente.' });
+  const parsed = updateDeviceAliasSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'O apelido deve ter no máximo 80 caracteres.' });
+  const device = await prisma.device.findUnique({
+    where: { id: request.params.id, workspaceId: auth.user.activeWorkspaceId },
+    include: { deviceLink: { select: { userId: true } } }
+  });
+  if (!device) return reply.code(404).send({ error: 'Aparelho não encontrado neste ambiente.' });
+  const role = getWorkspaceRole(auth.user, auth.user.activeWorkspaceId);
+  if (device.ownerUserId !== auth.user.id && device.deviceLink?.userId !== auth.user.id && !canManageWorkspace(role)) {
+    return reply.code(403).send({ error: 'Sem permissão para alterar o apelido deste aparelho.' });
+  }
+  const updated = await prisma.device.update({ where: { id: device.id }, data: { alias: parsed.data.alias } });
+  return { device: { id: updated.id, alias: updated.alias } };
 });
 
 app.get('/api/account/devices', async (request, reply) => {
@@ -1330,6 +1617,7 @@ app.post('/api/ingest/devices', async (request, reply) => {
         type: reading.type,
         value: reading.value,
         unit: reading.unit,
+        alert: reading.alert,
         recordedAt: reading.recordedAt ? new Date(reading.recordedAt) : new Date()
       }))
     });

@@ -17,6 +17,8 @@ import {
   simulateDemoDeviceSchema,
   tokenSchema,
   updateWorkspaceMemberSchema,
+  updateDeviceAliasSchema,
+  workspaceNotificationPreferencesSchema,
   updateWorkspaceSchema,
   updateProfileSchema,
   whatsappNotificationSettingsSchema,
@@ -31,6 +33,15 @@ test('aceita um aparelho com leituras validas', () => {
     readings: [{ type: 'temperatura', value: 22.5, unit: 'C', recordedAt: '2026-09-26T12:30:00.000Z' }]
   });
   assert.equal(result.success, true);
+  if (result.success) assert.equal(result.data.readings[0].alert, false);
+  const sensorAlert = ingestionSchema.safeParse({
+    externalId: 'sensor-01',
+    name: 'Sensor 01',
+    status: 'warning',
+    readings: [{ type: 'temperatura', value: 36, unit: 'C', alert: true }]
+  });
+  assert.equal(sensorAlert.success, true);
+  if (sensorAlert.success) assert.equal(sensorAlert.data.readings[0].alert, true);
 });
 
 test('rejeita valores nao finitos e campos desconhecidos', () => {
@@ -46,7 +57,7 @@ test('valida cadastro público, convite e ativação por e-mail', () => {
   const registration = { email: 'nova@example.com', displayName: 'Nova Pessoa', password: 'senha-segura-123' };
   assert.equal(registrationSchema.safeParse({ ...registration, workspaceName: 'Meu laboratório' }).success, true);
   assert.equal(registrationSchema.safeParse({ ...registration, invitationToken: 'i'.repeat(32) }).success, true);
-  assert.equal(registrationSchema.safeParse(registration).success, false);
+  assert.equal(registrationSchema.safeParse(registration).success, true);
   assert.equal(registrationSchema.safeParse({ ...registration, password: 'curta', workspaceName: 'Lab' }).success, false);
   assert.equal(tokenSchema.safeParse({ token: 'v'.repeat(32) }).success, true);
 });
@@ -65,6 +76,24 @@ test('valida ambientes, convites e politica de cadastro', () => {
   assert.equal(inviteWorkspaceMemberSchema.safeParse({ email: 'membro@example.com' }).success, true);
   assert.equal(updateWorkspaceMemberSchema.safeParse({ userId: 'usr_1', role: 'admin' }).success, true);
   assert.equal(registrationSettingSchema.safeParse({ enabled: false }).success, true);
+});
+
+test('valida notificacoes gerais e canais por aparelho no ambiente', () => {
+  assert.equal(workspaceNotificationPreferencesSchema.safeParse({ notifyAllDevices: true, devices: [] }).success, true);
+  assert.equal(workspaceNotificationPreferencesSchema.safeParse({
+    notifyAllDevices: false,
+    devices: [{ deviceId: 'device-1', emailEnabled: true, whatsappEnabled: false }]
+  }).success, true);
+  assert.equal(workspaceNotificationPreferencesSchema.safeParse({
+    notifyAllDevices: false,
+    devices: [{ deviceId: '', emailEnabled: true, whatsappEnabled: false }]
+  }).success, false);
+});
+
+test('valida apelido opcional do aparelho', () => {
+  assert.equal(updateDeviceAliasSchema.safeParse({ alias: 'Sensor Sala 2' }).success, true);
+  assert.equal(updateDeviceAliasSchema.safeParse({ alias: '' }).success, true);
+  assert.equal(updateDeviceAliasSchema.safeParse({ alias: 'x'.repeat(81) }).success, false);
 });
 
 test('valida nome e modelos de mensagem do WhatsApp', () => {

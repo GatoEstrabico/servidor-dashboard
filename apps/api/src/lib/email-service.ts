@@ -105,7 +105,7 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => replacements[character] ?? character);
 }
 
-function formatEmailHtml(message: string, senderName: string): string {
+function formatEmailHtml(message: string, senderName: string, action?: { label: string; url: string }): string {
   const codeSegments: string[] = [];
   let formatted = escapeHtml(message).replace(/```([\s\S]*?)```|`([^`\n]+)`/g, (_match, block: string | undefined, inline: string | undefined) => {
     const segment = block !== undefined
@@ -124,7 +124,10 @@ function formatEmailHtml(message: string, senderName: string): string {
     .replace(/^(\d+)\. ([^\n]+)/gm, '$1. $2')
     .replace(/\r?\n/g, '<br>');
   formatted = formatted.replace(/EMAILCODESEGMENT(\d+)TOKEN/g, (_token, index: string) => codeSegments[Number(index)] ?? '');
-  return `<!doctype html><html lang="pt-BR"><body style="margin:0;padding:24px;background:#f1f4f0;font-family:Arial,Helvetica,sans-serif;color:#26352d"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;margin:0 auto;border:1px solid #dfe7df;background:#ffffff"><tr><td style="padding:18px 22px;background:#173d30;color:#ffffff"><div style="font-size:15px;font-weight:700">${escapeHtml(senderName)}</div><div style="margin-top:5px;color:#c4d9cb;font-size:10px;letter-spacing:1px">MONITORAMENTO AMBIENTAL</div></td></tr><tr><td style="padding:22px;font-size:14px;line-height:1.65">${formatted}</td></tr><tr><td style="padding:12px 22px;border-top:1px solid #e8ede8;color:#77837b;font-size:10px">Notificação automática do sistema de monitoramento.</td></tr></table></body></html>`;
+  const actionHtml = action
+    ? `<div style="margin:20px 0"><a href="${escapeHtml(action.url)}" style="display:inline-block;padding:12px 18px;border-radius:4px;background:#1e6f51;color:#ffffff;font-weight:700;text-decoration:none">${escapeHtml(action.label)}</a></div><p style="font-size:11px;color:#68766e">Se o botão não funcionar, use o endereço abaixo:<br><a href="${escapeHtml(action.url)}" style="display:inline-block;max-width:100%;overflow-wrap:anywhere;word-break:break-all">${escapeHtml(action.url)}</a></p>`
+    : '';
+  return `<!doctype html><html lang="pt-BR"><body style="margin:0;padding:24px;background:#f1f4f0;font-family:Arial,Helvetica,sans-serif;color:#26352d"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;margin:0 auto;border:1px solid #dfe7df;background:#ffffff"><tr><td style="padding:18px 22px;background:#173d30;color:#ffffff"><div style="font-size:15px;font-weight:700">${escapeHtml(senderName)}</div><div style="margin-top:5px;color:#c4d9cb;font-size:10px;letter-spacing:1px">MONITORAMENTO AMBIENTAL</div></td></tr><tr><td style="padding:22px;font-size:14px;line-height:1.65">${formatted}${actionHtml}</td></tr><tr><td style="padding:12px 22px;border-top:1px solid #e8ede8;color:#77837b;font-size:10px">Notificação automática do sistema de monitoramento.</td></tr></table></body></html>`;
 }
 
 function getPublicSettings(): PublicEmailNotificationSettings {
@@ -212,7 +215,13 @@ export async function verifyEmailConnection(): Promise<void> {
   }
 }
 
-export async function sendEmailMessage(event: string, message: { to: string; subject: string; text: string }): Promise<void> {
+export async function sendEmailMessage(event: string, message: {
+  to: string;
+  subject: string;
+  text: string;
+  htmlText?: string;
+  action?: { label: string; url: string };
+}): Promise<void> {
   if (!transporter) throw new Error('Configure o envio de e-mail no menu E-mail API.');
   try {
     await transporter.sendMail({
@@ -220,7 +229,7 @@ export async function sendEmailMessage(event: string, message: { to: string; sub
       to: message.to,
       subject: message.subject,
       text: message.text,
-      html: formatEmailHtml(message.text, settings.senderName)
+      html: formatEmailHtml(message.htmlText ?? message.text, settings.senderName, message.action)
     });
     addLog('success', event, `Enviado para ${maskEmail(message.to)}.`);
   } catch (error) {

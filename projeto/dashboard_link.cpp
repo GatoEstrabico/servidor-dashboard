@@ -223,6 +223,7 @@ void dashboardLinkEnviar(const DadosSistema& dados, const String& configuredName
   const char* types[] = {"temperatura", "umidade", "gas_adc"};
   const float values[] = {dados.temperatura, dados.umidade, static_cast<float>(dados.gas_adc)};
   const char* units[] = {"C", "%", "ADC"};
+  const bool alerts[] = {dados.alerta_temperatura, dados.alerta_umidade, dados.alerta_gas};
   char recordedAt[25] = {};
   if (dados.timestamp > 1735689600) {
     struct tm utcTime;
@@ -233,6 +234,7 @@ void dashboardLinkEnviar(const DadosSistema& dados, const String& configuredName
     reading["type"] = types[index];
     reading["value"] = values[index];
     reading["unit"] = units[index];
+    reading["alert"] = alerts[index];
     if (recordedAt[0] != '\0') reading["recordedAt"] = recordedAt;
   }
 

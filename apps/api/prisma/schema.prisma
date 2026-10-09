@@ -16,6 +16,7 @@ model User {
   emailNotifications    Boolean       @default(true)
   whatsappNotifications Boolean       @default(false)
   isPlatformAdmin Boolean             @default(false)
+  passwordResetRequired Boolean        @default(false)
   activeWorkspaceId String?
   passwordHash   String
   createdAt      DateTime             @default(now())
@@ -58,6 +59,7 @@ model Device {
   id         String    @id @default(cuid())
   externalId String    @unique
   name       String
+  alias      String?
   location   String?
   status     String    @default("online")
   lastSeenAt DateTime  @default(now())
@@ -69,6 +71,7 @@ model Device {
   owner       User?     @relation("DeviceOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   readings   Reading[]
   deviceLink DeviceLink?
+  notificationPreferences DeviceNotificationPreference[]
 
   @@index([workspaceId, status, lastSeenAt])
   @@index([ownerUserId])
@@ -92,6 +95,7 @@ model Reading {
   type       String
   value      Float
   unit       String
+  alert      Boolean  @default(false)
   recordedAt DateTime
   createdAt  DateTime @default(now())
   device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
@@ -115,12 +119,27 @@ model WorkspaceMember {
   workspaceId String
   userId      String
   role        String   @default("member")
+  notifyAllDevices Boolean @default(true)
   createdAt   DateTime @default(now())
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceNotificationPreferences DeviceNotificationPreference[]
 
   @@id([workspaceId, userId])
   @@index([userId])
+}
+
+model DeviceNotificationPreference {
+  workspaceId String
+  userId      String
+  deviceId    String
+  emailEnabled Boolean @default(false)
+  whatsappEnabled Boolean @default(false)
+  workspaceMember WorkspaceMember @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId, deviceId])
+  @@index([deviceId])
 }
 
 model WorkspaceInvitation {

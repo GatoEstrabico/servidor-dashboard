@@ -59,6 +59,8 @@ button:disabled { cursor: wait; opacity: .7; }
 .text-button, .back-link { border: 0; padding: 0; color: #317456; background: transparent; font-size: 12px; font-weight: 600; text-align: left; }
 .text-button:hover, .back-link:hover { color: #1d543d; text-decoration: underline; }
 .forgot-link { display: block; margin: 12px 0 0 auto; }
+.login-form .secondary-button.login-button { height: 46px; font-size: 13px; }
+.login-form .login-button + .login-button { margin-top: 12px; }
 .back-link { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 28px; }
 .back-link svg { transform: rotate(90deg); }
 .success-message { margin: 12px 0; padding: 10px 12px; border: 1px solid #cde5d4; border-radius: 4px; color: #276b48; background: #eff8f1; font-size: 12px; line-height: 1.5; }
@@ -71,12 +73,22 @@ button:disabled { cursor: wait; opacity: .7; }
 .sidebar .brand-mark { width: 31px; height: 31px; }
 .workspace-label, .nav-label { margin: 39px 8px 10px; color: #708d80; font-family: 'DM Mono', monospace; font-size: 9px; }
 .workspace-switch { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 9px 7px; border: 1px solid rgba(226, 241, 231, .1); border-radius: 5px; background: rgba(238, 248, 239, .035); }
-.workspace-avatar { display: grid; width: 29px; height: 29px; flex: 0 0 29px; place-items: center; border-radius: 4px; color: #d3f0d9; background: #38624f; font-family: Manrope, sans-serif; font-size: 12px; font-weight: 700; }
+.workspace-avatar { display: grid; width: 29px; height: 29px; flex: 0 0 29px; place-items: center; overflow: hidden; border-radius: 4px; color: #d3f0d9; background: #38624f; font-family: Manrope, sans-serif; font-size: 12px; font-weight: 700; }
+.workspace-avatar img, .workspace-option-avatar img, .workspace-icon-preview img { width: 100%; height: 100%; object-fit: cover; }
 .workspace-name { min-width: 0; flex: 1; overflow: hidden; color: #edf2ed; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-name small, .account-info small { display: block; margin-top: 4px; color: #8aa196; font-size: 10px; }
 .workspace-switch > svg { color: #90a79b; }
+.workspace-dropdown { display: grid; gap: 9px; margin-top: 10px; padding: 8px; border: 1px solid rgba(212, 232, 219, .12); border-radius: 6px; background: rgba(16, 41, 38, .96); box-shadow: 0 12px 28px rgba(5, 14, 12, .24); }
+.workspace-list { display: grid; gap: 5px; }
+.workspace-option { display: flex; width: 100%; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border: 1px solid transparent; border-radius: 5px; color: #edf4ee; background: transparent; font-size: 11px; text-align: left; }
+.workspace-option-main { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-option-avatar { display: grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center; overflow: hidden; border-radius: 4px; color: #d3f0d9; background: #38624f; font-size: 10px; font-weight: 700; }
+.workspace-option small { color: #8ca598; font-size: 9px; }
+.workspace-option.active { border-color: rgba(157, 203, 166, .24); background: rgba(110, 180, 138, .12); box-shadow: inset 2px 0 #7ad0a0; }
+.workspace-manage-button { display: flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding: 7px 9px; border: 1px solid rgba(162, 214, 177, .25); border-radius: 5px; color: #e2f2e7; background: rgba(127, 182, 148, .08); font-size: 10px; cursor: pointer; }
+.workspace-manage-button:hover { background: rgba(127, 182, 148, .16); }
 .nav-label { margin-top: 32px; }
-.nav-link { display: flex; height: 38px; align-items: center; gap: 10px; padding: 0 9px; border-radius: 4px; color: #a8bbb0; font-size: 12px; text-decoration: none; }
+.nav-link { display: flex; width: 100%; height: 38px; align-items: center; gap: 10px; padding: 0 9px; border: 0; border-radius: 4px; color: #a8bbb0; background: transparent; font-size: 12px; text-align: left; text-decoration: none; cursor: pointer; }
 .nav-link.active { color: #e3f0e8; background: rgba(92, 166, 124, .16); box-shadow: inset 2px 0 #6fc294; }
 .nav-link.active svg { color: #8ed3a9; }
 .nav-count { min-width: 22px; margin-left: auto; padding: 3px 6px; border-radius: 9px; color: #b5d8c1; background: rgba(120, 186, 144, .15); text-align: center; font-family: 'DM Mono', monospace; font-size: 9px; }
@@ -222,6 +234,54 @@ button:disabled { cursor: wait; opacity: .7; }
 
 .settings-overlay { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(14, 28, 23, .52); backdrop-filter: blur(5px); }
 .settings-dialog { display: grid; width: min(100%, 540px); max-height: min(90vh, 880px); gap: 18px; overflow: auto; padding: 22px; border: 1px solid #e2e8e1; border-radius: 7px; color: #25312b; background: #fff; box-shadow: 0 24px 80px rgba(10, 27, 18, .24); }
+.workspace-manager-overlay { z-index: 25; }
+.workspace-selector-overlay { z-index: 24; }
+.workspace-manager-dialog { width: min(100%, 480px); gap: 16px; }
+.workspace-selector-dialog { width: min(100%, 420px); gap: 14px; }
+.workspace-selector-list { gap: 6px; }
+.workspace-selector-option { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 9px; border: 1px solid #e6ebe5; border-radius: 5px; color: #34423a; background: #fff; text-align: left; cursor: pointer; }
+.workspace-selector-option.active { border-color: #9ac8a5; background: #f2f8f2; }
+.workspace-selector-option > svg { margin-left: auto; color: #38815b; }
+.workspace-selector-name { display: grid; min-width: 0; gap: 3px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-selector-name small { color: #818d85; font-size: 9px; }
+.workspace-selector-manage { width: 100%; min-height: 39px; border-color: #d9e5da; color: #365342; background: #f7faf6; font-size: 11px; }
+.workspace-manager-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); overflow: visible; }
+.workspace-manager-tabs .settings-tab { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 4px; padding-right: 3px; padding-left: 3px; font-size: 9px; }
+.workspace-manager-pane { gap: 11px; }
+.workspace-devices-title { margin: 0; color: #34423a; font-family: Manrope, sans-serif; font-size: 15px; }
+.workspace-device-list { display: grid; max-height: 330px; gap: 8px; overflow: auto; padding-right: 2px; }
+.workspace-device-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e5e9e3; border-radius: 5px; background: #fff; }
+.workspace-device-summary { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.workspace-device-summary > div { display: grid; min-width: 0; gap: 4px; }
+.workspace-device-summary strong { overflow: hidden; color: #34423a; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-device-summary small { overflow: hidden; color: #818d85; font-family: 'DM Mono', monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-device-icon { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border-radius: 4px; color: #377652; background: #edf5ef; }
+.workspace-device-assignment { display: grid; min-width: 0; gap: 4px; }
+.workspace-device-assignment span { color: #818d85; font-size: 9px; }
+.workspace-device-assignment strong { overflow: hidden; color: #34423a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-device-action { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; padding: 0 8px; font-size: 9px; white-space: nowrap; }
+.workspace-device-action:disabled { opacity: .65; cursor: default; }
+.workspace-device-empty { padding: 20px 12px; border: 1px dashed #dce4dc; border-radius: 5px; color: #77837c; font-size: 11px; text-align: center; }
+.workspace-device-note { margin: 0; color: #818d85; font-size: 10px; line-height: 1.5; }
+.workspace-icon-editor { display: flex; min-width: 0; align-items: center; gap: 11px; padding: 12px; border: 1px solid #e6ebe5; border-radius: 5px; background: #f8faf7; }
+.workspace-icon-preview { display: grid; width: 46px; height: 46px; flex: 0 0 46px; place-items: center; overflow: hidden; border-radius: 5px; color: #d3f0d9; background: #38624f; font-size: 17px; font-weight: 700; }
+.workspace-icon-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }
+.workspace-icon-copy strong, .workspace-share-card strong { color: #34423a; font-size: 11px; }
+.workspace-icon-copy small, .workspace-share-card small { color: #818d85; font-size: 10px; }
+.workspace-icon-upload { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 9px; white-space: nowrap; }
+.workspace-code-input { font-family: 'DM Mono', monospace; font-weight: 700; letter-spacing: 0; }
+.workspace-share-card { display: flex; align-items: center; gap: 11px; padding: 12px; border: 1px solid #e6ebe5; border-radius: 5px; background: #f8faf7; }
+.workspace-share-card > div { display: grid; gap: 4px; }
+.workspace-remove-panel { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #ead5d0; border-radius: 5px; background: #fff8f6; }
+.workspace-remove-panel > div { display: grid; min-width: 0; gap: 4px; }
+.workspace-remove-panel strong { color: #8f433a; font-size: 11px; }
+.workspace-remove-panel small { color: #876f6a; font-size: 10px; line-height: 1.45; }
+.danger-button { display: inline-flex; min-height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0 11px; border: 1px solid #d9aaa1; border-radius: 4px; color: #913d34; background: #fff; font-size: 10px; font-weight: 700; }
+.danger-button:hover { border-color: #bf766b; color: #7e2d26; background: #fff0ed; }
+.danger-button:disabled { opacity: .6; cursor: wait; }
+.workspace-share-code-field { display: flex; align-items: center; gap: 8px; }
+.workspace-share-code-field .settings-input { min-width: 0; flex: 1; }
+.workspace-share-code-field .secondary-button { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; padding: 0; }
 .settings-header { display: flex; align-items: flex-start; justify-content: space-between; }
 .settings-header .eyebrow { margin-bottom: 5px; }
 .settings-header h2 { margin: 0; font-family: Manrope, sans-serif; font-size: 22px; }
@@ -230,6 +290,18 @@ button:disabled { cursor: wait; opacity: .7; }
 .settings-tab:hover { color: #2d5946; background: #f4f7f2; }
 .settings-tab.active { border-bottom-color: #39845f; color: #2d5946; }
 .settings-pane { display: grid; min-width: 0; align-content: start; gap: 14px; }
+.workspace-admin-panel { display: grid; gap: 10px; padding: 12px; border: 1px solid #e6ebe5; border-radius: 5px; background: #f8faf7; }
+.user-management-panel { display: grid; gap: 18px; }
+.user-management-card { padding: 18px; border: 1px solid #e5e9e3; border-radius: 5px; background: #fff; }
+.invite-form { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: 10px; align-items: center; }
+.member-list { display: grid; gap: 10px; margin-top: 14px; }
+.member-row { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: 10px; align-items: center; padding: 12px 14px; border: 1px solid #e5e9e3; border-radius: 5px; background: #f9fbf9; }
+.member-row strong { display: block; color: #2b3732; font-size: 12px; }
+.member-row small { color: #7a8680; font-size: 10px; }
+.protected-member-role { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 6px; padding: 0 8px; border: 1px solid #d8e4da; border-radius: 4px; color: #42644c; background: #f2f7f2; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.member-row .text-button { justify-self: end; }
+.invitation-row { grid-template-columns: minmax(0, 1fr) auto; }
+.invitation-row span { color: #77847d; font-size: 10px; }
 .language-setting { display: grid; gap: 12px; padding: 12px; border: 1px solid #e6ebe5; border-radius: 5px; background: #f8faf7; }
 .language-options { display: flex; gap: 8px; flex-wrap: wrap; }
 .language-option { display: inline-flex; min-height: 35px; align-items: center; gap: 8px; padding: 0 11px; border: 1px solid #dfe5df; border-radius: 4px; color: #53615a; background: #fff; cursor: pointer; font-size: 11px; font-weight: 600; }
@@ -281,6 +353,20 @@ button:disabled { cursor: wait; opacity: .7; }
   .mobile-brand .brand-mark { color: #397955; border-color: #dce9dc; background: #f0f6ef; }
   .login-footer { position: static; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; margin: 26px 0 0; font-size: 8px; line-height: 1.4; }
   .sidebar { display: none; }
+  .user-management-panel { gap: 12px; }
+  .user-management-card { gap: 14px; padding: 12px; }
+  .invite-form { grid-template-columns: minmax(0, 1fr); }
+  .member-list { gap: 8px; }
+  .member-row, .invitation-row { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px; }
+  .member-row .settings-input { width: 100%; }
+  .member-row .text-button { justify-self: start; }
+  .protected-member-role { justify-self: start; max-width: 100%; white-space: normal; }
+  .workspace-manager-dialog, .workspace-selector-dialog { max-height: calc(100vh - 32px); padding: 18px; }
+  .workspace-remove-panel { align-items: stretch; flex-direction: column; }
+  .danger-button { width: 100%; }
+  .workspace-manager-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workspace-device-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .workspace-device-action { width: 100%; font-size: 10px; }
   .main-area { margin-left: 0; }
   .topbar { height: 53px; padding: 0 13px; }
   .breadcrumb { font-size: 10px; }
@@ -336,7 +422,7 @@ button:disabled { cursor: wait; opacity: .7; }
     bottom: 0;
     left: 0;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     padding: 7px 8px max(8px, env(safe-area-inset-bottom));
     border-top: 1px solid #e5eae4;
     background: rgba(255, 255, 255, .97);
@@ -444,6 +530,29 @@ button:disabled { cursor: wait; opacity: .7; }
 :root.dark-mode .status-badge.offline { border-color: #4b3b37; color: #d2a098; background: #302523; }
 :root.dark-mode .empty-state strong { color: #d6e1d9; }
 :root.dark-mode .settings-dialog { border-color: #3a463f; color: #e3eae5; background: #1a231f; }
+:root.dark-mode .user-management-card { border-color: #303b35; color: #e3eae5; background: #1a231f; }
+:root.dark-mode .member-row { border-color: #354139; background: #202a25; }
+:root.dark-mode .member-row strong { color: #e3eae5; }
+:root.dark-mode .member-row small, :root.dark-mode .invitation-row span { color: #a0aea5; }
+:root.dark-mode .protected-member-role { border-color: #405749; color: #b6d9bf; background: #222d27; }
+:root.dark-mode .workspace-admin-panel { border-color: #354139; background: #1a231f; }
+:root.dark-mode .workspace-admin-panel .settings-section-heading h3 { color: #d6e1d9; }
+:root.dark-mode .workspace-selector-option { border-color: #39463e; color: #e3eae5; background: #202a25; }
+:root.dark-mode .workspace-selector-option.active, :root.dark-mode .workspace-icon-editor, :root.dark-mode .workspace-share-card { border-color: #405749; background: #222d27; }
+:root.dark-mode .workspace-selector-name small, :root.dark-mode .workspace-icon-copy small, :root.dark-mode .workspace-share-card small { color: #a0aea5; }
+:root.dark-mode .workspace-icon-copy strong, :root.dark-mode .workspace-share-card strong { color: #e3eae5; }
+:root.dark-mode .workspace-remove-panel { border-color: #5a3b36; background: #2b211f; }
+:root.dark-mode .workspace-remove-panel strong { color: #e6aaa0; }
+:root.dark-mode .workspace-remove-panel small { color: #c6a49e; }
+:root.dark-mode .danger-button { border-color: #79504a; color: #edb2a7; background: #302321; }
+:root.dark-mode .danger-button:hover { border-color: #a7685e; color: #ffd1c8; background: #3a2724; }
+:root.dark-mode .workspace-devices-title { color: #e3eae5; }
+:root.dark-mode .workspace-selector-manage { border-color: #405749; color: #c4dfcc; background: #222d27; }
+:root.dark-mode .workspace-device-row { border-color: #354139; background: #202a25; }
+:root.dark-mode .workspace-device-summary strong, :root.dark-mode .workspace-device-assignment strong { color: #e3eae5; }
+:root.dark-mode .workspace-device-summary small, :root.dark-mode .workspace-device-assignment span, :root.dark-mode .workspace-device-note { color: #a0aea5; }
+:root.dark-mode .workspace-device-icon { color: #a5d6b4; background: #26372d; }
+:root.dark-mode .workspace-device-empty { border-color: #39463e; color: #a0aea5; }
 :root.dark-mode .settings-tabs { border-color: #303b35; }
 :root.dark-mode .settings-tab { color: #a0aea5; }
 :root.dark-mode .settings-tab:hover { color: #d6e1d9; background: #222d27; }

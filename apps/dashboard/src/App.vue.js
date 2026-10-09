@@ -1,5 +1,5 @@
-import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { Activity, AlertTriangle, ArrowDownToLine, Bell, Check, ChevronDown, CircleAlert, CircleCheck, CircleMinus, Clock3, Cpu, Flame, LayoutDashboard, LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, RefreshCw, Search, ShieldCheck, Signal, Sun, Thermometer, Waves, X } from 'lucide-vue-next';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { Activity, AlertTriangle, ArrowDownToLine, Bell, Building2, Check, ChevronDown, CircleAlert, CircleCheck, CircleMinus, Clock3, Copy, Cpu, Flame, ImagePlus, LayoutDashboard, LockKeyhole, LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, Pencil, Plus, RefreshCw, Search, Settings, Share2, ShieldCheck, Signal, Sun, Thermometer, UsersRound, Waves, X } from 'lucide-vue-next';
 const user = ref(null);
 const devices = ref([]);
 const notifications = ref([]);
@@ -7,12 +7,43 @@ const notificationOpen = ref(false);
 const csrfToken = ref('');
 const email = ref('');
 const password = ref('');
+const registerName = ref('');
+const registerEmail = ref('');
+const registerPassword = ref('');
+const registerWorkspaceName = ref('');
+const registerMessage = ref('');
+const registerError = ref('');
+const inviteEmail = ref('');
+const inviteRole = ref('member');
+const inviteError = ref('');
+const inviteMessage = ref('');
 const search = ref('');
 const loginError = ref('');
 const pageError = ref('');
 const loading = ref(true);
 const submitting = ref(false);
 const loginMode = ref('login');
+const workspaceName = ref('');
+const workspaceIconDataUrl = ref(null);
+const workspaceIconError = ref('');
+const workspaceSaving = ref(false);
+const importWorkspaceCode = ref('');
+const workspaceShareMessage = ref('');
+const workspaces = ref([]);
+const accountLinkedDevices = ref([]);
+const accountDevicesLoading = ref(false);
+const accountDevicesError = ref('');
+const accountDevicesMessage = ref('');
+const workspaceDeviceTargetId = ref(null);
+const activeWorkspaceId = ref(null);
+const activeWorkspace = computed(() => workspaces.value.find((workspace) => workspace.id === activeWorkspaceId.value) ?? null);
+const activeWorkspaceCode = computed(() => activeWorkspace.value?.accessCode ?? '');
+const canManageActiveWorkspace = computed(() => ['owner', 'admin'].includes(activeWorkspace.value?.role ?? ''));
+const workspaceMembers = ref([]);
+const workspaceInvitations = ref([]);
+const registrationEnabled = ref(false);
+const usePlatformAdminControls = computed(() => Boolean(user.value?.isPlatformAdmin));
+const managementTab = ref('overview');
 const forgotEmail = ref('');
 const forgotMessage = ref('');
 const forgotError = ref('');
@@ -23,6 +54,10 @@ const resetError = ref('');
 const resetToken = ref('');
 const settingsOpen = ref(false);
 const settingsTab = ref('preferences');
+const workspaceMenuOpen = ref(false);
+const mobileWorkspaceSelectorOpen = ref(false);
+const workspaceDialogOpen = ref(false);
+const workspaceDialogAction = ref('create');
 const language = ref('pt-BR');
 const darkMode = ref(false);
 const currentPassword = ref('');
@@ -199,10 +234,99 @@ const englishText = {
     'Nao foi possivel encerrar a sessao. Tente novamente.': 'Could not end the session. Try again.',
     'Perfil atualizado.': 'Profile updated.',
     'Preferências de notificações salvas.': 'Notification preferences saved.',
-    'Informe sua senha atual para salvar.': 'Enter your current password to save.'
+    'Informe sua senha atual para salvar.': 'Enter your current password to save.',
+    'AMBIENTES': 'WORKSPACES',
+    'Ambientes': 'Workspaces',
+    'Ações de ambiente': 'Workspace actions',
+    'Fechar seleção de ambientes': 'Close workspace selection',
+    'Fechar gerenciamento de ambientes': 'Close workspace management',
+    'Selecionar ambiente': 'Select workspace',
+    'Adicionar/editar ambiente': 'Add/edit workspace',
+    'Criar': 'Create',
+    'Editar': 'Edit',
+    'Importar': 'Import',
+    'Compartilhar': 'Share',
+    'Nome do ambiente': 'Workspace name',
+    'Ex.: Laboratório Central': 'E.g. Central Laboratory',
+    'Ícone do ambiente': 'Workspace icon',
+    'Imagem JPG, PNG ou WebP, até 8 MB': 'JPG, PNG, or WebP image, up to 8 MB',
+    'Escolher imagem': 'Choose image',
+    'Escolha uma imagem JPG, PNG ou WebP de até 8 MB.': 'Choose a JPG, PNG, or WebP image up to 8 MB.',
+    'Não foi possível processar essa imagem.': 'Could not process this image.',
+    'Criar ambiente': 'Create workspace',
+    'Salvar alterações': 'Save changes',
+    'Você pode ver e compartilhar este ambiente, mas apenas um owner ou admin pode editar seu nome e ícone.': 'You can view and share this workspace, but only an owner or admin can edit its name and icon.',
+    'Insira o código compartilhado para adicionar o ambiente à sua lista.': 'Enter the shared code to add this workspace to your list.',
+    'Código do ambiente': 'Workspace code',
+    'Importar ambiente': 'Import workspace',
+    'Selecione ou crie um ambiente antes de compartilhar.': 'Select or create a workspace before sharing.',
+    'Código de acesso para compartilhar': 'Access code to share',
+    'Copiar código do ambiente': 'Copy workspace code',
+    'Envie este código para outro usuário importar o ambiente e acompanhar os mesmos aparelhos.': 'Send this code to another user so they can import the workspace and monitor the same devices.',
+    'Código do ambiente copiado.': 'Workspace code copied.',
+    'Não foi possível copiar automaticamente. Copie manualmente: ': 'Could not copy automatically. Copy manually: ',
+    'Selecionar ambiente de destino': 'Select destination workspace',
+    'Ambiente atual': 'Current workspace',
+    'Sem ambiente': 'No workspace',
+    'Adicionar a este ambiente': 'Add to this workspace',
+    'Mover para este ambiente': 'Move to this workspace',
+    'Este aparelho já está neste ambiente': 'This device is already in this workspace',
+    'Mover este aparelho? Ele deixará de aparecer no ambiente atual.': 'Move this device? It will no longer appear in its current workspace.',
+    'Aparelho adicionado ao ambiente.': 'Device added to workspace.',
+    'Aparelho movido para o ambiente.': 'Device moved to workspace.',
+    'Nenhum aparelho de monitoramento vinculado à sua conta.': 'No monitoring devices are linked to your account.',
+    'Falha ao carregar aparelhos vinculados.': 'Failed to load linked devices.',
+    'Não foi possível adicionar o aparelho ao ambiente.': 'Could not add the device to the workspace.',
+    'Você não pertence a esse ambiente.': 'You do not belong to this workspace.',
+    'Aparelho inválido.': 'Invalid device.',
+    'Aparelho não vinculado à sua conta.': 'This device is not linked to your account.',
+    'Você não tem permissão para mover este aparelho.': 'You do not have permission to move this device.',
+    'Gerenciamento de aparelhos': 'Device management',
+    'Aparelhos de monitoramento vinculados à sua conta': 'Monitoring devices linked to your account',
+    'Sem permissão para mover este aparelho.': 'You do not have permission to move this device.',
+    'Escolha o ambiente de destino para adicionar ou mover seus aparelhos vinculados.': 'Choose a destination workspace to add or move your linked devices.',
+    'Carregando aparelhos...': 'Loading devices...',
+    'O aparelho será associado ao ambiente selecionado acima.': 'The device will be assigned to the workspace selected above.',
+    'Cadastro público': 'Public registration',
+    'Permitir criação de contas': 'Allow account creation',
+    'Habilitado na tela de login': 'Enabled on the sign-in screen',
+    'Desabilitado': 'Disabled',
+    'Convite enviado por e-mail.': 'Invitation sent by email.',
+    'Informe um e-mail válido.': 'Enter a valid email address.',
+    'Sem permissão para convidar pessoas para este ambiente.': 'You do not have permission to invite people to this workspace.',
+    'Sem permissão para gerenciar este ambiente.': 'You do not have permission to manage this workspace.',
+    'Nao foi possivel carregar os ambientes.': 'Could not load workspaces.',
+    'Nao foi possivel criar o ambiente.': 'Could not create the workspace.',
+    'Nao foi possivel atualizar o ambiente.': 'Could not update the workspace.',
+    'Nao foi possivel importar o ambiente.': 'Could not import the workspace.',
+    'Nao foi possivel trocar de ambiente.': 'Could not switch workspaces.',
+    'Excluir ambiente': 'Delete workspace',
+    'Remover da minha lista': 'Remove from my list',
+    'Excluir este ambiente para todos? Esta ação não pode ser desfeita.': 'Delete this workspace for everyone? This action cannot be undone.',
+    'Remover este ambiente apenas da sua lista? Você poderá entrar novamente pelo código compartilhado.': 'Remove this workspace from your list only? You can rejoin with the shared code.',
+    'Isso excluirá o ambiente e o removerá para todos os membros.': 'This deletes the workspace for all members.',
+    'Isso remove sua participação, mas mantém o ambiente para os outros membros.': 'This removes your membership but keeps the workspace for other members.',
+    'Usuários': 'Users',
+    'Voltar': 'Back',
+    'Gerencie membros, papéis e convites do ambiente ativo.': 'Manage members, roles, and invitations for the active workspace.',
+    'Convidar usuário': 'Invite user',
+    'Convidar': 'Invite',
+    'Membro': 'Member',
+    'Administrador': 'Administrator',
+    'Proprietário': 'Owner',
+    'Administrador da plataforma': 'Platform administrator',
+    'O papel deste administrador da plataforma não pode ser alterado.': 'This platform administrator role cannot be changed.',
+    'O papel da conta administradora da plataforma não pode ser alterado.': 'The platform administrator account role cannot be changed.',
+    'Convites pendentes': 'Pending invitations',
+    'Remover': 'Remove',
+    'usuario@empresa.com': 'user@company.com'
 };
 function t(text) {
     return language.value === 'en' ? englishText[text] ?? text : text;
+}
+function workspaceRoleLabel(role) {
+    const labels = { owner: 'Proprietário', admin: 'Administrador', member: 'Membro' };
+    return t(labels[role] ?? role);
 }
 const dateLocale = computed(() => language.value === 'en' ? 'en-GB' : 'pt-BR');
 const reportDate = computed(() => new Intl.DateTimeFormat(dateLocale.value, {
@@ -313,16 +437,348 @@ function handleNotificationKeydown(event) {
     if (event.key === 'Escape')
         notificationOpen.value = false;
 }
+async function loadWorkspaces() {
+    if (!user.value) {
+        workspaces.value = [];
+        activeWorkspaceId.value = null;
+        workspaceMembers.value = [];
+        workspaceInvitations.value = [];
+        return;
+    }
+    try {
+        const result = await api('/api/workspaces');
+        workspaces.value = result.workspaces;
+        activeWorkspaceId.value = result.activeWorkspaceId;
+        user.value = { ...user.value, activeWorkspaceId: result.activeWorkspaceId, workspaces: result.workspaces, isPlatformAdmin: result.isPlatformAdmin };
+        if (result.activeWorkspaceId) {
+            await loadWorkspaceMembers();
+        }
+        else {
+            workspaceMembers.value = [];
+            workspaceInvitations.value = [];
+        }
+    }
+    catch (error) {
+        pageError.value = error instanceof Error ? error.message : 'Nao foi possivel carregar os ambientes.';
+    }
+}
+async function loadWorkspaceMembers() {
+    if (!user.value || !activeWorkspaceId.value) {
+        workspaceMembers.value = [];
+        workspaceInvitations.value = [];
+        return;
+    }
+    try {
+        const [membersResult, invitationsResult] = await Promise.all([
+            api('/api/workspaces/' + activeWorkspaceId.value + '/members'),
+            api('/api/workspaces/' + activeWorkspaceId.value + '/invitations')
+        ]);
+        workspaceMembers.value = membersResult.members;
+        workspaceInvitations.value = invitationsResult.invitations;
+    }
+    catch {
+        workspaceMembers.value = [];
+        workspaceInvitations.value = [];
+    }
+}
+async function loadAccountDevices() {
+    accountDevicesLoading.value = true;
+    accountDevicesError.value = '';
+    try {
+        const result = await api('/api/account/devices');
+        accountLinkedDevices.value = result.devices;
+    }
+    catch (error) {
+        accountDevicesError.value = error instanceof Error ? t(error.message) : t('Falha ao carregar aparelhos vinculados.');
+    }
+    finally {
+        accountDevicesLoading.value = false;
+    }
+}
+async function assignAccountDevice(device) {
+    const targetWorkspaceId = workspaceDeviceTargetId.value;
+    if (!targetWorkspaceId || device.workspaceId === targetWorkspaceId)
+        return;
+    if (device.workspaceId && !window.confirm(t('Mover este aparelho? Ele deixará de aparecer no ambiente atual.')))
+        return;
+    accountDevicesError.value = '';
+    accountDevicesMessage.value = '';
+    try {
+        await api('/api/workspaces/' + targetWorkspaceId + '/devices', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify({ deviceId: device.id })
+        });
+        accountDevicesMessage.value = t(device.workspaceId ? 'Aparelho movido para o ambiente.' : 'Aparelho adicionado ao ambiente.');
+        await loadAccountDevices();
+        await loadDevices();
+    }
+    catch (error) {
+        accountDevicesError.value = error instanceof Error ? t(error.message) : t('Não foi possível adicionar o aparelho ao ambiente.');
+    }
+}
+async function createWorkspace() {
+    if (!workspaceName.value.trim())
+        return;
+    workspaceSaving.value = true;
+    try {
+        const result = await api('/api/workspaces', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify({ name: workspaceName.value.trim(), iconDataUrl: workspaceIconDataUrl.value })
+        });
+        activeWorkspaceId.value = result.activeWorkspaceId;
+        workspaceName.value = '';
+        workspaceIconDataUrl.value = null;
+        workspaceDialogOpen.value = false;
+        await loadWorkspaces();
+    }
+    catch (error) {
+        pageError.value = error instanceof Error ? error.message : 'Nao foi possivel criar o ambiente.';
+    }
+    finally {
+        workspaceSaving.value = false;
+    }
+}
+function openWorkspaceManager(action = 'create') {
+    workspaceDialogAction.value = action;
+    workspaceName.value = action === 'edit' ? activeWorkspace.value?.name ?? '' : '';
+    workspaceIconDataUrl.value = action === 'edit' ? activeWorkspace.value?.iconDataUrl ?? null : null;
+    workspaceIconError.value = '';
+    workspaceShareMessage.value = '';
+    accountDevicesError.value = '';
+    accountDevicesMessage.value = '';
+    if (action === 'devices') {
+        workspaceDeviceTargetId.value = activeWorkspaceId.value;
+        void loadAccountDevices();
+    }
+    workspaceDialogOpen.value = true;
+}
+async function updateWorkspace() {
+    if (!activeWorkspaceId.value || !workspaceName.value.trim() || !canManageActiveWorkspace.value)
+        return;
+    workspaceSaving.value = true;
+    try {
+        await api('/api/workspaces/' + activeWorkspaceId.value, {
+            method: 'PATCH',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify({ name: workspaceName.value.trim(), iconDataUrl: workspaceIconDataUrl.value })
+        });
+        await loadWorkspaces();
+        workspaceDialogOpen.value = false;
+    }
+    catch (error) {
+        pageError.value = error instanceof Error ? error.message : 'Nao foi possivel atualizar o ambiente.';
+    }
+    finally {
+        workspaceSaving.value = false;
+    }
+}
+async function removeActiveWorkspace() {
+    const workspace = activeWorkspace.value;
+    if (!workspace || !activeWorkspaceId.value)
+        return;
+    const isOwner = workspace.role === 'owner';
+    const confirmation = isOwner
+        ? t('Excluir este ambiente para todos? Esta ação não pode ser desfeita.')
+        : t('Remover este ambiente apenas da sua lista? Você poderá entrar novamente pelo código compartilhado.');
+    if (!window.confirm(confirmation))
+        return;
+    workspaceSaving.value = true;
+    pageError.value = '';
+    try {
+        await api('/api/workspaces/' + activeWorkspaceId.value, {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken.value }
+        });
+        workspaceDialogOpen.value = false;
+        managementTab.value = 'overview';
+        await loadWorkspaces();
+        if (activeWorkspaceId.value) {
+            await loadDevices();
+        }
+        else {
+            devices.value = [];
+            knownDeviceStatuses = undefined;
+        }
+    }
+    catch (error) {
+        pageError.value = error instanceof Error ? t(error.message) : t('Nao foi possivel remover o ambiente.');
+    }
+    finally {
+        workspaceSaving.value = false;
+    }
+}
+async function selectWorkspaceIcon(event) {
+    const input = event.target;
+    const file = input.files?.[0];
+    workspaceIconError.value = '';
+    if (!file)
+        return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024) {
+        workspaceIconError.value = 'Escolha uma imagem JPG, PNG ou WebP de até 8 MB.';
+        input.value = '';
+        return;
+    }
+    try {
+        const bitmap = await createImageBitmap(file);
+        const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const context = canvas.getContext('2d');
+        if (!context)
+            throw new Error('Canvas indisponível.');
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+        workspaceIconDataUrl.value = canvas.toDataURL('image/webp', 0.78);
+    }
+    catch {
+        workspaceIconError.value = 'Não foi possível processar essa imagem.';
+    }
+    finally {
+        input.value = '';
+    }
+}
+async function joinWorkspaceByCode() {
+    const code = importWorkspaceCode.value.trim();
+    if (!code)
+        return;
+    workspaceShareMessage.value = '';
+    try {
+        const result = await api('/api/workspaces/join', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify({ code })
+        });
+        importWorkspaceCode.value = '';
+        activeWorkspaceId.value = result.activeWorkspaceId;
+        workspaceMenuOpen.value = false;
+        await loadWorkspaces();
+        workspaceDialogOpen.value = false;
+    }
+    catch (error) {
+        pageError.value = error instanceof Error ? error.message : 'Nao foi possivel importar o ambiente.';
+    }
+}
+async function shareWorkspaceCode() {
+    const code = activeWorkspaceCode.value;
+    if (!code) {
+        pageError.value = 'Este ambiente ainda não possui um código de compartilhamento.';
+        return;
+    }
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(code);
+        }
+        else {
+            const fallback = document.createElement('textarea');
+            fallback.value = code;
+            fallback.setAttribute('readonly', 'true');
+            fallback.style.position = 'fixed';
+            fallback.style.opacity = '0';
+            document.body.appendChild(fallback);
+            fallback.select();
+            document.execCommand('copy');
+            document.body.removeChild(fallback);
+        }
+        workspaceShareMessage.value = t('Código do ambiente copiado.');
+        pageError.value = '';
+    }
+    catch {
+        workspaceShareMessage.value = t('Não foi possível copiar automaticamente. Copie manualmente: ') + code;
+    }
+}
+async function toggleRegistrationSetting() {
+    if (!user.value?.isPlatformAdmin)
+        return;
+    try {
+        const result = await api('/api/admin/registration-settings', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify({ enabled: !registrationEnabled.value })
+        });
+        registrationEnabled.value = result.enabled;
+    }
+    catch (error) {
+        pageError.value = error instanceof Error ? error.message : 'Nao foi possivel alterar a abertura de cadastro.';
+    }
+}
+async function changeWorkspace(workspaceId) {
+    try {
+        await api('/api/workspaces/active', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify({ workspaceId })
+        });
+        activeWorkspaceId.value = workspaceId;
+        if (user.value)
+            user.value.activeWorkspaceId = workspaceId;
+        managementTab.value = 'overview';
+        activeMobileTab.value = 'home';
+        await loadDevices();
+        await loadWorkspaceMembers();
+        await nextTick();
+        document.getElementById('inicio')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    catch (error) {
+        pageError.value = error instanceof Error ? error.message : 'Nao foi possivel trocar de ambiente.';
+    }
+}
+async function registerAccount() {
+    registerError.value = '';
+    registerMessage.value = '';
+    if (!registerName.value.trim() || !registerEmail.value.trim() || !registerPassword.value.trim()) {
+        registerError.value = 'Preencha nome, e-mail e senha.';
+        return;
+    }
+    submitting.value = true;
+    try {
+        const result = await api('/api/auth/register', {
+            method: 'POST',
+            body: JSON.stringify({
+                displayName: registerName.value.trim(),
+                email: registerEmail.value.trim(),
+                password: registerPassword.value,
+                workspaceName: registerWorkspaceName.value.trim() || undefined
+            })
+        });
+        registerMessage.value = result.message;
+        registerName.value = '';
+        registerEmail.value = '';
+        registerPassword.value = '';
+        registerWorkspaceName.value = '';
+        loginMode.value = 'login';
+    }
+    catch (error) {
+        registerError.value = error instanceof Error ? error.message : 'Nao foi possivel criar a conta.';
+    }
+    finally {
+        submitting.value = false;
+    }
+}
 async function checkSession() {
     try {
-        const result = await api('/api/auth/me');
-        user.value = result.user;
-        csrfToken.value = result.csrfToken;
+        const [meResult, settingsResult] = await Promise.all([
+            api('/api/auth/me'),
+            api('/api/auth/registration-settings')
+        ]);
+        user.value = meResult.user;
+        csrfToken.value = meResult.csrfToken;
+        registrationEnabled.value = settingsResult.enabled;
         syncProfileForm();
+        await loadWorkspaces();
         await loadDevices();
     }
     catch {
         user.value = null;
+        try {
+            const settingsResult = await api('/api/auth/registration-settings');
+            registrationEnabled.value = settingsResult.enabled;
+        }
+        catch {
+            registrationEnabled.value = false;
+        }
     }
     finally {
         loading.value = false;
@@ -339,6 +795,7 @@ async function login() {
         user.value = result.user;
         csrfToken.value = result.csrfToken;
         password.value = '';
+        await loadWorkspaces();
         await loadDevices();
     }
     catch (error) {
@@ -545,10 +1002,64 @@ function setLanguage(nextLanguage) {
     language.value = nextLanguage;
     localStorage.setItem('lab-monitor-language', nextLanguage);
 }
+async function inviteUser() {
+    if (!activeWorkspaceId.value || !inviteEmail.value.trim())
+        return;
+    inviteError.value = '';
+    inviteMessage.value = '';
+    try {
+        const result = await api('/api/workspaces/' + activeWorkspaceId.value + '/invitations', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify({ email: inviteEmail.value.trim(), role: inviteRole.value })
+        });
+        inviteMessage.value = result.message;
+        inviteEmail.value = '';
+        inviteRole.value = 'member';
+        await loadWorkspaceMembers();
+    }
+    catch (error) {
+        inviteError.value = error instanceof Error ? error.message : 'Nao foi possivel enviar o convite.';
+    }
+}
+async function updateMemberRole(memberId, newRole) {
+    if (!activeWorkspaceId.value)
+        return;
+    try {
+        await api('/api/workspaces/' + activeWorkspaceId.value + '/members', {
+            method: 'PATCH',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify({ userId: memberId, role: newRole })
+        });
+        await loadWorkspaceMembers();
+    }
+    catch (error) {
+        pageError.value = error instanceof Error ? error.message : 'Nao foi possivel atualizar o papel do usuário.';
+    }
+}
+async function removeMember(memberId) {
+    if (!activeWorkspaceId.value)
+        return;
+    try {
+        await api('/api/workspaces/' + activeWorkspaceId.value + '/members/' + memberId, {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken.value }
+        });
+        await loadWorkspaceMembers();
+    }
+    catch (error) {
+        pageError.value = error instanceof Error ? error.message : 'Nao foi possivel remover o usuário.';
+    }
+}
 async function logout() {
     try {
         await api('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken.value } });
         user.value = null;
+        workspaces.value = [];
+        activeWorkspaceId.value = null;
+        workspaceMembers.value = [];
+        workspaceInvitations.value = [];
+        registrationEnabled.value = false;
         devices.value = [];
         notifications.value = [];
         notificationOpen.value = false;
@@ -635,9 +1146,21 @@ function deviceStatusLabel(status) {
     return t('Offline');
 }
 function syncMobileTab() {
+    if (managementTab.value === 'users') {
+        activeMobileTab.value = 'users';
+        return;
+    }
     const devicesSection = document.getElementById('aparelhos');
     if (devicesSection)
         activeMobileTab.value = devicesSection.getBoundingClientRect().top <= window.innerHeight * 0.45 ? 'devices' : 'home';
+}
+async function navigateMobileSection(section) {
+    managementTab.value = 'overview';
+    activeMobileTab.value = section;
+    await nextTick();
+    const sectionId = section === 'devices' ? 'aparelhos' : 'inicio';
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.history.replaceState({}, '', `#${sectionId}`);
 }
 onMounted(() => {
     darkMode.value = localStorage.getItem('lab-monitor-dark-mode') === 'true';
@@ -824,6 +1347,24 @@ else if (!__VLS_ctx.user) {
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.submitting ? __VLS_ctx.t('Entrando...') : __VLS_ctx.t('Entrar'));
+        if (__VLS_ctx.registrationEnabled) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (...[$event]) => {
+                        if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!(!__VLS_ctx.user))
+                            return;
+                        if (!(__VLS_ctx.loginMode === 'login'))
+                            return;
+                        if (!(__VLS_ctx.registrationEnabled))
+                            return;
+                        __VLS_ctx.loginMode = 'register';
+                    } },
+                ...{ class: "secondary-button login-button" },
+                type: "button",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "secure-note" },
         });
@@ -839,7 +1380,7 @@ else if (!__VLS_ctx.user) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('Sessao protegida com criptografia'));
     }
-    else if (__VLS_ctx.loginMode === 'forgot') {
+    else if (__VLS_ctx.loginMode === 'register') {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
@@ -848,11 +1389,11 @@ else if (!__VLS_ctx.user) {
                         return;
                     if (!!(__VLS_ctx.loginMode === 'login'))
                         return;
-                    if (!(__VLS_ctx.loginMode === 'forgot'))
+                    if (!(__VLS_ctx.loginMode === 'register'))
                         return;
                     __VLS_ctx.loginMode = 'login';
-                    __VLS_ctx.forgotError = '';
-                    __VLS_ctx.forgotMessage = '';
+                    __VLS_ctx.registerError = '';
+                    __VLS_ctx.registerMessage = '';
                 } },
             ...{ class: "back-link" },
             type: "button",
@@ -866,6 +1407,127 @@ else if (!__VLS_ctx.user) {
         const __VLS_14 = __VLS_13({
             size: (16),
         }, ...__VLS_functionalComponentArgsRest(__VLS_13));
+        (__VLS_ctx.t('Voltar ao login'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "eyebrow" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h2, __VLS_intrinsicElements.h2)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "form-subtitle" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+            for: "registerName",
+        });
+        (__VLS_ctx.t('Nome'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+            id: "registerName",
+            value: (__VLS_ctx.registerName),
+            type: "text",
+            maxlength: "80",
+            autocomplete: "name",
+            placeholder: "Seu nome",
+            required: true,
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+            for: "registerEmail",
+        });
+        (__VLS_ctx.t('E-mail'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+            id: "registerEmail",
+            type: "email",
+            autocomplete: "email",
+            placeholder: "voce@laboratorio.com",
+            required: true,
+        });
+        (__VLS_ctx.registerEmail);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+            for: "registerPassword",
+        });
+        (__VLS_ctx.t('Senha'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+            id: "registerPassword",
+            type: "password",
+            minlength: "12",
+            autocomplete: "new-password",
+            placeholder: "Pelo menos 12 caracteres",
+            required: true,
+        });
+        (__VLS_ctx.registerPassword);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+            for: "registerWorkspaceName",
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+            id: "registerWorkspaceName",
+            value: (__VLS_ctx.registerWorkspaceName),
+            type: "text",
+            maxlength: "80",
+            placeholder: "Laboratório Central",
+        });
+        if (__VLS_ctx.registerError) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "error-message" },
+                role: "alert",
+            });
+            (__VLS_ctx.registerError);
+        }
+        if (__VLS_ctx.registerMessage) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "success-message" },
+                role: "status",
+            });
+            (__VLS_ctx.registerMessage);
+        }
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (__VLS_ctx.registerAccount) },
+            ...{ class: "primary-button login-button" },
+            type: "button",
+            disabled: (__VLS_ctx.submitting),
+        });
+        if (__VLS_ctx.submitting) {
+            const __VLS_16 = {}.LoaderCircle;
+            /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+            // @ts-ignore
+            const __VLS_17 = __VLS_asFunctionalComponent(__VLS_16, new __VLS_16({
+                ...{ class: "spin" },
+                size: (17),
+            }));
+            const __VLS_18 = __VLS_17({
+                ...{ class: "spin" },
+                size: (17),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_17));
+        }
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.submitting ? 'Criando conta...' : 'Criar conta');
+    }
+    else if (__VLS_ctx.loginMode === 'forgot') {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!(!__VLS_ctx.user))
+                        return;
+                    if (!!(__VLS_ctx.loginMode === 'login'))
+                        return;
+                    if (!!(__VLS_ctx.loginMode === 'register'))
+                        return;
+                    if (!(__VLS_ctx.loginMode === 'forgot'))
+                        return;
+                    __VLS_ctx.loginMode = 'login';
+                    __VLS_ctx.forgotError = '';
+                    __VLS_ctx.forgotMessage = '';
+                } },
+            ...{ class: "back-link" },
+            type: "button",
+        });
+        const __VLS_20 = {}.ChevronDown;
+        /** @type {[typeof __VLS_components.ChevronDown, ]} */ ;
+        // @ts-ignore
+        const __VLS_21 = __VLS_asFunctionalComponent(__VLS_20, new __VLS_20({
+            size: (16),
+        }));
+        const __VLS_22 = __VLS_21({
+            size: (16),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_21));
         (__VLS_ctx.t('Voltar ao login'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
             ...{ class: "eyebrow" },
@@ -910,17 +1572,17 @@ else if (!__VLS_ctx.user) {
             disabled: (__VLS_ctx.submitting),
         });
         if (__VLS_ctx.submitting) {
-            const __VLS_16 = {}.LoaderCircle;
+            const __VLS_24 = {}.LoaderCircle;
             /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_17 = __VLS_asFunctionalComponent(__VLS_16, new __VLS_16({
+            const __VLS_25 = __VLS_asFunctionalComponent(__VLS_24, new __VLS_24({
                 ...{ class: "spin" },
                 size: (17),
             }));
-            const __VLS_18 = __VLS_17({
+            const __VLS_26 = __VLS_25({
                 ...{ class: "spin" },
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_17));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_25));
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('Enviar link'));
@@ -983,17 +1645,17 @@ else if (!__VLS_ctx.user) {
             disabled: (__VLS_ctx.submitting || !!__VLS_ctx.resetMessage),
         });
         if (__VLS_ctx.submitting) {
-            const __VLS_20 = {}.LoaderCircle;
+            const __VLS_28 = {}.LoaderCircle;
             /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_21 = __VLS_asFunctionalComponent(__VLS_20, new __VLS_20({
+            const __VLS_29 = __VLS_asFunctionalComponent(__VLS_28, new __VLS_28({
                 ...{ class: "spin" },
                 size: (17),
             }));
-            const __VLS_22 = __VLS_21({
+            const __VLS_30 = __VLS_29({
                 ...{ class: "spin" },
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_21));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_29));
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('Salvar nova senha'));
@@ -1005,6 +1667,8 @@ else if (!__VLS_ctx.user) {
                         if (!(!__VLS_ctx.user))
                             return;
                         if (!!(__VLS_ctx.loginMode === 'login'))
+                            return;
+                        if (!!(__VLS_ctx.loginMode === 'register'))
                             return;
                         if (!!(__VLS_ctx.loginMode === 'forgot'))
                             return;
@@ -1037,15 +1701,15 @@ else {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
         ...{ class: "brand-mark" },
     });
-    const __VLS_24 = {}.Activity;
+    const __VLS_32 = {}.Activity;
     /** @type {[typeof __VLS_components.Activity, ]} */ ;
     // @ts-ignore
-    const __VLS_25 = __VLS_asFunctionalComponent(__VLS_24, new __VLS_24({
+    const __VLS_33 = __VLS_asFunctionalComponent(__VLS_32, new __VLS_32({
         size: (18),
     }));
-    const __VLS_26 = __VLS_25({
+    const __VLS_34 = __VLS_33({
         size: (18),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_25));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_33));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
         ...{ class: "brand-light" },
@@ -1055,50 +1719,172 @@ else {
     });
     (__VLS_ctx.t('AMBIENTE'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ onClick: (...[$event]) => {
+                if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(!__VLS_ctx.user))
+                    return;
+                __VLS_ctx.workspaceMenuOpen = !__VLS_ctx.workspaceMenuOpen;
+            } },
         ...{ class: "workspace-switch" },
+        ...{ style: {} },
     });
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
         ...{ class: "workspace-avatar" },
     });
+    if (__VLS_ctx.activeWorkspace?.iconDataUrl) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.img)({
+            src: (__VLS_ctx.activeWorkspace.iconDataUrl),
+            alt: (''),
+        });
+    }
+    else {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.activeWorkspace?.name.slice(0, 1).toUpperCase() || 'L');
+    }
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
         ...{ class: "workspace-name" },
     });
-    (__VLS_ctx.t('Laboratorio Central'));
+    (__VLS_ctx.activeWorkspace?.name || __VLS_ctx.t('Laboratorio Central'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
     (__VLS_ctx.t('Plano operacional'));
-    const __VLS_28 = {}.ChevronDown;
+    const __VLS_36 = {}.ChevronDown;
     /** @type {[typeof __VLS_components.ChevronDown, ]} */ ;
     // @ts-ignore
-    const __VLS_29 = __VLS_asFunctionalComponent(__VLS_28, new __VLS_28({
+    const __VLS_37 = __VLS_asFunctionalComponent(__VLS_36, new __VLS_36({
         size: (15),
     }));
-    const __VLS_30 = __VLS_29({
+    const __VLS_38 = __VLS_37({
         size: (15),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_29));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_37));
+    if (__VLS_ctx.workspaceMenuOpen) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "workspace-dropdown" },
+        });
+        if (__VLS_ctx.workspaces.length) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "workspace-list" },
+            });
+            for (const [workspace] of __VLS_getVForSourceType((__VLS_ctx.workspaces))) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (...[$event]) => {
+                            if (!!(__VLS_ctx.loading))
+                                return;
+                            if (!!(!__VLS_ctx.user))
+                                return;
+                            if (!(__VLS_ctx.workspaceMenuOpen))
+                                return;
+                            if (!(__VLS_ctx.workspaces.length))
+                                return;
+                            __VLS_ctx.workspaceMenuOpen = false;
+                            __VLS_ctx.changeWorkspace(workspace.id);
+                        } },
+                    key: (workspace.id),
+                    ...{ class: "workspace-option" },
+                    type: "button",
+                    ...{ class: ({ active: workspace.id === __VLS_ctx.activeWorkspaceId }) },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "workspace-option-main" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "workspace-option-avatar" },
+                });
+                if (workspace.iconDataUrl) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.img)({
+                        src: (workspace.iconDataUrl),
+                        alt: "",
+                    });
+                }
+                else {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    (workspace.name.slice(0, 1).toUpperCase());
+                }
+                (workspace.name);
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                (__VLS_ctx.workspaceRoleLabel(workspace.role));
+            }
+        }
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.workspaceMenuOpen))
+                        return;
+                    __VLS_ctx.workspaceMenuOpen = false;
+                    __VLS_ctx.openWorkspaceManager('create');
+                } },
+            ...{ class: "workspace-manage-button" },
+            type: "button",
+        });
+        const __VLS_40 = {}.Plus;
+        /** @type {[typeof __VLS_components.Plus, ]} */ ;
+        // @ts-ignore
+        const __VLS_41 = __VLS_asFunctionalComponent(__VLS_40, new __VLS_40({
+            size: (15),
+        }));
+        const __VLS_42 = __VLS_41({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_41));
+        (__VLS_ctx.t('Adicionar/editar ambiente'));
+    }
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
         ...{ class: "nav-label" },
     });
     (__VLS_ctx.t('GERENCIAMENTO'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({});
     __VLS_asFunctionalElement(__VLS_intrinsicElements.a, __VLS_intrinsicElements.a)({
-        ...{ class: "nav-link active" },
+        ...{ onClick: (...[$event]) => {
+                if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(!__VLS_ctx.user))
+                    return;
+                __VLS_ctx.managementTab = 'overview';
+            } },
+        ...{ class: "nav-link" },
+        ...{ class: ({ active: __VLS_ctx.managementTab === 'overview' }) },
         href: "#inicio",
     });
-    const __VLS_32 = {}.LayoutDashboard;
+    const __VLS_44 = {}.LayoutDashboard;
     /** @type {[typeof __VLS_components.LayoutDashboard, ]} */ ;
     // @ts-ignore
-    const __VLS_33 = __VLS_asFunctionalComponent(__VLS_32, new __VLS_32({
+    const __VLS_45 = __VLS_asFunctionalComponent(__VLS_44, new __VLS_44({
         size: (17),
     }));
-    const __VLS_34 = __VLS_33({
+    const __VLS_46 = __VLS_45({
         size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_33));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_45));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Visao geral'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
         ...{ class: "nav-count" },
     });
     (__VLS_ctx.devices.length);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+        ...{ onClick: (...[$event]) => {
+                if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(!__VLS_ctx.user))
+                    return;
+                __VLS_ctx.managementTab = 'users';
+            } },
+        ...{ class: "nav-link" },
+        ...{ class: ({ active: __VLS_ctx.managementTab === 'users' }) },
+        type: "button",
+    });
+    const __VLS_48 = {}.Settings;
+    /** @type {[typeof __VLS_components.Settings, ]} */ ;
+    // @ts-ignore
+    const __VLS_49 = __VLS_asFunctionalComponent(__VLS_48, new __VLS_48({
+        size: (17),
+    }));
+    const __VLS_50 = __VLS_49({
+        size: (17),
+    }, ...__VLS_functionalComponentArgsRest(__VLS_49));
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    (__VLS_ctx.t('Usuários'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
         ...{ class: "sidebar-bottom" },
     });
@@ -1143,15 +1929,15 @@ else {
         title: (__VLS_ctx.t('Sair')),
         'aria-label': (__VLS_ctx.t('Sair')),
     });
-    const __VLS_36 = {}.LogOut;
+    const __VLS_52 = {}.LogOut;
     /** @type {[typeof __VLS_components.LogOut, ]} */ ;
     // @ts-ignore
-    const __VLS_37 = __VLS_asFunctionalComponent(__VLS_36, new __VLS_36({
+    const __VLS_53 = __VLS_asFunctionalComponent(__VLS_52, new __VLS_52({
         size: (17),
     }));
-    const __VLS_38 = __VLS_37({
+    const __VLS_54 = __VLS_53({
         size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_37));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_53));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
         ...{ class: "main-area" },
     });
@@ -1245,15 +2031,15 @@ else {
         'aria-expanded': (__VLS_ctx.notificationOpen),
         'aria-haspopup': "dialog",
     });
-    const __VLS_40 = {}.Bell;
+    const __VLS_56 = {}.Bell;
     /** @type {[typeof __VLS_components.Bell, ]} */ ;
     // @ts-ignore
-    const __VLS_41 = __VLS_asFunctionalComponent(__VLS_40, new __VLS_40({
+    const __VLS_57 = __VLS_asFunctionalComponent(__VLS_56, new __VLS_56({
         size: (18),
     }));
-    const __VLS_42 = __VLS_41({
+    const __VLS_58 = __VLS_57({
         size: (18),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_41));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_57));
     if (__VLS_ctx.unreadNotificationCount) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "notification-count" },
@@ -1312,26 +2098,26 @@ else {
                     ...{ class: "notification-icon" },
                 });
                 if (notification.status === 'online') {
-                    const __VLS_44 = {}.CircleCheck;
+                    const __VLS_60 = {}.CircleCheck;
                     /** @type {[typeof __VLS_components.CircleCheck, ]} */ ;
                     // @ts-ignore
-                    const __VLS_45 = __VLS_asFunctionalComponent(__VLS_44, new __VLS_44({
+                    const __VLS_61 = __VLS_asFunctionalComponent(__VLS_60, new __VLS_60({
                         size: (17),
                     }));
-                    const __VLS_46 = __VLS_45({
+                    const __VLS_62 = __VLS_61({
                         size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_45));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_61));
                 }
                 else {
-                    const __VLS_48 = {}.AlertTriangle;
+                    const __VLS_64 = {}.AlertTriangle;
                     /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
                     // @ts-ignore
-                    const __VLS_49 = __VLS_asFunctionalComponent(__VLS_48, new __VLS_48({
+                    const __VLS_65 = __VLS_asFunctionalComponent(__VLS_64, new __VLS_64({
                         size: (17),
                     }));
-                    const __VLS_50 = __VLS_49({
+                    const __VLS_66 = __VLS_65({
                         size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_49));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_65));
                 }
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "notification-copy" },
@@ -1356,15 +2142,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "notification-empty" },
             });
-            const __VLS_52 = {}.Bell;
+            const __VLS_68 = {}.Bell;
             /** @type {[typeof __VLS_components.Bell, ]} */ ;
             // @ts-ignore
-            const __VLS_53 = __VLS_asFunctionalComponent(__VLS_52, new __VLS_52({
+            const __VLS_69 = __VLS_asFunctionalComponent(__VLS_68, new __VLS_68({
                 size: (22),
             }));
-            const __VLS_54 = __VLS_53({
+            const __VLS_70 = __VLS_69({
                 size: (22),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_53));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_69));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
             (__VLS_ctx.t('Nenhuma notificação'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -1395,399 +2181,512 @@ else {
         id: "inicio",
         ...{ class: "dashboard-content" },
     });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "page-heading" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
-        ...{ class: "eyebrow" },
-    });
-    (__VLS_ctx.reportDate.toLocaleUpperCase(__VLS_ctx.dateLocale));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.h1, __VLS_intrinsicElements.h1)({});
-    (__VLS_ctx.t('Visao geral'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
-        ...{ class: "heading-sub" },
-    });
-    (__VLS_ctx.t('Acompanhe a saude dos aparelhos e as ultimas medicoes.'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-        ...{ onClick: (__VLS_ctx.loadDevices) },
-        ...{ class: "secondary-button" },
-        disabled: (__VLS_ctx.loading),
-    });
-    const __VLS_56 = {}.RefreshCw;
-    /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
-    // @ts-ignore
-    const __VLS_57 = __VLS_asFunctionalComponent(__VLS_56, new __VLS_56({
-        size: (16),
-    }));
-    const __VLS_58 = __VLS_57({
-        size: (16),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_57));
-    (__VLS_ctx.t('Atualizar'));
-    if (__VLS_ctx.pageError) {
+    if (__VLS_ctx.managementTab === 'users') {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-            ...{ class: "notice-error" },
-            role: "alert",
+            ...{ class: "user-management-panel" },
         });
-        const __VLS_60 = {}.AlertTriangle;
-        /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "page-heading" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "eyebrow" },
+        });
+        (__VLS_ctx.t('GERENCIAMENTO'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h1, __VLS_intrinsicElements.h1)({});
+        (__VLS_ctx.t('Usuários'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "heading-sub" },
+        });
+        (__VLS_ctx.t('Gerencie membros, papéis e convites do ambiente ativo.'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'users'))
+                        return;
+                    __VLS_ctx.managementTab = 'overview';
+                } },
+            ...{ class: "secondary-button" },
+            type: "button",
+        });
+        (__VLS_ctx.t('Voltar'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+            ...{ class: "settings-pane user-management-card" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "settings-section-heading" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+        (__VLS_ctx.t('Convidar usuário'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "invite-form" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+            ...{ class: "settings-input" },
+            type: "email",
+            placeholder: (__VLS_ctx.t('usuario@empresa.com')),
+        });
+        (__VLS_ctx.inviteEmail);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
+            value: (__VLS_ctx.inviteRole),
+            ...{ class: "settings-input select-input" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+            value: "member",
+        });
+        (__VLS_ctx.t('Membro'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+            value: "admin",
+        });
+        (__VLS_ctx.t('Administrador'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (__VLS_ctx.inviteUser) },
+            ...{ class: "primary-button" },
+            type: "button",
+        });
+        (__VLS_ctx.t('Convidar'));
+        if (__VLS_ctx.inviteMessage) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "success-message" },
+                role: "status",
+            });
+            (__VLS_ctx.t(__VLS_ctx.inviteMessage));
+        }
+        if (__VLS_ctx.inviteError) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "error-message" },
+                role: "alert",
+            });
+            (__VLS_ctx.t(__VLS_ctx.inviteError));
+        }
+        if (__VLS_ctx.workspaceMembers.length) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "member-list" },
+            });
+            for (const [member] of __VLS_getVForSourceType((__VLS_ctx.workspaceMembers))) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    key: (member.id),
+                    ...{ class: "member-row" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                (member.displayName || member.email);
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                (member.email);
+                if (member.isPlatformAdmin) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                        ...{ class: "protected-member-role" },
+                        title: (__VLS_ctx.t('O papel deste administrador da plataforma não pode ser alterado.')),
+                        'aria-label': (__VLS_ctx.t('Administrador da plataforma')),
+                    });
+                    const __VLS_72 = {}.LockKeyhole;
+                    /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_73 = __VLS_asFunctionalComponent(__VLS_72, new __VLS_72({
+                        size: (14),
+                    }));
+                    const __VLS_74 = __VLS_73({
+                        size: (14),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_73));
+                    (__VLS_ctx.t('Administrador da plataforma'));
+                }
+                else {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
+                        ...{ onChange: (...[$event]) => {
+                                if (!!(__VLS_ctx.loading))
+                                    return;
+                                if (!!(!__VLS_ctx.user))
+                                    return;
+                                if (!(__VLS_ctx.managementTab === 'users'))
+                                    return;
+                                if (!(__VLS_ctx.workspaceMembers.length))
+                                    return;
+                                if (!!(member.isPlatformAdmin))
+                                    return;
+                                __VLS_ctx.updateMemberRole(member.id, $event.target.value);
+                            } },
+                        value: (member.role),
+                        ...{ class: "settings-input select-input small" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                        value: "member",
+                    });
+                    (__VLS_ctx.t('Membro'));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                        value: "admin",
+                    });
+                    (__VLS_ctx.t('Administrador'));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                        value: "owner",
+                        disabled: (member.email === __VLS_ctx.user?.email),
+                    });
+                    (__VLS_ctx.t('Proprietário'));
+                }
+                if (member.email !== __VLS_ctx.user?.email) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                        ...{ onClick: (...[$event]) => {
+                                if (!!(__VLS_ctx.loading))
+                                    return;
+                                if (!!(!__VLS_ctx.user))
+                                    return;
+                                if (!(__VLS_ctx.managementTab === 'users'))
+                                    return;
+                                if (!(__VLS_ctx.workspaceMembers.length))
+                                    return;
+                                if (!(member.email !== __VLS_ctx.user?.email))
+                                    return;
+                                __VLS_ctx.removeMember(member.id);
+                            } },
+                        ...{ class: "text-button" },
+                        type: "button",
+                    });
+                    (__VLS_ctx.t('Remover'));
+                }
+            }
+        }
+        if (__VLS_ctx.workspaceInvitations.length) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "member-list" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "settings-section-heading" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+            (__VLS_ctx.t('Convites pendentes'));
+            for (const [invitation] of __VLS_getVForSourceType((__VLS_ctx.workspaceInvitations))) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    key: (invitation.id),
+                    ...{ class: "member-row invitation-row" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                (invitation.email);
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                (__VLS_ctx.workspaceRoleLabel(invitation.role));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                (new Date(invitation.expiresAt).toLocaleDateString('pt-BR'));
+            }
+        }
+    }
+    else {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "page-heading" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "eyebrow" },
+        });
+        (__VLS_ctx.reportDate.toLocaleUpperCase(__VLS_ctx.dateLocale));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h1, __VLS_intrinsicElements.h1)({});
+        (__VLS_ctx.t('Visao geral'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "heading-sub" },
+        });
+        (__VLS_ctx.t('Acompanhe a saude dos aparelhos e as ultimas medicoes.'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (__VLS_ctx.loadDevices) },
+            ...{ class: "secondary-button" },
+            disabled: (__VLS_ctx.loading),
+        });
+        const __VLS_76 = {}.RefreshCw;
+        /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
         // @ts-ignore
-        const __VLS_61 = __VLS_asFunctionalComponent(__VLS_60, new __VLS_60({
+        const __VLS_77 = __VLS_asFunctionalComponent(__VLS_76, new __VLS_76({
+            size: (16),
+        }));
+        const __VLS_78 = __VLS_77({
+            size: (16),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_77));
+        (__VLS_ctx.t('Atualizar'));
+        if (__VLS_ctx.pageError) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "notice-error" },
+                role: "alert",
+            });
+            const __VLS_80 = {}.AlertTriangle;
+            /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
+            // @ts-ignore
+            const __VLS_81 = __VLS_asFunctionalComponent(__VLS_80, new __VLS_80({
+                size: (17),
+            }));
+            const __VLS_82 = __VLS_81({
+                size: (17),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_81));
+            (__VLS_ctx.t(__VLS_ctx.pageError));
+        }
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+            ...{ class: "metrics-grid" },
+            'aria-label': (__VLS_ctx.t('Resumo dos aparelhos')),
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+            ...{ class: "metric metric-total" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-top" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('Total de aparelhos'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "metric-icon" },
+        });
+        const __VLS_84 = {}.Cpu;
+        /** @type {[typeof __VLS_components.Cpu, ]} */ ;
+        // @ts-ignore
+        const __VLS_85 = __VLS_asFunctionalComponent(__VLS_84, new __VLS_84({
             size: (17),
         }));
-        const __VLS_62 = __VLS_61({
+        const __VLS_86 = __VLS_85({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_61));
-        (__VLS_ctx.pageError);
-    }
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
-        ...{ class: "metrics-grid" },
-        'aria-label': (__VLS_ctx.t('Resumo dos aparelhos')),
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
-        ...{ class: "metric metric-total" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-top" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Total de aparelhos'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "metric-icon" },
-    });
-    const __VLS_64 = {}.Cpu;
-    /** @type {[typeof __VLS_components.Cpu, ]} */ ;
-    // @ts-ignore
-    const __VLS_65 = __VLS_asFunctionalComponent(__VLS_64, new __VLS_64({
-        size: (17),
-    }));
-    const __VLS_66 = __VLS_65({
-        size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_65));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-value" },
-    });
-    (__VLS_ctx.devices.length);
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('cadastrados'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-foot" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "metric-mark" },
-    });
-    (__VLS_ctx.t('Inventario monitorado'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
-        ...{ class: "metric" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-top" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Online'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "metric-icon green" },
-    });
-    const __VLS_68 = {}.Signal;
-    /** @type {[typeof __VLS_components.Signal, ]} */ ;
-    // @ts-ignore
-    const __VLS_69 = __VLS_asFunctionalComponent(__VLS_68, new __VLS_68({
-        size: (17),
-    }));
-    const __VLS_70 = __VLS_69({
-        size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_69));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-value" },
-    });
-    (__VLS_ctx.onlineCount);
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('aparelhos'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-foot positive" },
-    });
-    const __VLS_72 = {}.Check;
-    /** @type {[typeof __VLS_components.Check, ]} */ ;
-    // @ts-ignore
-    const __VLS_73 = __VLS_asFunctionalComponent(__VLS_72, new __VLS_72({
-        size: (13),
-    }));
-    const __VLS_74 = __VLS_73({
-        size: (13),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_73));
-    (__VLS_ctx.t('Operando normalmente'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
-        ...{ class: "metric" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-top" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Em atencao'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "metric-icon amber" },
-    });
-    const __VLS_76 = {}.AlertTriangle;
-    /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
-    // @ts-ignore
-    const __VLS_77 = __VLS_asFunctionalComponent(__VLS_76, new __VLS_76({
-        size: (17),
-    }));
-    const __VLS_78 = __VLS_77({
-        size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_77));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-value" },
-    });
-    (__VLS_ctx.warningCount);
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('aparelhos'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-foot" },
-        ...{ class: (__VLS_ctx.warningCount ? 'warning-text' : '') },
-    });
-    (__VLS_ctx.t(__VLS_ctx.warningCount ? 'Requer verificacao' : 'Nenhum alerta ativo'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
-        ...{ class: "metric" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-top" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Offline'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "metric-icon rose" },
-    });
-    const __VLS_80 = {}.Activity;
-    /** @type {[typeof __VLS_components.Activity, ]} */ ;
-    // @ts-ignore
-    const __VLS_81 = __VLS_asFunctionalComponent(__VLS_80, new __VLS_80({
-        size: (17),
-    }));
-    const __VLS_82 = __VLS_81({
-        size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_81));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-value" },
-    });
-    (__VLS_ctx.offlineCount);
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('aparelhos'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "metric-foot" },
-    });
-    (__VLS_ctx.latestReadings);
-    (__VLS_ctx.t('medicoes recentes'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
-        id: "aparelhos",
-        ...{ class: "device-section" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "section-heading" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.h2, __VLS_intrinsicElements.h2)({});
-    (__VLS_ctx.t('Aparelhos'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({});
-    (__VLS_ctx.t('Inventario e leituras mais recentes'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-        ...{ onClick: (__VLS_ctx.exportList) },
-        ...{ class: "export-button" },
-        title: (__VLS_ctx.t('Exportar lista')),
-    });
-    const __VLS_84 = {}.ArrowDownToLine;
-    /** @type {[typeof __VLS_components.ArrowDownToLine, ]} */ ;
-    // @ts-ignore
-    const __VLS_85 = __VLS_asFunctionalComponent(__VLS_84, new __VLS_84({
-        size: (16),
-    }));
-    const __VLS_86 = __VLS_85({
-        size: (16),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_85));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Exportar'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "table-toolbar" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "table-count" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "count-dot" },
-    });
-    (__VLS_ctx.devices.length);
-    (__VLS_ctx.t('aparelhos registrados'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
-        ...{ class: "search-field" },
-    });
-    const __VLS_88 = {}.Search;
-    /** @type {[typeof __VLS_components.Search, ]} */ ;
-    // @ts-ignore
-    const __VLS_89 = __VLS_asFunctionalComponent(__VLS_88, new __VLS_88({
-        size: (16),
-    }));
-    const __VLS_90 = __VLS_89({
-        size: (16),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_89));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
-        type: "search",
-        placeholder: (__VLS_ctx.t('Buscar aparelho...')),
-        'aria-label': (__VLS_ctx.t('Buscar aparelho...')),
-    });
-    (__VLS_ctx.search);
-    if (__VLS_ctx.filteredDevices.length) {
+        }, ...__VLS_functionalComponentArgsRest(__VLS_85));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-            ...{ class: "device-list" },
+            ...{ class: "metric-value" },
         });
-        for (const [device] of __VLS_getVForSourceType((__VLS_ctx.filteredDevices))) {
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
-                id: (`device-${device.id}`),
-                key: (device.id),
-                ...{ class: "device-card" },
-                ...{ class: (`device-card-${device.status}`) },
+        (__VLS_ctx.devices.length);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('cadastrados'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-foot" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "metric-mark" },
+        });
+        (__VLS_ctx.t('Inventario monitorado'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+            ...{ class: "metric" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-top" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('Online'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "metric-icon green" },
+        });
+        const __VLS_88 = {}.Signal;
+        /** @type {[typeof __VLS_components.Signal, ]} */ ;
+        // @ts-ignore
+        const __VLS_89 = __VLS_asFunctionalComponent(__VLS_88, new __VLS_88({
+            size: (17),
+        }));
+        const __VLS_90 = __VLS_89({
+            size: (17),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_89));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-value" },
+        });
+        (__VLS_ctx.onlineCount);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('aparelhos'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-foot positive" },
+        });
+        const __VLS_92 = {}.Check;
+        /** @type {[typeof __VLS_components.Check, ]} */ ;
+        // @ts-ignore
+        const __VLS_93 = __VLS_asFunctionalComponent(__VLS_92, new __VLS_92({
+            size: (13),
+        }));
+        const __VLS_94 = __VLS_93({
+            size: (13),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_93));
+        (__VLS_ctx.t('Operando normalmente'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+            ...{ class: "metric" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-top" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('Em atencao'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "metric-icon amber" },
+        });
+        const __VLS_96 = {}.AlertTriangle;
+        /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
+        // @ts-ignore
+        const __VLS_97 = __VLS_asFunctionalComponent(__VLS_96, new __VLS_96({
+            size: (17),
+        }));
+        const __VLS_98 = __VLS_97({
+            size: (17),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_97));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-value" },
+        });
+        (__VLS_ctx.warningCount);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('aparelhos'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-foot" },
+            ...{ class: (__VLS_ctx.warningCount ? 'warning-text' : '') },
+        });
+        (__VLS_ctx.t(__VLS_ctx.warningCount ? 'Requer verificacao' : 'Nenhum alerta ativo'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+            ...{ class: "metric" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-top" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('Offline'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "metric-icon rose" },
+        });
+        const __VLS_100 = {}.Activity;
+        /** @type {[typeof __VLS_components.Activity, ]} */ ;
+        // @ts-ignore
+        const __VLS_101 = __VLS_asFunctionalComponent(__VLS_100, new __VLS_100({
+            size: (17),
+        }));
+        const __VLS_102 = __VLS_101({
+            size: (17),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_101));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-value" },
+        });
+        (__VLS_ctx.offlineCount);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('aparelhos'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "metric-foot" },
+        });
+        (__VLS_ctx.latestReadings);
+        (__VLS_ctx.t('medicoes recentes'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+            id: "aparelhos",
+            ...{ class: "device-section" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "section-heading" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h2, __VLS_intrinsicElements.h2)({});
+        (__VLS_ctx.t('Aparelhos'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({});
+        (__VLS_ctx.t('Inventario e leituras mais recentes'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (__VLS_ctx.exportList) },
+            ...{ class: "export-button" },
+            title: (__VLS_ctx.t('Exportar lista')),
+        });
+        const __VLS_104 = {}.ArrowDownToLine;
+        /** @type {[typeof __VLS_components.ArrowDownToLine, ]} */ ;
+        // @ts-ignore
+        const __VLS_105 = __VLS_asFunctionalComponent(__VLS_104, new __VLS_104({
+            size: (16),
+        }));
+        const __VLS_106 = __VLS_105({
+            size: (16),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_105));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('Exportar'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "table-toolbar" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "table-count" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "count-dot" },
+        });
+        (__VLS_ctx.devices.length);
+        (__VLS_ctx.t('aparelhos registrados'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+            ...{ class: "search-field" },
+        });
+        const __VLS_108 = {}.Search;
+        /** @type {[typeof __VLS_components.Search, ]} */ ;
+        // @ts-ignore
+        const __VLS_109 = __VLS_asFunctionalComponent(__VLS_108, new __VLS_108({
+            size: (16),
+        }));
+        const __VLS_110 = __VLS_109({
+            size: (16),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_109));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+            type: "search",
+            placeholder: (__VLS_ctx.t('Buscar aparelho...')),
+            'aria-label': (__VLS_ctx.t('Buscar aparelho...')),
+        });
+        (__VLS_ctx.search);
+        if (__VLS_ctx.filteredDevices.length) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "device-list" },
             });
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-                ...{ onClick: (...[$event]) => {
-                        if (!!(__VLS_ctx.loading))
-                            return;
-                        if (!!(!__VLS_ctx.user))
-                            return;
-                        if (!(__VLS_ctx.filteredDevices.length))
-                            return;
-                        __VLS_ctx.toggleDevice(device.id);
-                    } },
-                ...{ class: "device-summary" },
-                type: "button",
-                'aria-expanded': (__VLS_ctx.isDeviceExpanded(device.id)),
-                'aria-controls': (`device-details-${device.id}`),
-            });
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                ...{ class: "device-identity" },
-            });
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                ...{ class: "device-icon" },
-            });
-            const __VLS_92 = {}.Cpu;
-            /** @type {[typeof __VLS_components.Cpu, ]} */ ;
-            // @ts-ignore
-            const __VLS_93 = __VLS_asFunctionalComponent(__VLS_92, new __VLS_92({
-                size: (17),
-            }));
-            const __VLS_94 = __VLS_93({
-                size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_93));
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                ...{ class: "device-identity-copy" },
-            });
-            (device.name);
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                ...{ class: "status-badge" },
-                ...{ class: (device.status) },
-            });
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.i, __VLS_intrinsicElements.i)({});
-            (__VLS_ctx.deviceStatusLabel(device.status));
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                ...{ class: "device-health-overview" },
-                'aria-label': (__VLS_ctx.t('Estado dos sensores')),
-            });
-            for (const [sensor] of __VLS_getVForSourceType((__VLS_ctx.latestSensorReadings(device.readings)))) {
+            for (const [device] of __VLS_getVForSourceType((__VLS_ctx.filteredDevices))) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+                    id: (`device-${device.id}`),
+                    key: (device.id),
+                    ...{ class: "device-card" },
+                    ...{ class: (`device-card-${device.status}`) },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (...[$event]) => {
+                            if (!!(__VLS_ctx.loading))
+                                return;
+                            if (!!(!__VLS_ctx.user))
+                                return;
+                            if (!!(__VLS_ctx.managementTab === 'users'))
+                                return;
+                            if (!(__VLS_ctx.filteredDevices.length))
+                                return;
+                            __VLS_ctx.toggleDevice(device.id);
+                        } },
+                    ...{ class: "device-summary" },
+                    type: "button",
+                    'aria-expanded': (__VLS_ctx.isDeviceExpanded(device.id)),
+                    'aria-controls': (`device-details-${device.id}`),
+                });
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                    key: (sensor.key),
-                    ...{ class: "device-health-item" },
-                    ...{ class: (sensor.reading ? `health-${device.status}` : 'health-missing') },
-                    title: (`${sensor.name}: ${sensor.reading ? __VLS_ctx.deviceStatusLabel(device.status) : __VLS_ctx.t('sem leitura recebida')}`),
+                    ...{ class: "device-identity" },
                 });
-                const __VLS_96 = ((__VLS_ctx.readingIcon(sensor.key)));
-                // @ts-ignore
-                const __VLS_97 = __VLS_asFunctionalComponent(__VLS_96, new __VLS_96({
-                    size: (15),
-                }));
-                const __VLS_98 = __VLS_97({
-                    size: (15),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_97));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                (sensor.shortName);
-                const __VLS_100 = ((sensor.reading ? __VLS_ctx.deviceStatusIcon(device.status) : __VLS_ctx.CircleMinus));
-                // @ts-ignore
-                const __VLS_101 = __VLS_asFunctionalComponent(__VLS_100, new __VLS_100({
-                    size: (15),
-                }));
-                const __VLS_102 = __VLS_101({
-                    size: (15),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_101));
-            }
-            const __VLS_104 = {}.ChevronDown;
-            /** @type {[typeof __VLS_components.ChevronDown, ]} */ ;
-            // @ts-ignore
-            const __VLS_105 = __VLS_asFunctionalComponent(__VLS_104, new __VLS_104({
-                ...{ class: "device-expand-icon" },
-                ...{ class: ({ expanded: __VLS_ctx.isDeviceExpanded(device.id) }) },
-                size: (18),
-            }));
-            const __VLS_106 = __VLS_105({
-                ...{ class: "device-expand-icon" },
-                ...{ class: ({ expanded: __VLS_ctx.isDeviceExpanded(device.id) }) },
-                size: (18),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_105));
-            if (__VLS_ctx.isDeviceExpanded(device.id)) {
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                    id: (`device-details-${device.id}`),
-                    ...{ class: "device-details" },
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "device-icon" },
                 });
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                    ...{ class: "device-meta" },
-                });
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                const __VLS_108 = {}.MapPin;
-                /** @type {[typeof __VLS_components.MapPin, ]} */ ;
-                // @ts-ignore
-                const __VLS_109 = __VLS_asFunctionalComponent(__VLS_108, new __VLS_108({
-                    size: (14),
-                }));
-                const __VLS_110 = __VLS_109({
-                    size: (14),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_109));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-                (__VLS_ctx.t('Localizacao'));
-                (device.location || __VLS_ctx.t('Nao informado'));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
                 const __VLS_112 = {}.Cpu;
                 /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                 // @ts-ignore
                 const __VLS_113 = __VLS_asFunctionalComponent(__VLS_112, new __VLS_112({
-                    size: (14),
+                    size: (17),
                 }));
                 const __VLS_114 = __VLS_113({
-                    size: (14),
+                    size: (17),
                 }, ...__VLS_functionalComponentArgsRest(__VLS_113));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-                (__VLS_ctx.t('Identificador'));
-                (device.externalId);
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                const __VLS_116 = {}.Clock3;
-                /** @type {[typeof __VLS_components.Clock3, ]} */ ;
-                // @ts-ignore
-                const __VLS_117 = __VLS_asFunctionalComponent(__VLS_116, new __VLS_116({
-                    size: (14),
-                }));
-                const __VLS_118 = __VLS_117({
-                    size: (14),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_117));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-                (__VLS_ctx.t('Ultimo contato'));
-                (__VLS_ctx.formatTime(device.lastSeenAt));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                    ...{ class: "device-readings-detail" },
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "device-identity-copy" },
+                });
+                (device.name);
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "status-badge" },
+                    ...{ class: (device.status) },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.i, __VLS_intrinsicElements.i)({});
+                (__VLS_ctx.deviceStatusLabel(device.status));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "device-health-overview" },
+                    'aria-label': (__VLS_ctx.t('Estado dos sensores')),
                 });
                 for (const [sensor] of __VLS_getVForSourceType((__VLS_ctx.latestSensorReadings(device.readings)))) {
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                         key: (sensor.key),
-                        ...{ class: "sensor-detail-card" },
+                        ...{ class: "device-health-item" },
+                        ...{ class: (sensor.reading ? `health-${device.status}` : 'health-missing') },
+                        title: (`${sensor.name}: ${sensor.reading ? __VLS_ctx.deviceStatusLabel(device.status) : __VLS_ctx.t('sem leitura recebida')}`),
                     });
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                        ...{ class: "sensor-detail-label" },
-                    });
-                    const __VLS_120 = ((__VLS_ctx.readingIcon(sensor.key)));
+                    const __VLS_116 = ((__VLS_ctx.readingIcon(sensor.key)));
+                    // @ts-ignore
+                    const __VLS_117 = __VLS_asFunctionalComponent(__VLS_116, new __VLS_116({
+                        size: (15),
+                    }));
+                    const __VLS_118 = __VLS_117({
+                        size: (15),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_117));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    (sensor.shortName);
+                    const __VLS_120 = ((sensor.reading ? __VLS_ctx.deviceStatusIcon(device.status) : __VLS_ctx.CircleMinus));
                     // @ts-ignore
                     const __VLS_121 = __VLS_asFunctionalComponent(__VLS_120, new __VLS_120({
                         size: (15),
@@ -1795,133 +2694,918 @@ else {
                     const __VLS_122 = __VLS_121({
                         size: (15),
                     }, ...__VLS_functionalComponentArgsRest(__VLS_121));
-                    (sensor.name);
+                }
+                const __VLS_124 = {}.ChevronDown;
+                /** @type {[typeof __VLS_components.ChevronDown, ]} */ ;
+                // @ts-ignore
+                const __VLS_125 = __VLS_asFunctionalComponent(__VLS_124, new __VLS_124({
+                    ...{ class: "device-expand-icon" },
+                    ...{ class: ({ expanded: __VLS_ctx.isDeviceExpanded(device.id) }) },
+                    size: (18),
+                }));
+                const __VLS_126 = __VLS_125({
+                    ...{ class: "device-expand-icon" },
+                    ...{ class: ({ expanded: __VLS_ctx.isDeviceExpanded(device.id) }) },
+                    size: (18),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_125));
+                if (__VLS_ctx.isDeviceExpanded(device.id)) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        id: (`device-details-${device.id}`),
+                        ...{ class: "device-details" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        ...{ class: "device-meta" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    const __VLS_128 = {}.MapPin;
+                    /** @type {[typeof __VLS_components.MapPin, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_129 = __VLS_asFunctionalComponent(__VLS_128, new __VLS_128({
+                        size: (14),
+                    }));
+                    const __VLS_130 = __VLS_129({
+                        size: (14),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_129));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-                    (sensor.reading ? `${sensor.reading.value} ${sensor.reading.unit}` : __VLS_ctx.t('Sem leitura'));
-                    if (sensor.reading) {
-                        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                            ...{ class: "sensor-reading-time" },
+                    (__VLS_ctx.t('Localizacao'));
+                    (device.location || __VLS_ctx.t('Nao informado'));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    const __VLS_132 = {}.Cpu;
+                    /** @type {[typeof __VLS_components.Cpu, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_133 = __VLS_asFunctionalComponent(__VLS_132, new __VLS_132({
+                        size: (14),
+                    }));
+                    const __VLS_134 = __VLS_133({
+                        size: (14),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_133));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (__VLS_ctx.t('Identificador'));
+                    (device.externalId);
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    const __VLS_136 = {}.Clock3;
+                    /** @type {[typeof __VLS_components.Clock3, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_137 = __VLS_asFunctionalComponent(__VLS_136, new __VLS_136({
+                        size: (14),
+                    }));
+                    const __VLS_138 = __VLS_137({
+                        size: (14),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_137));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (__VLS_ctx.t('Ultimo contato'));
+                    (__VLS_ctx.formatTime(device.lastSeenAt));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        ...{ class: "device-readings-detail" },
+                    });
+                    for (const [sensor] of __VLS_getVForSourceType((__VLS_ctx.latestSensorReadings(device.readings)))) {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+                            key: (sensor.key),
+                            ...{ class: "sensor-detail-card" },
                         });
-                        (__VLS_ctx.formatTime(sensor.reading.recordedAt));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                            ...{ class: "sensor-detail-label" },
+                        });
+                        const __VLS_140 = ((__VLS_ctx.readingIcon(sensor.key)));
+                        // @ts-ignore
+                        const __VLS_141 = __VLS_asFunctionalComponent(__VLS_140, new __VLS_140({
+                            size: (15),
+                        }));
+                        const __VLS_142 = __VLS_141({
+                            size: (15),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_141));
+                        (sensor.name);
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                        (sensor.reading ? `${sensor.reading.value} ${sensor.reading.unit}` : __VLS_ctx.t('Sem leitura'));
+                        if (sensor.reading) {
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                                ...{ class: "sensor-reading-time" },
+                            });
+                            (__VLS_ctx.formatTime(sensor.reading.recordedAt));
+                        }
                     }
                 }
             }
         }
-    }
-    else {
+        else {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "empty-state" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "empty-icon" },
+            });
+            const __VLS_144 = {}.Cpu;
+            /** @type {[typeof __VLS_components.Cpu, ]} */ ;
+            // @ts-ignore
+            const __VLS_145 = __VLS_asFunctionalComponent(__VLS_144, new __VLS_144({
+                size: (22),
+            }));
+            const __VLS_146 = __VLS_145({
+                size: (22),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_145));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.t(__VLS_ctx.search ? 'Nenhum aparelho encontrado' : 'Nenhum aparelho conectado'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t(__VLS_ctx.search ? 'Tente outro termo de busca.' : 'Os aparelhos aparecerao aqui quando enviarem dados.'));
+        }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-            ...{ class: "empty-state" },
+            ...{ class: "table-footer" },
         });
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-            ...{ class: "empty-icon" },
-        });
-        const __VLS_124 = {}.Cpu;
-        /** @type {[typeof __VLS_components.Cpu, ]} */ ;
-        // @ts-ignore
-        const __VLS_125 = __VLS_asFunctionalComponent(__VLS_124, new __VLS_124({
-            size: (22),
-        }));
-        const __VLS_126 = __VLS_125({
-            size: (22),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_125));
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-        (__VLS_ctx.t(__VLS_ctx.search ? 'Nenhum aparelho encontrado' : 'Nenhum aparelho conectado'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-        (__VLS_ctx.t(__VLS_ctx.search ? 'Tente outro termo de busca.' : 'Os aparelhos aparecerao aqui quando enviarem dados.'));
+        (__VLS_ctx.t('Exibindo'));
+        (__VLS_ctx.filteredDevices.length);
+        (__VLS_ctx.t('de'));
+        (__VLS_ctx.devices.length);
+        (__VLS_ctx.t('aparelhos'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "live-dot" },
+        });
+        (__VLS_ctx.t('Sincronizacao a cada 30 segundos'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.footer, __VLS_intrinsicElements.footer)({
+            ...{ class: "dashboard-footer" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.b, __VLS_intrinsicElements.b)({});
+        (__VLS_ctx.t('Monitoramento de laboratorio'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('Dados atualizados em tempo real'));
     }
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "table-footer" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Exibindo'));
-    (__VLS_ctx.filteredDevices.length);
-    (__VLS_ctx.t('de'));
-    (__VLS_ctx.devices.length);
-    (__VLS_ctx.t('aparelhos'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "live-dot" },
-    });
-    (__VLS_ctx.t('Sincronizacao a cada 30 segundos'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.footer, __VLS_intrinsicElements.footer)({
-        ...{ class: "dashboard-footer" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.b, __VLS_intrinsicElements.b)({});
-    (__VLS_ctx.t('Monitoramento de laboratorio'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Dados atualizados em tempo real'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
         ...{ class: "mobile-nav" },
         'aria-label': (__VLS_ctx.t('Navegacao principal')),
     });
     __VLS_asFunctionalElement(__VLS_intrinsicElements.a, __VLS_intrinsicElements.a)({
+        ...{ onClick: (...[$event]) => {
+                if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(!__VLS_ctx.user))
+                    return;
+                __VLS_ctx.navigateMobileSection('home');
+            } },
         ...{ class: "mobile-nav-item" },
-        ...{ class: ({ active: __VLS_ctx.activeMobileTab === 'home' }) },
+        ...{ class: ({ active: __VLS_ctx.managementTab === 'overview' && __VLS_ctx.activeMobileTab === 'home' }) },
         href: "#inicio",
         'aria-current': (__VLS_ctx.activeMobileTab === 'home' ? 'page' : undefined),
     });
-    const __VLS_128 = {}.LayoutDashboard;
+    const __VLS_148 = {}.LayoutDashboard;
     /** @type {[typeof __VLS_components.LayoutDashboard, ]} */ ;
     // @ts-ignore
-    const __VLS_129 = __VLS_asFunctionalComponent(__VLS_128, new __VLS_128({
+    const __VLS_149 = __VLS_asFunctionalComponent(__VLS_148, new __VLS_148({
         size: (20),
     }));
-    const __VLS_130 = __VLS_129({
+    const __VLS_150 = __VLS_149({
         size: (20),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_129));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_149));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Inicio'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.a, __VLS_intrinsicElements.a)({
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+        ...{ onClick: (...[$event]) => {
+                if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(!__VLS_ctx.user))
+                    return;
+                __VLS_ctx.mobileWorkspaceSelectorOpen = true;
+            } },
         ...{ class: "mobile-nav-item" },
-        ...{ class: ({ active: __VLS_ctx.activeMobileTab === 'devices' }) },
+        type: "button",
+    });
+    const __VLS_152 = {}.Building2;
+    /** @type {[typeof __VLS_components.Building2, ]} */ ;
+    // @ts-ignore
+    const __VLS_153 = __VLS_asFunctionalComponent(__VLS_152, new __VLS_152({
+        size: (19),
+    }));
+    const __VLS_154 = __VLS_153({
+        size: (19),
+    }, ...__VLS_functionalComponentArgsRest(__VLS_153));
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    (__VLS_ctx.t('Ambientes'));
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.a, __VLS_intrinsicElements.a)({
+        ...{ onClick: (...[$event]) => {
+                if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(!__VLS_ctx.user))
+                    return;
+                __VLS_ctx.navigateMobileSection('devices');
+            } },
+        ...{ class: "mobile-nav-item" },
+        ...{ class: ({ active: __VLS_ctx.managementTab === 'overview' && __VLS_ctx.activeMobileTab === 'devices' }) },
         href: "#aparelhos",
         'aria-current': (__VLS_ctx.activeMobileTab === 'devices' ? 'page' : undefined),
     });
-    const __VLS_132 = {}.Cpu;
+    const __VLS_156 = {}.Cpu;
     /** @type {[typeof __VLS_components.Cpu, ]} */ ;
     // @ts-ignore
-    const __VLS_133 = __VLS_asFunctionalComponent(__VLS_132, new __VLS_132({
+    const __VLS_157 = __VLS_asFunctionalComponent(__VLS_156, new __VLS_156({
         size: (20),
     }));
-    const __VLS_134 = __VLS_133({
+    const __VLS_158 = __VLS_157({
         size: (20),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_133));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_157));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Aparelhos'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-        ...{ onClick: (__VLS_ctx.loadDevices) },
+        ...{ onClick: (...[$event]) => {
+                if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(!__VLS_ctx.user))
+                    return;
+                __VLS_ctx.managementTab = 'users';
+                __VLS_ctx.activeMobileTab = 'users';
+            } },
         ...{ class: "mobile-nav-item" },
+        ...{ class: ({ active: __VLS_ctx.managementTab === 'users' }) },
         type: "button",
-        disabled: (__VLS_ctx.loading),
     });
-    const __VLS_136 = {}.RefreshCw;
-    /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
+    const __VLS_160 = {}.UsersRound;
+    /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
     // @ts-ignore
-    const __VLS_137 = __VLS_asFunctionalComponent(__VLS_136, new __VLS_136({
+    const __VLS_161 = __VLS_asFunctionalComponent(__VLS_160, new __VLS_160({
         size: (19),
     }));
-    const __VLS_138 = __VLS_137({
+    const __VLS_162 = __VLS_161({
         size: (19),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_137));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_161));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Atualizar'));
+    (__VLS_ctx.t('Usuários'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
         ...{ onClick: (__VLS_ctx.logout) },
         ...{ class: "mobile-nav-item" },
         type: "button",
     });
-    const __VLS_140 = {}.LogOut;
+    const __VLS_164 = {}.LogOut;
     /** @type {[typeof __VLS_components.LogOut, ]} */ ;
     // @ts-ignore
-    const __VLS_141 = __VLS_asFunctionalComponent(__VLS_140, new __VLS_140({
+    const __VLS_165 = __VLS_asFunctionalComponent(__VLS_164, new __VLS_164({
         size: (19),
     }));
-    const __VLS_142 = __VLS_141({
+    const __VLS_166 = __VLS_165({
         size: (19),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_141));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_165));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Sair'));
+    if (__VLS_ctx.mobileWorkspaceSelectorOpen) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.mobileWorkspaceSelectorOpen))
+                        return;
+                    __VLS_ctx.mobileWorkspaceSelectorOpen = false;
+                } },
+            ...{ class: "settings-overlay workspace-selector-overlay" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+            ...{ class: "settings-dialog workspace-selector-dialog" },
+            role: "dialog",
+            'aria-modal': "true",
+            'aria-labelledby': "mobileWorkspaceTitle",
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.header, __VLS_intrinsicElements.header)({
+            ...{ class: "settings-header" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "eyebrow" },
+        });
+        (__VLS_ctx.t('AMBIENTES'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h2, __VLS_intrinsicElements.h2)({
+            id: "mobileWorkspaceTitle",
+        });
+        (__VLS_ctx.t('Selecionar ambiente'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.mobileWorkspaceSelectorOpen))
+                        return;
+                    __VLS_ctx.mobileWorkspaceSelectorOpen = false;
+                } },
+            ...{ class: "icon-button" },
+            type: "button",
+            'aria-label': (__VLS_ctx.t('Fechar seleção de ambientes')),
+        });
+        const __VLS_168 = {}.X;
+        /** @type {[typeof __VLS_components.X, ]} */ ;
+        // @ts-ignore
+        const __VLS_169 = __VLS_asFunctionalComponent(__VLS_168, new __VLS_168({
+            size: (19),
+        }));
+        const __VLS_170 = __VLS_169({
+            size: (19),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_169));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "workspace-list workspace-selector-list" },
+        });
+        for (const [workspace] of __VLS_getVForSourceType((__VLS_ctx.workspaces))) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (...[$event]) => {
+                        if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(!__VLS_ctx.user))
+                            return;
+                        if (!(__VLS_ctx.mobileWorkspaceSelectorOpen))
+                            return;
+                        __VLS_ctx.mobileWorkspaceSelectorOpen = false;
+                        __VLS_ctx.changeWorkspace(workspace.id);
+                    } },
+                key: (workspace.id),
+                ...{ class: "workspace-selector-option" },
+                type: "button",
+                ...{ class: ({ active: workspace.id === __VLS_ctx.activeWorkspaceId }) },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "workspace-option-avatar" },
+            });
+            if (workspace.iconDataUrl) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.img)({
+                    src: (workspace.iconDataUrl),
+                    alt: "",
+                });
+            }
+            else {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                (workspace.name.slice(0, 1).toUpperCase());
+            }
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "workspace-selector-name" },
+            });
+            (workspace.name);
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+            (__VLS_ctx.workspaceRoleLabel(workspace.role));
+            if (workspace.id === __VLS_ctx.activeWorkspaceId) {
+                const __VLS_172 = {}.Check;
+                /** @type {[typeof __VLS_components.Check, ]} */ ;
+                // @ts-ignore
+                const __VLS_173 = __VLS_asFunctionalComponent(__VLS_172, new __VLS_172({
+                    size: (16),
+                }));
+                const __VLS_174 = __VLS_173({
+                    size: (16),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_173));
+            }
+        }
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.mobileWorkspaceSelectorOpen))
+                        return;
+                    __VLS_ctx.mobileWorkspaceSelectorOpen = false;
+                    __VLS_ctx.openWorkspaceManager('create');
+                } },
+            ...{ class: "workspace-manage-button workspace-selector-manage" },
+            type: "button",
+        });
+        const __VLS_176 = {}.Plus;
+        /** @type {[typeof __VLS_components.Plus, ]} */ ;
+        // @ts-ignore
+        const __VLS_177 = __VLS_asFunctionalComponent(__VLS_176, new __VLS_176({
+            size: (15),
+        }));
+        const __VLS_178 = __VLS_177({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_177));
+        (__VLS_ctx.t('Adicionar/editar ambiente'));
+    }
+    if (__VLS_ctx.workspaceDialogOpen) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.workspaceDialogOpen))
+                        return;
+                    __VLS_ctx.workspaceDialogOpen = false;
+                } },
+            ...{ class: "settings-overlay workspace-manager-overlay" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+            ...{ class: "settings-dialog workspace-manager-dialog" },
+            role: "dialog",
+            'aria-modal': "true",
+            'aria-labelledby': "workspaceManagerTitle",
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.header, __VLS_intrinsicElements.header)({
+            ...{ class: "settings-header" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "eyebrow" },
+        });
+        (__VLS_ctx.t('AMBIENTES'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h2, __VLS_intrinsicElements.h2)({
+            id: "workspaceManagerTitle",
+        });
+        (__VLS_ctx.t('Adicionar/editar ambiente'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.workspaceDialogOpen))
+                        return;
+                    __VLS_ctx.workspaceDialogOpen = false;
+                } },
+            ...{ class: "icon-button" },
+            type: "button",
+            'aria-label': (__VLS_ctx.t('Fechar gerenciamento de ambientes')),
+        });
+        const __VLS_180 = {}.X;
+        /** @type {[typeof __VLS_components.X, ]} */ ;
+        // @ts-ignore
+        const __VLS_181 = __VLS_asFunctionalComponent(__VLS_180, new __VLS_180({
+            size: (19),
+        }));
+        const __VLS_182 = __VLS_181({
+            size: (19),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_181));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
+            ...{ class: "settings-tabs workspace-manager-tabs" },
+            role: "tablist",
+            'aria-label': (__VLS_ctx.t('Ações de ambiente')),
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.workspaceDialogOpen))
+                        return;
+                    __VLS_ctx.openWorkspaceManager('create');
+                } },
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.workspaceDialogAction === 'create' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.workspaceDialogAction === 'create'),
+        });
+        const __VLS_184 = {}.Plus;
+        /** @type {[typeof __VLS_components.Plus, ]} */ ;
+        // @ts-ignore
+        const __VLS_185 = __VLS_asFunctionalComponent(__VLS_184, new __VLS_184({
+            size: (14),
+        }));
+        const __VLS_186 = __VLS_185({
+            size: (14),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_185));
+        (__VLS_ctx.t('Criar'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.workspaceDialogOpen))
+                        return;
+                    __VLS_ctx.openWorkspaceManager('edit');
+                } },
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.workspaceDialogAction === 'edit' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.workspaceDialogAction === 'edit'),
+        });
+        const __VLS_188 = {}.Pencil;
+        /** @type {[typeof __VLS_components.Pencil, ]} */ ;
+        // @ts-ignore
+        const __VLS_189 = __VLS_asFunctionalComponent(__VLS_188, new __VLS_188({
+            size: (14),
+        }));
+        const __VLS_190 = __VLS_189({
+            size: (14),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_189));
+        (__VLS_ctx.t('Editar'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.workspaceDialogOpen))
+                        return;
+                    __VLS_ctx.openWorkspaceManager('import');
+                } },
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.workspaceDialogAction === 'import' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.workspaceDialogAction === 'import'),
+        });
+        const __VLS_192 = {}.ArrowDownToLine;
+        /** @type {[typeof __VLS_components.ArrowDownToLine, ]} */ ;
+        // @ts-ignore
+        const __VLS_193 = __VLS_asFunctionalComponent(__VLS_192, new __VLS_192({
+            size: (14),
+        }));
+        const __VLS_194 = __VLS_193({
+            size: (14),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_193));
+        (__VLS_ctx.t('Importar'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.workspaceDialogOpen))
+                        return;
+                    __VLS_ctx.openWorkspaceManager('devices');
+                } },
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.workspaceDialogAction === 'devices' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.workspaceDialogAction === 'devices'),
+        });
+        const __VLS_196 = {}.Cpu;
+        /** @type {[typeof __VLS_components.Cpu, ]} */ ;
+        // @ts-ignore
+        const __VLS_197 = __VLS_asFunctionalComponent(__VLS_196, new __VLS_196({
+            size: (14),
+        }));
+        const __VLS_198 = __VLS_197({
+            size: (14),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_197));
+        (__VLS_ctx.t('Aparelhos'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.workspaceDialogOpen))
+                        return;
+                    __VLS_ctx.openWorkspaceManager('share');
+                } },
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.workspaceDialogAction === 'share' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.workspaceDialogAction === 'share'),
+        });
+        const __VLS_200 = {}.Share2;
+        /** @type {[typeof __VLS_components.Share2, ]} */ ;
+        // @ts-ignore
+        const __VLS_201 = __VLS_asFunctionalComponent(__VLS_200, new __VLS_200({
+            size: (14),
+        }));
+        const __VLS_202 = __VLS_201({
+            size: (14),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_201));
+        (__VLS_ctx.t('Compartilhar'));
+        if (__VLS_ctx.workspaceDialogAction === 'create' || __VLS_ctx.workspaceDialogAction === 'edit') {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "settings-pane workspace-manager-pane" },
+            });
+            if (__VLS_ctx.workspaceDialogAction === 'create' || __VLS_ctx.canManageActiveWorkspace) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                    for: "workspaceName",
+                });
+                (__VLS_ctx.t('Nome do ambiente'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                    id: "workspaceName",
+                    value: (__VLS_ctx.workspaceName),
+                    ...{ class: "settings-input" },
+                    type: "text",
+                    maxlength: "80",
+                    placeholder: (__VLS_ctx.t('Ex.: Laboratório Central')),
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "workspace-icon-editor" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "workspace-icon-preview" },
+                });
+                if (__VLS_ctx.workspaceIconDataUrl) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.img)({
+                        src: (__VLS_ctx.workspaceIconDataUrl),
+                        alt: "Prévia do ícone",
+                    });
+                }
+                else {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    (__VLS_ctx.workspaceName.slice(0, 1).toUpperCase() || '?');
+                }
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "workspace-icon-copy" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                (__VLS_ctx.t('Ícone do ambiente'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                (__VLS_ctx.t('Imagem JPG, PNG ou WebP, até 8 MB'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                    ...{ class: "secondary-button workspace-icon-upload" },
+                    for: "workspaceIconFile",
+                });
+                const __VLS_204 = {}.ImagePlus;
+                /** @type {[typeof __VLS_components.ImagePlus, ]} */ ;
+                // @ts-ignore
+                const __VLS_205 = __VLS_asFunctionalComponent(__VLS_204, new __VLS_204({
+                    size: (15),
+                }));
+                const __VLS_206 = __VLS_205({
+                    size: (15),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_205));
+                (__VLS_ctx.t('Escolher imagem'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                    ...{ onChange: (__VLS_ctx.selectWorkspaceIcon) },
+                    id: "workspaceIconFile",
+                    ...{ class: "visually-hidden" },
+                    type: "file",
+                    accept: "image/jpeg,image/png,image/webp",
+                });
+                if (__VLS_ctx.workspaceIconError) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                        ...{ class: "error-message" },
+                        role: "alert",
+                    });
+                    (__VLS_ctx.t(__VLS_ctx.workspaceIconError));
+                }
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (...[$event]) => {
+                            if (!!(__VLS_ctx.loading))
+                                return;
+                            if (!!(!__VLS_ctx.user))
+                                return;
+                            if (!(__VLS_ctx.workspaceDialogOpen))
+                                return;
+                            if (!(__VLS_ctx.workspaceDialogAction === 'create' || __VLS_ctx.workspaceDialogAction === 'edit'))
+                                return;
+                            if (!(__VLS_ctx.workspaceDialogAction === 'create' || __VLS_ctx.canManageActiveWorkspace))
+                                return;
+                            __VLS_ctx.workspaceDialogAction === 'create' ? __VLS_ctx.createWorkspace() : __VLS_ctx.updateWorkspace();
+                        } },
+                    ...{ class: "primary-button settings-save-button" },
+                    type: "button",
+                    disabled: (__VLS_ctx.workspaceSaving || !__VLS_ctx.workspaceName.trim()),
+                });
+                (__VLS_ctx.workspaceSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.workspaceDialogAction === 'create' ? __VLS_ctx.t('Criar ambiente') : __VLS_ctx.t('Salvar alterações'));
+            }
+            else {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "form-subtitle" },
+                });
+                (__VLS_ctx.t('Você pode ver e compartilhar este ambiente, mas apenas um owner ou admin pode editar seu nome e ícone.'));
+            }
+        }
+        if (__VLS_ctx.workspaceDialogAction === 'edit' && __VLS_ctx.activeWorkspace) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "workspace-remove-panel" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.activeWorkspace.role === 'owner' ? __VLS_ctx.t('Excluir ambiente') : __VLS_ctx.t('Remover da minha lista'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+            (__VLS_ctx.activeWorkspace.role === 'owner' ? __VLS_ctx.t('Isso excluirá o ambiente e o removerá para todos os membros.') : __VLS_ctx.t('Isso remove sua participação, mas mantém o ambiente para os outros membros.'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (__VLS_ctx.removeActiveWorkspace) },
+                ...{ class: "danger-button" },
+                type: "button",
+                disabled: (__VLS_ctx.workspaceSaving),
+            });
+            (__VLS_ctx.workspaceSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.activeWorkspace.role === 'owner' ? __VLS_ctx.t('Excluir ambiente') : __VLS_ctx.t('Remover da minha lista'));
+        }
+        else if (__VLS_ctx.workspaceDialogAction === 'import') {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "settings-pane workspace-manager-pane" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "form-subtitle" },
+            });
+            (__VLS_ctx.t('Insira o código compartilhado para adicionar o ambiente à sua lista.'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                for: "importWorkspaceCode",
+            });
+            (__VLS_ctx.t('Código do ambiente'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                ...{ onKeydown: (__VLS_ctx.joinWorkspaceByCode) },
+                id: "importWorkspaceCode",
+                value: (__VLS_ctx.importWorkspaceCode),
+                ...{ class: "settings-input workspace-code-input" },
+                type: "text",
+                maxlength: "24",
+                placeholder: "LAB-ABC123",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (__VLS_ctx.joinWorkspaceByCode) },
+                ...{ class: "primary-button settings-save-button" },
+                type: "button",
+                disabled: (!__VLS_ctx.importWorkspaceCode.trim()),
+            });
+            (__VLS_ctx.t('Importar ambiente'));
+        }
+        else if (__VLS_ctx.workspaceDialogAction === 'devices') {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "settings-pane workspace-manager-pane" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({
+                ...{ class: "workspace-devices-title" },
+            });
+            (__VLS_ctx.t('Aparelhos de monitoramento vinculados à sua conta'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "form-subtitle" },
+            });
+            (__VLS_ctx.t('Escolha o ambiente de destino para adicionar ou mover seus aparelhos vinculados.'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                for: "workspaceDeviceTarget",
+            });
+            (__VLS_ctx.t('Selecionar ambiente de destino'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
+                id: "workspaceDeviceTarget",
+                value: (__VLS_ctx.workspaceDeviceTargetId),
+                ...{ class: "settings-input select-input" },
+            });
+            for (const [workspace] of __VLS_getVForSourceType((__VLS_ctx.workspaces))) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                    key: (workspace.id),
+                    value: (workspace.id),
+                });
+                (workspace.name);
+            }
+            if (__VLS_ctx.accountDevicesMessage) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "success-message" },
+                    role: "status",
+                });
+                (__VLS_ctx.accountDevicesMessage);
+            }
+            if (__VLS_ctx.accountDevicesError) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "error-message" },
+                    role: "alert",
+                });
+                (__VLS_ctx.accountDevicesError);
+            }
+            if (__VLS_ctx.accountDevicesLoading) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "workspace-device-empty" },
+                });
+                (__VLS_ctx.t('Carregando aparelhos...'));
+            }
+            else if (__VLS_ctx.accountLinkedDevices.length) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "workspace-device-list" },
+                });
+                for (const [device] of __VLS_getVForSourceType((__VLS_ctx.accountLinkedDevices))) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+                        key: (device.id),
+                        ...{ class: "workspace-device-row" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        ...{ class: "workspace-device-summary" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                        ...{ class: "workspace-device-icon" },
+                    });
+                    const __VLS_208 = {}.Cpu;
+                    /** @type {[typeof __VLS_components.Cpu, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_209 = __VLS_asFunctionalComponent(__VLS_208, new __VLS_208({
+                        size: (17),
+                    }));
+                    const __VLS_210 = __VLS_209({
+                        size: (17),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_209));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (device.name);
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                    (device.externalId);
+                    if (device.location) {
+                        (device.location);
+                    }
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        ...{ class: "workspace-device-assignment" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    (__VLS_ctx.t('Ambiente atual'));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (device.workspaceName || __VLS_ctx.t('Sem ambiente'));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                        ...{ onClick: (...[$event]) => {
+                                if (!!(__VLS_ctx.loading))
+                                    return;
+                                if (!!(!__VLS_ctx.user))
+                                    return;
+                                if (!(__VLS_ctx.workspaceDialogOpen))
+                                    return;
+                                if (!!(__VLS_ctx.workspaceDialogAction === 'edit' && __VLS_ctx.activeWorkspace))
+                                    return;
+                                if (!!(__VLS_ctx.workspaceDialogAction === 'import'))
+                                    return;
+                                if (!(__VLS_ctx.workspaceDialogAction === 'devices'))
+                                    return;
+                                if (!!(__VLS_ctx.accountDevicesLoading))
+                                    return;
+                                if (!(__VLS_ctx.accountLinkedDevices.length))
+                                    return;
+                                __VLS_ctx.assignAccountDevice(device);
+                            } },
+                        ...{ class: "secondary-button workspace-device-action" },
+                        type: "button",
+                        disabled: (!__VLS_ctx.workspaceDeviceTargetId || !device.canAssign || device.workspaceId === __VLS_ctx.workspaceDeviceTargetId),
+                    });
+                    (!device.canAssign ? __VLS_ctx.t('Sem permissão para mover este aparelho.') : device.workspaceId === __VLS_ctx.workspaceDeviceTargetId ? __VLS_ctx.t('Este aparelho já está neste ambiente') : device.workspaceId ? __VLS_ctx.t('Mover para este ambiente') : __VLS_ctx.t('Adicionar a este ambiente'));
+                }
+            }
+            else {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "workspace-device-empty" },
+                });
+                (__VLS_ctx.t('Nenhum aparelho de monitoramento vinculado à sua conta.'));
+            }
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "workspace-device-note" },
+            });
+            (__VLS_ctx.t('O aparelho será associado ao ambiente selecionado acima.'));
+        }
+        else {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "settings-pane workspace-manager-pane" },
+            });
+            if (__VLS_ctx.activeWorkspace) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "workspace-share-card" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "workspace-icon-preview" },
+                });
+                if (__VLS_ctx.activeWorkspace.iconDataUrl) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.img)({
+                        src: (__VLS_ctx.activeWorkspace.iconDataUrl),
+                        alt: "",
+                    });
+                }
+                else {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    (__VLS_ctx.activeWorkspace.name.slice(0, 1).toUpperCase());
+                }
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                (__VLS_ctx.activeWorkspace.name);
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                (__VLS_ctx.t('Código de acesso para compartilhar'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                    for: "workspaceShareCode",
+                });
+                (__VLS_ctx.t('Código do ambiente'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "workspace-share-code-field" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                    id: "workspaceShareCode",
+                    ...{ class: "settings-input workspace-code-input" },
+                    type: "text",
+                    value: (__VLS_ctx.activeWorkspaceCode),
+                    readonly: true,
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (__VLS_ctx.shareWorkspaceCode) },
+                    ...{ class: "secondary-button" },
+                    type: "button",
+                    title: (__VLS_ctx.t('Copiar código do ambiente')),
+                    'aria-label': (__VLS_ctx.t('Copiar código do ambiente')),
+                });
+                const __VLS_212 = {}.Copy;
+                /** @type {[typeof __VLS_components.Copy, ]} */ ;
+                // @ts-ignore
+                const __VLS_213 = __VLS_asFunctionalComponent(__VLS_212, new __VLS_212({
+                    size: (16),
+                }));
+                const __VLS_214 = __VLS_213({
+                    size: (16),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_213));
+                if (__VLS_ctx.workspaceShareMessage) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                        ...{ class: "success-message" },
+                        role: "status",
+                    });
+                    (__VLS_ctx.workspaceShareMessage);
+                }
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "form-subtitle" },
+                });
+                (__VLS_ctx.t('Envie este código para outro usuário importar o ambiente e acompanhar os mesmos aparelhos.'));
+            }
+            else {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "form-subtitle" },
+                });
+                (__VLS_ctx.t('Selecione ou crie um ambiente antes de compartilhar.'));
+            }
+        }
+    }
     if (__VLS_ctx.settingsOpen) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ onClick: (...[$event]) => {
@@ -1967,15 +3651,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar configuracoes')),
         });
-        const __VLS_144 = {}.X;
+        const __VLS_216 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_145 = __VLS_asFunctionalComponent(__VLS_144, new __VLS_144({
+        const __VLS_217 = __VLS_asFunctionalComponent(__VLS_216, new __VLS_216({
             size: (19),
         }));
-        const __VLS_146 = __VLS_145({
+        const __VLS_218 = __VLS_217({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_145));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_217));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
             ...{ class: "settings-tabs" },
             role: "tablist",
@@ -2043,26 +3727,26 @@ else {
                 ...{ class: "theme-setting-icon" },
             });
             if (!__VLS_ctx.darkMode) {
-                const __VLS_148 = {}.Moon;
+                const __VLS_220 = {}.Moon;
                 /** @type {[typeof __VLS_components.Moon, ]} */ ;
                 // @ts-ignore
-                const __VLS_149 = __VLS_asFunctionalComponent(__VLS_148, new __VLS_148({
+                const __VLS_221 = __VLS_asFunctionalComponent(__VLS_220, new __VLS_220({
                     size: (18),
                 }));
-                const __VLS_150 = __VLS_149({
+                const __VLS_222 = __VLS_221({
                     size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_149));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_221));
             }
             else {
-                const __VLS_152 = {}.Sun;
+                const __VLS_224 = {}.Sun;
                 /** @type {[typeof __VLS_components.Sun, ]} */ ;
                 // @ts-ignore
-                const __VLS_153 = __VLS_asFunctionalComponent(__VLS_152, new __VLS_152({
+                const __VLS_225 = __VLS_asFunctionalComponent(__VLS_224, new __VLS_224({
                     size: (18),
                 }));
-                const __VLS_154 = __VLS_153({
+                const __VLS_226 = __VLS_225({
                     size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_153));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_225));
             }
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
@@ -2138,6 +3822,44 @@ else {
                 alt: "",
             });
             (__VLS_ctx.t('English'));
+            if (__VLS_ctx.user?.isPlatformAdmin) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "workspace-admin-panel" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "settings-section-heading" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+                (__VLS_ctx.t('Cadastro público'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                    ...{ class: "theme-setting" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "theme-setting-icon" },
+                });
+                const __VLS_228 = {}.ShieldCheck;
+                /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
+                // @ts-ignore
+                const __VLS_229 = __VLS_asFunctionalComponent(__VLS_228, new __VLS_228({
+                    size: (18),
+                }));
+                const __VLS_230 = __VLS_229({
+                    size: (18),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_229));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "theme-setting-copy" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                (__VLS_ctx.t('Permitir criação de contas'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                (__VLS_ctx.registrationEnabled ? __VLS_ctx.t('Habilitado na tela de login') : __VLS_ctx.t('Desabilitado'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                    ...{ onChange: (__VLS_ctx.toggleRegistrationSetting) },
+                    ...{ class: "theme-switch" },
+                    type: "checkbox",
+                    checked: (__VLS_ctx.registrationEnabled),
+                });
+            }
         }
         else if (__VLS_ctx.settingsTab === 'account') {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
@@ -2328,15 +4050,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-icon" },
             });
-            const __VLS_156 = {}.Mail;
+            const __VLS_232 = {}.Mail;
             /** @type {[typeof __VLS_components.Mail, ]} */ ;
             // @ts-ignore
-            const __VLS_157 = __VLS_asFunctionalComponent(__VLS_156, new __VLS_156({
+            const __VLS_233 = __VLS_asFunctionalComponent(__VLS_232, new __VLS_232({
                 size: (18),
             }));
-            const __VLS_158 = __VLS_157({
+            const __VLS_234 = __VLS_233({
                 size: (18),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_157));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_233));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
             });
@@ -2356,15 +4078,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-icon" },
             });
-            const __VLS_160 = {}.MessageCircle;
+            const __VLS_236 = {}.MessageCircle;
             /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_161 = __VLS_asFunctionalComponent(__VLS_160, new __VLS_160({
+            const __VLS_237 = __VLS_asFunctionalComponent(__VLS_236, new __VLS_236({
                 size: (18),
             }));
-            const __VLS_162 = __VLS_161({
+            const __VLS_238 = __VLS_237({
                 size: (18),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_161));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_237));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
             });
@@ -2456,7 +4178,17 @@ else {
 /** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
 /** @type {__VLS_StyleScopedClasses['login-button']} */ ;
 /** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['secondary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['login-button']} */ ;
 /** @type {__VLS_StyleScopedClasses['secure-note']} */ ;
+/** @type {__VLS_StyleScopedClasses['back-link']} */ ;
+/** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
+/** @type {__VLS_StyleScopedClasses['form-subtitle']} */ ;
+/** @type {__VLS_StyleScopedClasses['error-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['success-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['login-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
 /** @type {__VLS_StyleScopedClasses['back-link']} */ ;
 /** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
 /** @type {__VLS_StyleScopedClasses['form-subtitle']} */ ;
@@ -2483,10 +4215,16 @@ else {
 /** @type {__VLS_StyleScopedClasses['workspace-switch']} */ ;
 /** @type {__VLS_StyleScopedClasses['workspace-avatar']} */ ;
 /** @type {__VLS_StyleScopedClasses['workspace-name']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-dropdown']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-list']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-option']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-option-main']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-option-avatar']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-manage-button']} */ ;
 /** @type {__VLS_StyleScopedClasses['nav-label']} */ ;
 /** @type {__VLS_StyleScopedClasses['nav-link']} */ ;
-/** @type {__VLS_StyleScopedClasses['active']} */ ;
 /** @type {__VLS_StyleScopedClasses['nav-count']} */ ;
+/** @type {__VLS_StyleScopedClasses['nav-link']} */ ;
 /** @type {__VLS_StyleScopedClasses['sidebar-bottom']} */ ;
 /** @type {__VLS_StyleScopedClasses['sidebar-status']} */ ;
 /** @type {__VLS_StyleScopedClasses['live-dot']} */ ;
@@ -2525,6 +4263,32 @@ else {
 /** @type {__VLS_StyleScopedClasses['top-avatar-image']} */ ;
 /** @type {__VLS_StyleScopedClasses['top-avatar']} */ ;
 /** @type {__VLS_StyleScopedClasses['dashboard-content']} */ ;
+/** @type {__VLS_StyleScopedClasses['user-management-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['page-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
+/** @type {__VLS_StyleScopedClasses['heading-sub']} */ ;
+/** @type {__VLS_StyleScopedClasses['secondary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['user-management-card']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-section-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['invite-form']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['select-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['success-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['error-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['member-list']} */ ;
+/** @type {__VLS_StyleScopedClasses['member-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['protected-member-role']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['select-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['small']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['member-list']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-section-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['member-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['invitation-row']} */ ;
 /** @type {__VLS_StyleScopedClasses['page-heading']} */ ;
 /** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
 /** @type {__VLS_StyleScopedClasses['heading-sub']} */ ;
@@ -2590,6 +4354,86 @@ else {
 /** @type {__VLS_StyleScopedClasses['mobile-nav-item']} */ ;
 /** @type {__VLS_StyleScopedClasses['mobile-nav-item']} */ ;
 /** @type {__VLS_StyleScopedClasses['mobile-nav-item']} */ ;
+/** @type {__VLS_StyleScopedClasses['mobile-nav-item']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-overlay']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-selector-overlay']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-dialog']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-selector-dialog']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-header']} */ ;
+/** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
+/** @type {__VLS_StyleScopedClasses['icon-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-list']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-selector-list']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-selector-option']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-option-avatar']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-selector-name']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-manage-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-selector-manage']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-overlay']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-manager-overlay']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-dialog']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-manager-dialog']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-header']} */ ;
+/** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
+/** @type {__VLS_StyleScopedClasses['icon-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tabs']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-manager-tabs']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-manager-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-icon-editor']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-icon-preview']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-icon-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['secondary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-icon-upload']} */ ;
+/** @type {__VLS_StyleScopedClasses['visually-hidden']} */ ;
+/** @type {__VLS_StyleScopedClasses['error-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-save-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['form-subtitle']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-remove-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['danger-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-manager-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['form-subtitle']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-code-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-save-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-manager-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-devices-title']} */ ;
+/** @type {__VLS_StyleScopedClasses['form-subtitle']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['select-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['success-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['error-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-device-empty']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-device-list']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-device-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-device-summary']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-device-icon']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-device-assignment']} */ ;
+/** @type {__VLS_StyleScopedClasses['secondary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-device-action']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-device-empty']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-device-note']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-manager-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-share-card']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-icon-preview']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-share-code-field']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-code-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['secondary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['success-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['form-subtitle']} */ ;
+/** @type {__VLS_StyleScopedClasses['form-subtitle']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-overlay']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-dialog']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-header']} */ ;
@@ -2611,6 +4455,12 @@ else {
 /** @type {__VLS_StyleScopedClasses['language-option-flag']} */ ;
 /** @type {__VLS_StyleScopedClasses['language-option']} */ ;
 /** @type {__VLS_StyleScopedClasses['language-option-flag']} */ ;
+/** @type {__VLS_StyleScopedClasses['workspace-admin-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-section-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting-icon']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-switch']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-pane']} */ ;
 /** @type {__VLS_StyleScopedClasses['account-settings-form']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-section-heading']} */ ;
@@ -2664,24 +4514,33 @@ const __VLS_self = (await import('vue')).defineComponent({
             AlertTriangle: AlertTriangle,
             ArrowDownToLine: ArrowDownToLine,
             Bell: Bell,
+            Building2: Building2,
             Check: Check,
             ChevronDown: ChevronDown,
             CircleCheck: CircleCheck,
             CircleMinus: CircleMinus,
             Clock3: Clock3,
+            Copy: Copy,
             Cpu: Cpu,
+            ImagePlus: ImagePlus,
             LayoutDashboard: LayoutDashboard,
+            LockKeyhole: LockKeyhole,
             LoaderCircle: LoaderCircle,
             LogOut: LogOut,
             Mail: Mail,
             MapPin: MapPin,
             MessageCircle: MessageCircle,
             Moon: Moon,
+            Pencil: Pencil,
+            Plus: Plus,
             RefreshCw: RefreshCw,
             Search: Search,
+            Settings: Settings,
+            Share2: Share2,
             ShieldCheck: ShieldCheck,
             Signal: Signal,
             Sun: Sun,
+            UsersRound: UsersRound,
             X: X,
             user: user,
             devices: devices,
@@ -2689,12 +4548,42 @@ const __VLS_self = (await import('vue')).defineComponent({
             notificationOpen: notificationOpen,
             email: email,
             password: password,
+            registerName: registerName,
+            registerEmail: registerEmail,
+            registerPassword: registerPassword,
+            registerWorkspaceName: registerWorkspaceName,
+            registerMessage: registerMessage,
+            registerError: registerError,
+            inviteEmail: inviteEmail,
+            inviteRole: inviteRole,
+            inviteError: inviteError,
+            inviteMessage: inviteMessage,
             search: search,
             loginError: loginError,
             pageError: pageError,
             loading: loading,
             submitting: submitting,
             loginMode: loginMode,
+            workspaceName: workspaceName,
+            workspaceIconDataUrl: workspaceIconDataUrl,
+            workspaceIconError: workspaceIconError,
+            workspaceSaving: workspaceSaving,
+            importWorkspaceCode: importWorkspaceCode,
+            workspaceShareMessage: workspaceShareMessage,
+            workspaces: workspaces,
+            accountLinkedDevices: accountLinkedDevices,
+            accountDevicesLoading: accountDevicesLoading,
+            accountDevicesError: accountDevicesError,
+            accountDevicesMessage: accountDevicesMessage,
+            workspaceDeviceTargetId: workspaceDeviceTargetId,
+            activeWorkspaceId: activeWorkspaceId,
+            activeWorkspace: activeWorkspace,
+            activeWorkspaceCode: activeWorkspaceCode,
+            canManageActiveWorkspace: canManageActiveWorkspace,
+            workspaceMembers: workspaceMembers,
+            workspaceInvitations: workspaceInvitations,
+            registrationEnabled: registrationEnabled,
+            managementTab: managementTab,
             forgotEmail: forgotEmail,
             forgotMessage: forgotMessage,
             forgotError: forgotError,
@@ -2704,6 +4593,10 @@ const __VLS_self = (await import('vue')).defineComponent({
             resetError: resetError,
             settingsOpen: settingsOpen,
             settingsTab: settingsTab,
+            workspaceMenuOpen: workspaceMenuOpen,
+            mobileWorkspaceSelectorOpen: mobileWorkspaceSelectorOpen,
+            workspaceDialogOpen: workspaceDialogOpen,
+            workspaceDialogAction: workspaceDialogAction,
             language: language,
             darkMode: darkMode,
             currentPassword: currentPassword,
@@ -2724,6 +4617,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             avatarError: avatarError,
             activeMobileTab: activeMobileTab,
             t: t,
+            workspaceRoleLabel: workspaceRoleLabel,
             dateLocale: dateLocale,
             reportDate: reportDate,
             filteredDevices: filteredDevices,
@@ -2736,6 +4630,17 @@ const __VLS_self = (await import('vue')).defineComponent({
             markAllNotificationsRead: markAllNotificationsRead,
             openDeviceNotification: openDeviceNotification,
             notificationMessageInEnglish: notificationMessageInEnglish,
+            assignAccountDevice: assignAccountDevice,
+            createWorkspace: createWorkspace,
+            openWorkspaceManager: openWorkspaceManager,
+            updateWorkspace: updateWorkspace,
+            removeActiveWorkspace: removeActiveWorkspace,
+            selectWorkspaceIcon: selectWorkspaceIcon,
+            joinWorkspaceByCode: joinWorkspaceByCode,
+            shareWorkspaceCode: shareWorkspaceCode,
+            toggleRegistrationSetting: toggleRegistrationSetting,
+            changeWorkspace: changeWorkspace,
+            registerAccount: registerAccount,
             login: login,
             requestPasswordReset: requestPasswordReset,
             submitPasswordReset: submitPasswordReset,
@@ -2746,6 +4651,9 @@ const __VLS_self = (await import('vue')).defineComponent({
             selectAvatar: selectAvatar,
             toggleDarkMode: toggleDarkMode,
             setLanguage: setLanguage,
+            inviteUser: inviteUser,
+            updateMemberRole: updateMemberRole,
+            removeMember: removeMember,
             logout: logout,
             formatTime: formatTime,
             formatRefreshTime: formatRefreshTime,
@@ -2756,6 +4664,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             toggleDevice: toggleDevice,
             deviceStatusIcon: deviceStatusIcon,
             deviceStatusLabel: deviceStatusLabel,
+            navigateMobileSection: navigateMobileSection,
         };
     },
 });

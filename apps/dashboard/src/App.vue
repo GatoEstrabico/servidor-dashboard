@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import {
-  Activity, AlertTriangle, ArrowDownToLine, Bell, Check, ChevronDown,
-  CircleAlert, CircleCheck, CircleMinus, Clock3, Cpu, Flame, LayoutDashboard,
-  LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, RefreshCw, Search,
-  Settings, ShieldCheck, Signal, Sun, Thermometer, Waves, X
+  Activity, AlertTriangle, ArrowDownToLine, Bell, Building2, Check, ChevronDown,
+  CircleAlert, CircleCheck, CircleMinus, Clock3, Copy, Cpu, Flame, ImagePlus, LayoutDashboard, LockKeyhole,
+  LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, Pencil, Plus, RefreshCw, Search,
+  Settings, Share2, ShieldCheck, Signal, Sun, Thermometer, UsersRound, Waves, X
 } from 'lucide-vue-next';
 
 type User = {
@@ -15,7 +15,25 @@ type User = {
   whatsappNumber: string | null;
   emailNotifications: boolean;
   whatsappNotifications: boolean;
+  emailVerifiedAt: string | null;
+  isPlatformAdmin: boolean;
+  activeWorkspaceId: string | null;
+  workspaces: Workspace[];
 };
+type Workspace = { id: string; name: string; role: string; accessCode?: string | null; iconDataUrl?: string | null };
+type AccountLinkedDevice = {
+  id: string;
+  externalId: string;
+  name: string;
+  location: string | null;
+  status: Device['status'];
+  lastSeenAt: string;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  canAssign: boolean;
+};
+type WorkspaceMember = { id: string; email: string; displayName: string; role: string; emailVerifiedAt: string | null; isPlatformAdmin: boolean; createdAt: string };
+type WorkspaceInvitation = { id: string; email: string; role: string; expiresAt: string; createdAt: string };
 type Reading = { id: string; type: string; value: number; unit: string; recordedAt: string };
 type Device = {
   id: string;
@@ -45,12 +63,43 @@ const notificationOpen = ref(false);
 const csrfToken = ref('');
 const email = ref('');
 const password = ref('');
+const registerName = ref('');
+const registerEmail = ref('');
+const registerPassword = ref('');
+const registerWorkspaceName = ref('');
+const registerMessage = ref('');
+const registerError = ref('');
+const inviteEmail = ref('');
+const inviteRole = ref('member');
+const inviteError = ref('');
+const inviteMessage = ref('');
 const search = ref('');
 const loginError = ref('');
 const pageError = ref('');
 const loading = ref(true);
 const submitting = ref(false);
-const loginMode = ref<'login' | 'forgot' | 'reset'>('login');
+const loginMode = ref<'login' | 'register' | 'forgot' | 'reset'>('login');
+const workspaceName = ref('');
+const workspaceIconDataUrl = ref<string | null>(null);
+const workspaceIconError = ref('');
+const workspaceSaving = ref(false);
+const importWorkspaceCode = ref('');
+const workspaceShareMessage = ref('');
+const workspaces = ref<Workspace[]>([]);
+const accountLinkedDevices = ref<AccountLinkedDevice[]>([]);
+const accountDevicesLoading = ref(false);
+const accountDevicesError = ref('');
+const accountDevicesMessage = ref('');
+const workspaceDeviceTargetId = ref<string | null>(null);
+const activeWorkspaceId = ref<string | null>(null);
+const activeWorkspace = computed(() => workspaces.value.find((workspace) => workspace.id === activeWorkspaceId.value) ?? null);
+const activeWorkspaceCode = computed(() => activeWorkspace.value?.accessCode ?? '');
+const canManageActiveWorkspace = computed(() => ['owner', 'admin'].includes(activeWorkspace.value?.role ?? ''));
+const workspaceMembers = ref<WorkspaceMember[]>([]);
+const workspaceInvitations = ref<WorkspaceInvitation[]>([]);
+const registrationEnabled = ref(false);
+const usePlatformAdminControls = computed(() => Boolean(user.value?.isPlatformAdmin));
+const managementTab = ref<'overview' | 'users'>('overview');
 const forgotEmail = ref('');
 const forgotMessage = ref('');
 const forgotError = ref('');
@@ -61,6 +110,10 @@ const resetError = ref('');
 const resetToken = ref('');
 const settingsOpen = ref(false);
 const settingsTab = ref<'preferences' | 'account' | 'notifications'>('preferences');
+const workspaceMenuOpen = ref(false);
+const mobileWorkspaceSelectorOpen = ref(false);
+const workspaceDialogOpen = ref(false);
+const workspaceDialogAction = ref<'create' | 'edit' | 'import' | 'share' | 'devices'>('create');
 const language = ref<Language>('pt-BR');
 const darkMode = ref(false);
 const currentPassword = ref('');
@@ -238,11 +291,101 @@ const englishText: Record<string, string> = {
   'Nao foi possivel encerrar a sessao. Tente novamente.': 'Could not end the session. Try again.',
   'Perfil atualizado.': 'Profile updated.',
   'Preferências de notificações salvas.': 'Notification preferences saved.',
-  'Informe sua senha atual para salvar.': 'Enter your current password to save.'
+  'Informe sua senha atual para salvar.': 'Enter your current password to save.',
+  'AMBIENTES': 'WORKSPACES',
+  'Ambientes': 'Workspaces',
+  'Ações de ambiente': 'Workspace actions',
+  'Fechar seleção de ambientes': 'Close workspace selection',
+  'Fechar gerenciamento de ambientes': 'Close workspace management',
+  'Selecionar ambiente': 'Select workspace',
+  'Adicionar/editar ambiente': 'Add/edit workspace',
+  'Criar': 'Create',
+  'Editar': 'Edit',
+  'Importar': 'Import',
+  'Compartilhar': 'Share',
+  'Nome do ambiente': 'Workspace name',
+  'Ex.: Laboratório Central': 'E.g. Central Laboratory',
+  'Ícone do ambiente': 'Workspace icon',
+  'Imagem JPG, PNG ou WebP, até 8 MB': 'JPG, PNG, or WebP image, up to 8 MB',
+  'Escolher imagem': 'Choose image',
+  'Escolha uma imagem JPG, PNG ou WebP de até 8 MB.': 'Choose a JPG, PNG, or WebP image up to 8 MB.',
+  'Não foi possível processar essa imagem.': 'Could not process this image.',
+  'Criar ambiente': 'Create workspace',
+  'Salvar alterações': 'Save changes',
+  'Você pode ver e compartilhar este ambiente, mas apenas um owner ou admin pode editar seu nome e ícone.': 'You can view and share this workspace, but only an owner or admin can edit its name and icon.',
+  'Insira o código compartilhado para adicionar o ambiente à sua lista.': 'Enter the shared code to add this workspace to your list.',
+  'Código do ambiente': 'Workspace code',
+  'Importar ambiente': 'Import workspace',
+  'Selecione ou crie um ambiente antes de compartilhar.': 'Select or create a workspace before sharing.',
+  'Código de acesso para compartilhar': 'Access code to share',
+  'Copiar código do ambiente': 'Copy workspace code',
+  'Envie este código para outro usuário importar o ambiente e acompanhar os mesmos aparelhos.': 'Send this code to another user so they can import the workspace and monitor the same devices.',
+  'Código do ambiente copiado.': 'Workspace code copied.',
+  'Não foi possível copiar automaticamente. Copie manualmente: ': 'Could not copy automatically. Copy manually: ',
+  'Selecionar ambiente de destino': 'Select destination workspace',
+  'Ambiente atual': 'Current workspace',
+  'Sem ambiente': 'No workspace',
+  'Adicionar a este ambiente': 'Add to this workspace',
+  'Mover para este ambiente': 'Move to this workspace',
+  'Este aparelho já está neste ambiente': 'This device is already in this workspace',
+  'Mover este aparelho? Ele deixará de aparecer no ambiente atual.': 'Move this device? It will no longer appear in its current workspace.',
+  'Aparelho adicionado ao ambiente.': 'Device added to workspace.',
+  'Aparelho movido para o ambiente.': 'Device moved to workspace.',
+  'Nenhum aparelho de monitoramento vinculado à sua conta.': 'No monitoring devices are linked to your account.',
+  'Falha ao carregar aparelhos vinculados.': 'Failed to load linked devices.',
+  'Não foi possível adicionar o aparelho ao ambiente.': 'Could not add the device to the workspace.',
+  'Você não pertence a esse ambiente.': 'You do not belong to this workspace.',
+  'Aparelho inválido.': 'Invalid device.',
+  'Aparelho não vinculado à sua conta.': 'This device is not linked to your account.',
+  'Você não tem permissão para mover este aparelho.': 'You do not have permission to move this device.',
+  'Gerenciamento de aparelhos': 'Device management',
+  'Aparelhos de monitoramento vinculados à sua conta': 'Monitoring devices linked to your account',
+  'Sem permissão para mover este aparelho.': 'You do not have permission to move this device.',
+  'Escolha o ambiente de destino para adicionar ou mover seus aparelhos vinculados.': 'Choose a destination workspace to add or move your linked devices.',
+  'Carregando aparelhos...': 'Loading devices...',
+  'O aparelho será associado ao ambiente selecionado acima.': 'The device will be assigned to the workspace selected above.',
+  'Cadastro público': 'Public registration',
+  'Permitir criação de contas': 'Allow account creation',
+  'Habilitado na tela de login': 'Enabled on the sign-in screen',
+  'Desabilitado': 'Disabled',
+  'Convite enviado por e-mail.': 'Invitation sent by email.',
+  'Informe um e-mail válido.': 'Enter a valid email address.',
+  'Sem permissão para convidar pessoas para este ambiente.': 'You do not have permission to invite people to this workspace.',
+  'Sem permissão para gerenciar este ambiente.': 'You do not have permission to manage this workspace.',
+  'Nao foi possivel carregar os ambientes.': 'Could not load workspaces.',
+  'Nao foi possivel criar o ambiente.': 'Could not create the workspace.',
+  'Nao foi possivel atualizar o ambiente.': 'Could not update the workspace.',
+  'Nao foi possivel importar o ambiente.': 'Could not import the workspace.',
+  'Nao foi possivel trocar de ambiente.': 'Could not switch workspaces.',
+  'Excluir ambiente': 'Delete workspace',
+  'Remover da minha lista': 'Remove from my list',
+  'Excluir este ambiente para todos? Esta ação não pode ser desfeita.': 'Delete this workspace for everyone? This action cannot be undone.',
+  'Remover este ambiente apenas da sua lista? Você poderá entrar novamente pelo código compartilhado.': 'Remove this workspace from your list only? You can rejoin with the shared code.',
+  'Isso excluirá o ambiente e o removerá para todos os membros.': 'This deletes the workspace for all members.',
+  'Isso remove sua participação, mas mantém o ambiente para os outros membros.': 'This removes your membership but keeps the workspace for other members.',
+  'Usuários': 'Users',
+  'Voltar': 'Back',
+  'Gerencie membros, papéis e convites do ambiente ativo.': 'Manage members, roles, and invitations for the active workspace.',
+  'Convidar usuário': 'Invite user',
+  'Convidar': 'Invite',
+  'Membro': 'Member',
+  'Administrador': 'Administrator',
+  'Proprietário': 'Owner',
+  'Administrador da plataforma': 'Platform administrator',
+  'O papel deste administrador da plataforma não pode ser alterado.': 'This platform administrator role cannot be changed.',
+  'O papel da conta administradora da plataforma não pode ser alterado.': 'The platform administrator account role cannot be changed.',
+  'Convites pendentes': 'Pending invitations',
+  'Remover': 'Remove',
+  'usuario@empresa.com': 'user@company.com'
 };
 
 function t(text: string) {
   return language.value === 'en' ? englishText[text] ?? text : text;
+}
+
+function workspaceRoleLabel(role: string) {
+  const labels: Record<string, string> = { owner: 'Proprietário', admin: 'Administrador', member: 'Membro' };
+  return t(labels[role] ?? role);
 }
 
 const dateLocale = computed(() => language.value === 'en' ? 'en-GB' : 'pt-BR');
@@ -356,15 +499,328 @@ function handleNotificationKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') notificationOpen.value = false;
 }
 
+async function loadWorkspaces() {
+  if (!user.value) {
+    workspaces.value = [];
+    activeWorkspaceId.value = null;
+    workspaceMembers.value = [];
+    workspaceInvitations.value = [];
+    return;
+  }
+  try {
+    const result = await api<{ workspaces: Workspace[]; activeWorkspaceId: string | null; isPlatformAdmin: boolean }>('/api/workspaces');
+    workspaces.value = result.workspaces;
+    activeWorkspaceId.value = result.activeWorkspaceId;
+    user.value = { ...user.value, activeWorkspaceId: result.activeWorkspaceId, workspaces: result.workspaces, isPlatformAdmin: result.isPlatformAdmin };
+    if (result.activeWorkspaceId) {
+      await loadWorkspaceMembers();
+    } else {
+      workspaceMembers.value = [];
+      workspaceInvitations.value = [];
+    }
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Nao foi possivel carregar os ambientes.';
+  }
+}
+
+async function loadWorkspaceMembers() {
+  if (!user.value || !activeWorkspaceId.value) {
+    workspaceMembers.value = [];
+    workspaceInvitations.value = [];
+    return;
+  }
+  try {
+    const [membersResult, invitationsResult] = await Promise.all([
+      api<{ members: WorkspaceMember[] }>('/api/workspaces/' + activeWorkspaceId.value + '/members'),
+      api<{ invitations: WorkspaceInvitation[] }>('/api/workspaces/' + activeWorkspaceId.value + '/invitations')
+    ]);
+    workspaceMembers.value = membersResult.members;
+    workspaceInvitations.value = invitationsResult.invitations;
+  } catch {
+    workspaceMembers.value = [];
+    workspaceInvitations.value = [];
+  }
+}
+
+async function loadAccountDevices() {
+  accountDevicesLoading.value = true;
+  accountDevicesError.value = '';
+  try {
+    const result = await api<{ devices: AccountLinkedDevice[] }>('/api/account/devices');
+    accountLinkedDevices.value = result.devices;
+  } catch (error) {
+    accountDevicesError.value = error instanceof Error ? t(error.message) : t('Falha ao carregar aparelhos vinculados.');
+  } finally {
+    accountDevicesLoading.value = false;
+  }
+}
+
+async function assignAccountDevice(device: AccountLinkedDevice) {
+  const targetWorkspaceId = workspaceDeviceTargetId.value;
+  if (!targetWorkspaceId || device.workspaceId === targetWorkspaceId) return;
+  if (device.workspaceId && !window.confirm(t('Mover este aparelho? Ele deixará de aparecer no ambiente atual.'))) return;
+  accountDevicesError.value = '';
+  accountDevicesMessage.value = '';
+  try {
+    await api('/api/workspaces/' + targetWorkspaceId + '/devices', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ deviceId: device.id })
+    });
+    accountDevicesMessage.value = t(device.workspaceId ? 'Aparelho movido para o ambiente.' : 'Aparelho adicionado ao ambiente.');
+    await loadAccountDevices();
+    await loadDevices();
+  } catch (error) {
+    accountDevicesError.value = error instanceof Error ? t(error.message) : t('Não foi possível adicionar o aparelho ao ambiente.');
+  }
+}
+
+async function createWorkspace() {
+  if (!workspaceName.value.trim()) return;
+  workspaceSaving.value = true;
+  try {
+    const result = await api<{ workspace: Workspace; activeWorkspaceId: string }>('/api/workspaces', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ name: workspaceName.value.trim(), iconDataUrl: workspaceIconDataUrl.value })
+    });
+    activeWorkspaceId.value = result.activeWorkspaceId;
+    workspaceName.value = '';
+    workspaceIconDataUrl.value = null;
+    workspaceDialogOpen.value = false;
+    await loadWorkspaces();
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Nao foi possivel criar o ambiente.';
+  } finally {
+    workspaceSaving.value = false;
+  }
+}
+
+function openWorkspaceManager(action: 'create' | 'edit' | 'import' | 'share' | 'devices' = 'create') {
+  workspaceDialogAction.value = action;
+  workspaceName.value = action === 'edit' ? activeWorkspace.value?.name ?? '' : '';
+  workspaceIconDataUrl.value = action === 'edit' ? activeWorkspace.value?.iconDataUrl ?? null : null;
+  workspaceIconError.value = '';
+  workspaceShareMessage.value = '';
+  accountDevicesError.value = '';
+  accountDevicesMessage.value = '';
+  if (action === 'devices') {
+    workspaceDeviceTargetId.value = activeWorkspaceId.value;
+    void loadAccountDevices();
+  }
+  workspaceDialogOpen.value = true;
+}
+
+async function updateWorkspace() {
+  if (!activeWorkspaceId.value || !workspaceName.value.trim() || !canManageActiveWorkspace.value) return;
+  workspaceSaving.value = true;
+  try {
+    await api<{ workspace: Workspace }>('/api/workspaces/' + activeWorkspaceId.value, {
+      method: 'PATCH',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ name: workspaceName.value.trim(), iconDataUrl: workspaceIconDataUrl.value })
+    });
+    await loadWorkspaces();
+    workspaceDialogOpen.value = false;
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Nao foi possivel atualizar o ambiente.';
+  } finally {
+    workspaceSaving.value = false;
+  }
+}
+
+async function removeActiveWorkspace() {
+  const workspace = activeWorkspace.value;
+  if (!workspace || !activeWorkspaceId.value) return;
+  const isOwner = workspace.role === 'owner';
+  const confirmation = isOwner
+    ? t('Excluir este ambiente para todos? Esta ação não pode ser desfeita.')
+    : t('Remover este ambiente apenas da sua lista? Você poderá entrar novamente pelo código compartilhado.');
+  if (!window.confirm(confirmation)) return;
+
+  workspaceSaving.value = true;
+  pageError.value = '';
+  try {
+    await api<{ action: 'deleted' | 'removed'; activeWorkspaceId: string | null }>('/api/workspaces/' + activeWorkspaceId.value, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken.value }
+    });
+    workspaceDialogOpen.value = false;
+    managementTab.value = 'overview';
+    await loadWorkspaces();
+    if (activeWorkspaceId.value) {
+      await loadDevices();
+    } else {
+      devices.value = [];
+      knownDeviceStatuses = undefined;
+    }
+  } catch (error) {
+    pageError.value = error instanceof Error ? t(error.message) : t('Nao foi possivel remover o ambiente.');
+  } finally {
+    workspaceSaving.value = false;
+  }
+}
+
+async function selectWorkspaceIcon(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  workspaceIconError.value = '';
+  if (!file) return;
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024) {
+    workspaceIconError.value = 'Escolha uma imagem JPG, PNG ou WebP de até 8 MB.';
+    input.value = '';
+    return;
+  }
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas indisponível.');
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    workspaceIconDataUrl.value = canvas.toDataURL('image/webp', 0.78);
+  } catch {
+    workspaceIconError.value = 'Não foi possível processar essa imagem.';
+  } finally {
+    input.value = '';
+  }
+}
+
+async function joinWorkspaceByCode() {
+  const code = importWorkspaceCode.value.trim();
+  if (!code) return;
+  workspaceShareMessage.value = '';
+  try {
+    const result = await api<{ workspace: Workspace; activeWorkspaceId: string; message: string }>('/api/workspaces/join', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ code })
+    });
+    importWorkspaceCode.value = '';
+    activeWorkspaceId.value = result.activeWorkspaceId;
+    workspaceMenuOpen.value = false;
+    await loadWorkspaces();
+    workspaceDialogOpen.value = false;
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Nao foi possivel importar o ambiente.';
+  }
+}
+
+async function shareWorkspaceCode() {
+  const code = activeWorkspaceCode.value;
+  if (!code) {
+    pageError.value = 'Este ambiente ainda não possui um código de compartilhamento.';
+    return;
+  }
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(code);
+    } else {
+      const fallback = document.createElement('textarea');
+      fallback.value = code;
+      fallback.setAttribute('readonly', 'true');
+      fallback.style.position = 'fixed';
+      fallback.style.opacity = '0';
+      document.body.appendChild(fallback);
+      fallback.select();
+      document.execCommand('copy');
+      document.body.removeChild(fallback);
+    }
+    workspaceShareMessage.value = t('Código do ambiente copiado.');
+    pageError.value = '';
+  } catch {
+    workspaceShareMessage.value = t('Não foi possível copiar automaticamente. Copie manualmente: ') + code;
+  }
+}
+
+async function toggleRegistrationSetting() {
+  if (!user.value?.isPlatformAdmin) return;
+  try {
+    const result = await api<{ enabled: boolean }>('/api/admin/registration-settings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ enabled: !registrationEnabled.value })
+    });
+    registrationEnabled.value = result.enabled;
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Nao foi possivel alterar a abertura de cadastro.';
+  }
+}
+
+async function changeWorkspace(workspaceId: string) {
+  try {
+    await api<{ activeWorkspaceId: string }>('/api/workspaces/active', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ workspaceId })
+    });
+    activeWorkspaceId.value = workspaceId;
+    if (user.value) user.value.activeWorkspaceId = workspaceId;
+    managementTab.value = 'overview';
+    activeMobileTab.value = 'home';
+    await loadDevices();
+    await loadWorkspaceMembers();
+    await nextTick();
+    document.getElementById('inicio')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Nao foi possivel trocar de ambiente.';
+  }
+}
+
+async function registerAccount() {
+  registerError.value = '';
+  registerMessage.value = '';
+  if (!registerName.value.trim() || !registerEmail.value.trim() || !registerPassword.value.trim()) {
+    registerError.value = 'Preencha nome, e-mail e senha.';
+    return;
+  }
+  submitting.value = true;
+  try {
+    const result = await api<{ message: string }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        displayName: registerName.value.trim(),
+        email: registerEmail.value.trim(),
+        password: registerPassword.value,
+        workspaceName: registerWorkspaceName.value.trim() || undefined
+      })
+    });
+    registerMessage.value = result.message;
+    registerName.value = '';
+    registerEmail.value = '';
+    registerPassword.value = '';
+    registerWorkspaceName.value = '';
+    loginMode.value = 'login';
+  } catch (error) {
+    registerError.value = error instanceof Error ? error.message : 'Nao foi possivel criar a conta.';
+  } finally {
+    submitting.value = false;
+  }
+}
+
 async function checkSession() {
   try {
-    const result = await api<{ user: User; csrfToken: string }>('/api/auth/me');
-    user.value = result.user;
-    csrfToken.value = result.csrfToken;
+    const [meResult, settingsResult] = await Promise.all([
+      api<{ user: User; csrfToken: string }>('/api/auth/me'),
+      api<{ enabled: boolean }>('/api/auth/registration-settings')
+    ]);
+    user.value = meResult.user;
+    csrfToken.value = meResult.csrfToken;
+    registrationEnabled.value = settingsResult.enabled;
     syncProfileForm();
+    await loadWorkspaces();
     await loadDevices();
   } catch {
     user.value = null;
+    try {
+      const settingsResult = await api<{ enabled: boolean }>('/api/auth/registration-settings');
+      registrationEnabled.value = settingsResult.enabled;
+    } catch {
+      registrationEnabled.value = false;
+    }
   } finally {
     loading.value = false;
   }
@@ -381,6 +837,7 @@ async function login() {
     user.value = result.user;
     csrfToken.value = result.csrfToken;
     password.value = '';
+    await loadWorkspaces();
     await loadDevices();
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : 'Falha ao entrar.';
@@ -579,10 +1036,61 @@ function setLanguage(nextLanguage: Language) {
   localStorage.setItem('lab-monitor-language', nextLanguage);
 }
 
+async function inviteUser() {
+  if (!activeWorkspaceId.value || !inviteEmail.value.trim()) return;
+  inviteError.value = '';
+  inviteMessage.value = '';
+  try {
+    const result = await api<{ message: string }>('/api/workspaces/' + activeWorkspaceId.value + '/invitations', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ email: inviteEmail.value.trim(), role: inviteRole.value })
+    });
+    inviteMessage.value = result.message;
+    inviteEmail.value = '';
+    inviteRole.value = 'member';
+    await loadWorkspaceMembers();
+  } catch (error) {
+    inviteError.value = error instanceof Error ? error.message : 'Nao foi possivel enviar o convite.';
+  }
+}
+
+async function updateMemberRole(memberId: string, newRole: string) {
+  if (!activeWorkspaceId.value) return;
+  try {
+    await api('/api/workspaces/' + activeWorkspaceId.value + '/members', {
+      method: 'PATCH',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ userId: memberId, role: newRole })
+    });
+    await loadWorkspaceMembers();
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Nao foi possivel atualizar o papel do usuário.';
+  }
+}
+
+async function removeMember(memberId: string) {
+  if (!activeWorkspaceId.value) return;
+  try {
+    await api('/api/workspaces/' + activeWorkspaceId.value + '/members/' + memberId, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken.value }
+    });
+    await loadWorkspaceMembers();
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Nao foi possivel remover o usuário.';
+  }
+}
+
 async function logout() {
   try {
     await api('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken.value } });
     user.value = null;
+    workspaces.value = [];
+    activeWorkspaceId.value = null;
+    workspaceMembers.value = [];
+    workspaceInvitations.value = [];
+    registrationEnabled.value = false;
     devices.value = [];
     notifications.value = [];
     notificationOpen.value = false;
@@ -668,8 +1176,21 @@ function deviceStatusLabel(status: Device['status']) {
 }
 
 function syncMobileTab() {
+  if (managementTab.value === 'users') {
+    activeMobileTab.value = 'users';
+    return;
+  }
   const devicesSection = document.getElementById('aparelhos');
   if (devicesSection) activeMobileTab.value = devicesSection.getBoundingClientRect().top <= window.innerHeight * 0.45 ? 'devices' : 'home';
+}
+
+async function navigateMobileSection(section: 'home' | 'devices') {
+  managementTab.value = 'overview';
+  activeMobileTab.value = section;
+  await nextTick();
+  const sectionId = section === 'devices' ? 'aparelhos' : 'inicio';
+  document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  window.history.replaceState({}, '', `#${sectionId}`);
 }
 
 onMounted(() => {
@@ -732,7 +1253,30 @@ onUnmounted(() => {
             <LoaderCircle v-if="submitting" class="spin" :size="17" />
             <span>{{ submitting ? t('Entrando...') : t('Entrar') }}</span>
           </button>
+          <button v-if="registrationEnabled" class="secondary-button login-button" type="button" @click="loginMode = 'register'">
+            <span>Criar conta</span>
+          </button>
           <div class="secure-note"><ShieldCheck :size="16" /><span>{{ t('Sessao protegida com criptografia') }}</span></div>
+        </template>
+        <template v-else-if="loginMode === 'register'">
+          <button class="back-link" type="button" @click="loginMode = 'login'; registerError = ''; registerMessage = ''"><ChevronDown :size="16" /> {{ t('Voltar ao login') }}</button>
+          <p class="eyebrow">NOVA CONTA</p>
+          <h2>Criar conta</h2>
+          <p class="form-subtitle">Crie sua conta e comece com seu primeiro ambiente.</p>
+          <label for="registerName">{{ t('Nome') }}</label>
+          <input id="registerName" v-model="registerName" type="text" maxlength="80" autocomplete="name" placeholder="Seu nome" required />
+          <label for="registerEmail">{{ t('E-mail') }}</label>
+          <input id="registerEmail" v-model="registerEmail" type="email" autocomplete="email" placeholder="voce@laboratorio.com" required />
+          <label for="registerPassword">{{ t('Senha') }}</label>
+          <input id="registerPassword" v-model="registerPassword" type="password" minlength="12" autocomplete="new-password" placeholder="Pelo menos 12 caracteres" required />
+          <label for="registerWorkspaceName">Nome do ambiente</label>
+          <input id="registerWorkspaceName" v-model="registerWorkspaceName" type="text" maxlength="80" placeholder="Laboratório Central" />
+          <p v-if="registerError" class="error-message" role="alert">{{ registerError }}</p>
+          <p v-if="registerMessage" class="success-message" role="status">{{ registerMessage }}</p>
+          <button class="primary-button login-button" type="button" :disabled="submitting" @click="registerAccount">
+            <LoaderCircle v-if="submitting" class="spin" :size="17" />
+            <span>{{ submitting ? 'Criando conta...' : 'Criar conta' }}</span>
+          </button>
         </template>
         <template v-else-if="loginMode === 'forgot'">
           <button class="back-link" type="button" @click="loginMode = 'login'; forgotError = ''; forgotMessage = ''"><ChevronDown :size="16" /> {{ t('Voltar ao login') }}</button>
@@ -771,9 +1315,27 @@ onUnmounted(() => {
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark"><Activity :size="18" /></span><span>LAB<span class="brand-light">/MONITOR</span></span></div>
       <div class="workspace-label">{{ t('AMBIENTE') }}</div>
-      <div class="workspace-switch"><span class="workspace-avatar">L</span><span class="workspace-name">{{ t('Laboratorio Central') }}<small>{{ t('Plano operacional') }}</small></span><ChevronDown :size="15" /></div>
+      <div class="workspace-switch" @click="workspaceMenuOpen = !workspaceMenuOpen" style="cursor:pointer;">
+        <span class="workspace-avatar"><img v-if="activeWorkspace?.iconDataUrl" :src="activeWorkspace.iconDataUrl" :alt="''" /><span v-else>{{ activeWorkspace?.name.slice(0, 1).toUpperCase() || 'L' }}</span></span>
+        <span class="workspace-name">{{ activeWorkspace?.name || t('Laboratorio Central') }}<small>{{ t('Plano operacional') }}</small></span>
+        <ChevronDown :size="15" />
+      </div>
+      <div v-if="workspaceMenuOpen" class="workspace-dropdown">
+        <div class="workspace-list" v-if="workspaces.length">
+          <button v-for="workspace in workspaces" :key="workspace.id" class="workspace-option" type="button" :class="{ active: workspace.id === activeWorkspaceId }" @click="workspaceMenuOpen = false; changeWorkspace(workspace.id)">
+            <span class="workspace-option-main"><span class="workspace-option-avatar"><img v-if="workspace.iconDataUrl" :src="workspace.iconDataUrl" alt="" /><span v-else>{{ workspace.name.slice(0, 1).toUpperCase() }}</span></span>{{ workspace.name }}</span>
+            <small>{{ workspaceRoleLabel(workspace.role) }}</small>
+          </button>
+        </div>
+        <button class="workspace-manage-button" type="button" @click="workspaceMenuOpen = false; openWorkspaceManager('create')"><Plus :size="15" /> {{ t('Adicionar/editar ambiente') }}</button>
+      </div>
       <div class="nav-label">{{ t('GERENCIAMENTO') }}</div>
-      <nav><a class="nav-link active" href="#inicio"><LayoutDashboard :size="17" /><span>{{ t('Visao geral') }}</span><span class="nav-count">{{ devices.length }}</span></a></nav>
+      <nav>
+        <a class="nav-link" :class="{ active: managementTab === 'overview' }" href="#inicio" @click="managementTab = 'overview'"><LayoutDashboard :size="17" /><span>{{ t('Visao geral') }}</span><span class="nav-count">{{ devices.length }}</span></a>
+        <button class="nav-link" :class="{ active: managementTab === 'users' }" type="button" @click="managementTab = 'users'">
+          <Settings :size="17" /><span>{{ t('Usuários') }}</span>
+        </button>
+      </nav>
       <div class="sidebar-bottom">
         <div class="sidebar-status"><span class="live-dot"></span><div>{{ t('API conectada') }}<small>{{ t('Atualizacao automatica') }}</small></div><span class="status-ping"></span></div>
         <div class="account-row"><div class="account-avatar"><img v-if="user.avatarDataUrl" :src="user.avatarDataUrl" alt="" /><span v-else>{{ user.displayName.slice(0, 1).toUpperCase() }}</span></div><div class="account-info">{{ user.displayName }}<small>{{ user.email }}</small></div><button class="icon-button sidebar-logout" :title="t('Sair')" :aria-label="t('Sair')" @click="logout"><LogOut :size="17" /></button></div>
@@ -837,12 +1399,59 @@ onUnmounted(() => {
       </header>
 
       <main id="inicio" class="dashboard-content">
+        <div v-if="managementTab === 'users'" class="user-management-panel">
+          <div class="page-heading">
+            <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h1>{{ t('Usuários') }}</h1><p class="heading-sub">{{ t('Gerencie membros, papéis e convites do ambiente ativo.') }}</p></div>
+            <button class="secondary-button" type="button" @click="managementTab = 'overview'">{{ t('Voltar') }}</button>
+          </div>
+          <section class="settings-pane user-management-card">
+            <div class="settings-section-heading"><h3>{{ t('Convidar usuário') }}</h3></div>
+            <div class="invite-form">
+              <input v-model="inviteEmail" class="settings-input" type="email" :placeholder="t('usuario@empresa.com')" />
+              <select v-model="inviteRole" class="settings-input select-input">
+                <option value="member">{{ t('Membro') }}</option>
+                <option value="admin">{{ t('Administrador') }}</option>
+              </select>
+              <button class="primary-button" type="button" @click="inviteUser">{{ t('Convidar') }}</button>
+            </div>
+            <p v-if="inviteMessage" class="success-message" role="status">{{ t(inviteMessage) }}</p>
+            <p v-if="inviteError" class="error-message" role="alert">{{ t(inviteError) }}</p>
+            <div class="member-list" v-if="workspaceMembers.length">
+              <div v-for="member in workspaceMembers" :key="member.id" class="member-row">
+                <div>
+                  <strong>{{ member.displayName || member.email }}</strong>
+                  <small>{{ member.email }}</small>
+                </div>
+                <span v-if="member.isPlatformAdmin" class="protected-member-role" :title="t('O papel deste administrador da plataforma não pode ser alterado.')" :aria-label="t('Administrador da plataforma')">
+                  <LockKeyhole :size="14" /> {{ t('Administrador da plataforma') }}
+                </span>
+                <select v-else :value="member.role" class="settings-input select-input small" @change="updateMemberRole(member.id, ($event.target as HTMLSelectElement).value)">
+                  <option value="member">{{ t('Membro') }}</option>
+                  <option value="admin">{{ t('Administrador') }}</option>
+                  <option value="owner" :disabled="member.email === user?.email">{{ t('Proprietário') }}</option>
+                </select>
+                <button v-if="member.email !== user?.email" class="text-button" type="button" @click="removeMember(member.id)">{{ t('Remover') }}</button>
+              </div>
+            </div>
+            <div class="member-list" v-if="workspaceInvitations.length">
+              <div class="settings-section-heading"><h3>{{ t('Convites pendentes') }}</h3></div>
+              <div v-for="invitation in workspaceInvitations" :key="invitation.id" class="member-row invitation-row">
+                <div>
+                  <strong>{{ invitation.email }}</strong>
+                  <small>{{ workspaceRoleLabel(invitation.role) }}</small>
+                </div>
+                <span>{{ new Date(invitation.expiresAt).toLocaleDateString('pt-BR') }}</span>
+              </div>
+            </div>
+          </section>
+        </div>
+        <template v-else>
         <div class="page-heading">
           <div><p class="eyebrow">{{ reportDate.toLocaleUpperCase(dateLocale) }}</p><h1>{{ t('Visao geral') }}</h1><p class="heading-sub">{{ t('Acompanhe a saude dos aparelhos e as ultimas medicoes.') }}</p></div>
           <button class="secondary-button" :disabled="loading" @click="loadDevices"><RefreshCw :size="16" /> {{ t('Atualizar') }}</button>
         </div>
 
-        <div v-if="pageError" class="notice-error" role="alert"><AlertTriangle :size="17" />{{ pageError }}</div>
+        <div v-if="pageError" class="notice-error" role="alert"><AlertTriangle :size="17" />{{ t(pageError) }}</div>
 
         <section class="metrics-grid" :aria-label="t('Resumo dos aparelhos')">
           <article class="metric metric-total"><div class="metric-top"><span>{{ t('Total de aparelhos') }}</span><span class="metric-icon"><Cpu :size="17" /></span></div><div class="metric-value">{{ devices.length }} <span>{{ t('cadastrados') }}</span></div><div class="metric-foot"><span class="metric-mark"></span>{{ t('Inventario monitorado') }}</div></article>
@@ -908,23 +1517,136 @@ onUnmounted(() => {
           <div class="table-footer"><span>{{ t('Exibindo') }} {{ filteredDevices.length }} {{ t('de') }} {{ devices.length }} {{ t('aparelhos') }}</span><span><span class="live-dot"></span> {{ t('Sincronizacao a cada 30 segundos') }}</span></div>
         </section>
         <footer class="dashboard-footer"><span>LAB / MONITOR <b>·</b> {{ t('Monitoramento de laboratorio') }}</span><span>{{ t('Dados atualizados em tempo real') }}</span></footer>
+        </template>
       </main>
     </section>
 
     <nav class="mobile-nav" :aria-label="t('Navegacao principal')">
-      <a class="mobile-nav-item" :class="{ active: activeMobileTab === 'home' }" href="#inicio" :aria-current="activeMobileTab === 'home' ? 'page' : undefined">
+      <a class="mobile-nav-item" :class="{ active: managementTab === 'overview' && activeMobileTab === 'home' }" href="#inicio" :aria-current="activeMobileTab === 'home' ? 'page' : undefined" @click.prevent="navigateMobileSection('home')">
         <LayoutDashboard :size="20" /><span>{{ t('Inicio') }}</span>
       </a>
-      <a class="mobile-nav-item" :class="{ active: activeMobileTab === 'devices' }" href="#aparelhos" :aria-current="activeMobileTab === 'devices' ? 'page' : undefined">
+      <button class="mobile-nav-item" type="button" @click="mobileWorkspaceSelectorOpen = true">
+        <Building2 :size="19" /><span>{{ t('Ambientes') }}</span>
+      </button>
+      <a class="mobile-nav-item" :class="{ active: managementTab === 'overview' && activeMobileTab === 'devices' }" href="#aparelhos" :aria-current="activeMobileTab === 'devices' ? 'page' : undefined" @click.prevent="navigateMobileSection('devices')">
         <Cpu :size="20" /><span>{{ t('Aparelhos') }}</span>
       </a>
-      <button class="mobile-nav-item" type="button" :disabled="loading" @click="loadDevices">
-        <RefreshCw :size="19" /><span>{{ t('Atualizar') }}</span>
+      <button class="mobile-nav-item" :class="{ active: managementTab === 'users' }" type="button" @click="managementTab = 'users'; activeMobileTab = 'users'">
+        <UsersRound :size="19" /><span>{{ t('Usuários') }}</span>
       </button>
       <button class="mobile-nav-item" type="button" @click="logout">
         <LogOut :size="19" /><span>{{ t('Sair') }}</span>
       </button>
     </nav>
+
+    <div v-if="mobileWorkspaceSelectorOpen" class="settings-overlay workspace-selector-overlay" @click.self="mobileWorkspaceSelectorOpen = false">
+      <section class="settings-dialog workspace-selector-dialog" role="dialog" aria-modal="true" aria-labelledby="mobileWorkspaceTitle">
+        <header class="settings-header">
+          <div><p class="eyebrow">{{ t('AMBIENTES') }}</p><h2 id="mobileWorkspaceTitle">{{ t('Selecionar ambiente') }}</h2></div>
+          <button class="icon-button" type="button" :aria-label="t('Fechar seleção de ambientes')" @click="mobileWorkspaceSelectorOpen = false"><X :size="19" /></button>
+        </header>
+        <div class="workspace-list workspace-selector-list">
+          <button v-for="workspace in workspaces" :key="workspace.id" class="workspace-selector-option" type="button" :class="{ active: workspace.id === activeWorkspaceId }" @click="mobileWorkspaceSelectorOpen = false; changeWorkspace(workspace.id)">
+            <span class="workspace-option-avatar"><img v-if="workspace.iconDataUrl" :src="workspace.iconDataUrl" alt="" /><span v-else>{{ workspace.name.slice(0, 1).toUpperCase() }}</span></span>
+            <span class="workspace-selector-name">{{ workspace.name }}<small>{{ workspaceRoleLabel(workspace.role) }}</small></span>
+            <Check v-if="workspace.id === activeWorkspaceId" :size="16" />
+          </button>
+        </div>
+        <button class="workspace-manage-button workspace-selector-manage" type="button" @click="mobileWorkspaceSelectorOpen = false; openWorkspaceManager('create')"><Plus :size="15" /> {{ t('Adicionar/editar ambiente') }}</button>
+      </section>
+    </div>
+
+    <div v-if="workspaceDialogOpen" class="settings-overlay workspace-manager-overlay" @click.self="workspaceDialogOpen = false">
+      <section class="settings-dialog workspace-manager-dialog" role="dialog" aria-modal="true" aria-labelledby="workspaceManagerTitle">
+        <header class="settings-header">
+          <div><p class="eyebrow">{{ t('AMBIENTES') }}</p><h2 id="workspaceManagerTitle">{{ t('Adicionar/editar ambiente') }}</h2></div>
+          <button class="icon-button" type="button" :aria-label="t('Fechar gerenciamento de ambientes')" @click="workspaceDialogOpen = false"><X :size="19" /></button>
+        </header>
+
+        <nav class="settings-tabs workspace-manager-tabs" role="tablist" :aria-label="t('Ações de ambiente')">
+          <button class="settings-tab" :class="{ active: workspaceDialogAction === 'create' }" type="button" role="tab" :aria-selected="workspaceDialogAction === 'create'" @click="openWorkspaceManager('create')"><Plus :size="14" /> {{ t('Criar') }}</button>
+          <button class="settings-tab" :class="{ active: workspaceDialogAction === 'edit' }" type="button" role="tab" :aria-selected="workspaceDialogAction === 'edit'" @click="openWorkspaceManager('edit')"><Pencil :size="14" /> {{ t('Editar') }}</button>
+          <button class="settings-tab" :class="{ active: workspaceDialogAction === 'import' }" type="button" role="tab" :aria-selected="workspaceDialogAction === 'import'" @click="openWorkspaceManager('import')"><ArrowDownToLine :size="14" /> {{ t('Importar') }}</button>
+          <button class="settings-tab" :class="{ active: workspaceDialogAction === 'devices' }" type="button" role="tab" :aria-selected="workspaceDialogAction === 'devices'" @click="openWorkspaceManager('devices')"><Cpu :size="14" /> {{ t('Aparelhos') }}</button>
+          <button class="settings-tab" :class="{ active: workspaceDialogAction === 'share' }" type="button" role="tab" :aria-selected="workspaceDialogAction === 'share'" @click="openWorkspaceManager('share')"><Share2 :size="14" /> {{ t('Compartilhar') }}</button>
+        </nav>
+
+        <div v-if="workspaceDialogAction === 'create' || workspaceDialogAction === 'edit'" class="settings-pane workspace-manager-pane">
+          <template v-if="workspaceDialogAction === 'create' || canManageActiveWorkspace">
+            <label for="workspaceName">{{ t('Nome do ambiente') }}</label>
+            <input id="workspaceName" v-model="workspaceName" class="settings-input" type="text" maxlength="80" :placeholder="t('Ex.: Laboratório Central')" />
+            <div class="workspace-icon-editor">
+              <span class="workspace-icon-preview"><img v-if="workspaceIconDataUrl" :src="workspaceIconDataUrl" alt="Prévia do ícone" /><span v-else>{{ workspaceName.slice(0, 1).toUpperCase() || '?' }}</span></span>
+              <div class="workspace-icon-copy"><strong>{{ t('Ícone do ambiente') }}</strong><small>{{ t('Imagem JPG, PNG ou WebP, até 8 MB') }}</small></div>
+              <label class="secondary-button workspace-icon-upload" for="workspaceIconFile"><ImagePlus :size="15" /> {{ t('Escolher imagem') }}</label>
+              <input id="workspaceIconFile" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" @change="selectWorkspaceIcon" />
+            </div>
+            <p v-if="workspaceIconError" class="error-message" role="alert">{{ t(workspaceIconError) }}</p>
+            <button class="primary-button settings-save-button" type="button" :disabled="workspaceSaving || !workspaceName.trim()" @click="workspaceDialogAction === 'create' ? createWorkspace() : updateWorkspace()">
+              {{ workspaceSaving ? t('Salvando...') : workspaceDialogAction === 'create' ? t('Criar ambiente') : t('Salvar alterações') }}
+            </button>
+          </template>
+          <p v-else class="form-subtitle">{{ t('Você pode ver e compartilhar este ambiente, mas apenas um owner ou admin pode editar seu nome e ícone.') }}</p>
+        </div>
+
+        <div v-if="workspaceDialogAction === 'edit' && activeWorkspace" class="workspace-remove-panel">
+          <div>
+            <strong>{{ activeWorkspace.role === 'owner' ? t('Excluir ambiente') : t('Remover da minha lista') }}</strong>
+            <small>{{ activeWorkspace.role === 'owner' ? t('Isso excluirá o ambiente e o removerá para todos os membros.') : t('Isso remove sua participação, mas mantém o ambiente para os outros membros.') }}</small>
+          </div>
+          <button class="danger-button" type="button" :disabled="workspaceSaving" @click="removeActiveWorkspace">
+            {{ workspaceSaving ? t('Salvando...') : activeWorkspace.role === 'owner' ? t('Excluir ambiente') : t('Remover da minha lista') }}
+          </button>
+        </div>
+
+        <div v-else-if="workspaceDialogAction === 'import'" class="settings-pane workspace-manager-pane">
+          <p class="form-subtitle">{{ t('Insira o código compartilhado para adicionar o ambiente à sua lista.') }}</p>
+          <label for="importWorkspaceCode">{{ t('Código do ambiente') }}</label>
+          <input id="importWorkspaceCode" v-model="importWorkspaceCode" class="settings-input workspace-code-input" type="text" maxlength="24" placeholder="LAB-ABC123" @keydown.enter.prevent="joinWorkspaceByCode" />
+          <button class="primary-button settings-save-button" type="button" :disabled="!importWorkspaceCode.trim()" @click="joinWorkspaceByCode">{{ t('Importar ambiente') }}</button>
+        </div>
+
+        <div v-else-if="workspaceDialogAction === 'devices'" class="settings-pane workspace-manager-pane">
+          <h3 class="workspace-devices-title">{{ t('Aparelhos de monitoramento vinculados à sua conta') }}</h3>
+          <p class="form-subtitle">{{ t('Escolha o ambiente de destino para adicionar ou mover seus aparelhos vinculados.') }}</p>
+          <label for="workspaceDeviceTarget">{{ t('Selecionar ambiente de destino') }}</label>
+          <select id="workspaceDeviceTarget" v-model="workspaceDeviceTargetId" class="settings-input select-input">
+            <option v-for="workspace in workspaces" :key="workspace.id" :value="workspace.id">{{ workspace.name }}</option>
+          </select>
+          <p v-if="accountDevicesMessage" class="success-message" role="status">{{ accountDevicesMessage }}</p>
+          <p v-if="accountDevicesError" class="error-message" role="alert">{{ accountDevicesError }}</p>
+          <div v-if="accountDevicesLoading" class="workspace-device-empty">{{ t('Carregando aparelhos...') }}</div>
+          <div v-else-if="accountLinkedDevices.length" class="workspace-device-list">
+            <article v-for="device in accountLinkedDevices" :key="device.id" class="workspace-device-row">
+              <div class="workspace-device-summary">
+                <span class="workspace-device-icon"><Cpu :size="17" /></span>
+                <div><strong>{{ device.name }}</strong><small>{{ device.externalId }}<template v-if="device.location"> · {{ device.location }}</template></small></div>
+              </div>
+              <div class="workspace-device-assignment"><span>{{ t('Ambiente atual') }}</span><strong>{{ device.workspaceName || t('Sem ambiente') }}</strong></div>
+              <button class="secondary-button workspace-device-action" type="button" :disabled="!workspaceDeviceTargetId || !device.canAssign || device.workspaceId === workspaceDeviceTargetId" @click="assignAccountDevice(device)">
+                {{ !device.canAssign ? t('Sem permissão para mover este aparelho.') : device.workspaceId === workspaceDeviceTargetId ? t('Este aparelho já está neste ambiente') : device.workspaceId ? t('Mover para este ambiente') : t('Adicionar a este ambiente') }}
+              </button>
+            </article>
+          </div>
+          <div v-else class="workspace-device-empty">{{ t('Nenhum aparelho de monitoramento vinculado à sua conta.') }}</div>
+          <p class="workspace-device-note">{{ t('O aparelho será associado ao ambiente selecionado acima.') }}</p>
+        </div>
+
+        <div v-else class="settings-pane workspace-manager-pane">
+          <template v-if="activeWorkspace">
+            <div class="workspace-share-card">
+              <span class="workspace-icon-preview"><img v-if="activeWorkspace.iconDataUrl" :src="activeWorkspace.iconDataUrl" alt="" /><span v-else>{{ activeWorkspace.name.slice(0, 1).toUpperCase() }}</span></span>
+              <div><strong>{{ activeWorkspace.name }}</strong><small>{{ t('Código de acesso para compartilhar') }}</small></div>
+            </div>
+            <label for="workspaceShareCode">{{ t('Código do ambiente') }}</label>
+            <div class="workspace-share-code-field"><input id="workspaceShareCode" class="settings-input workspace-code-input" type="text" :value="activeWorkspaceCode" readonly /><button class="secondary-button" type="button" :title="t('Copiar código do ambiente')" :aria-label="t('Copiar código do ambiente')" @click="shareWorkspaceCode"><Copy :size="16" /></button></div>
+            <p v-if="workspaceShareMessage" class="success-message" role="status">{{ workspaceShareMessage }}</p>
+            <p class="form-subtitle">{{ t('Envie este código para outro usuário importar o ambiente e acompanhar os mesmos aparelhos.') }}</p>
+          </template>
+          <p v-else class="form-subtitle">{{ t('Selecione ou crie um ambiente antes de compartilhar.') }}</p>
+        </div>
+      </section>
+    </div>
 
     <div v-if="settingsOpen" class="settings-overlay" @click.self="settingsOpen = false">
       <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
@@ -951,6 +1673,14 @@ onUnmounted(() => {
               <button class="language-option" :class="{ active: language === 'pt-BR' }" type="button" :aria-pressed="language === 'pt-BR'" @click="setLanguage('pt-BR')"><img class="language-option-flag" src="/flags/br.svg" alt="" />{{ t('Português') }}</button>
               <button class="language-option" :class="{ active: language === 'en' }" type="button" :aria-pressed="language === 'en'" @click="setLanguage('en')"><img class="language-option-flag" src="/flags/gb.svg" alt="" />{{ t('English') }}</button>
             </div>
+          </div>
+          <div v-if="user?.isPlatformAdmin" class="workspace-admin-panel">
+            <div class="settings-section-heading"><h3>{{ t('Cadastro público') }}</h3></div>
+            <label class="theme-setting">
+              <span class="theme-setting-icon"><ShieldCheck :size="18" /></span>
+              <span class="theme-setting-copy"><strong>{{ t('Permitir criação de contas') }}</strong><small>{{ registrationEnabled ? t('Habilitado na tela de login') : t('Desabilitado') }}</small></span>
+              <input class="theme-switch" type="checkbox" :checked="registrationEnabled" @change="toggleRegistrationSetting" />
+            </label>
           </div>
         </div>
 

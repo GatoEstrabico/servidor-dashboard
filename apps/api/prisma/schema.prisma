@@ -15,11 +15,18 @@ model User {
   whatsappNumber String?
   emailNotifications    Boolean       @default(true)
   whatsappNotifications Boolean       @default(false)
+  isPlatformAdmin Boolean             @default(false)
+  activeWorkspaceId String?
   passwordHash   String
   createdAt      DateTime             @default(now())
+  emailVerifiedAt DateTime?
   sessions       Session[]
   deviceLinks    DeviceLink[]
   resetTokens    PasswordResetToken[]
+  memberships    WorkspaceMember[]
+  ownedDevices   Device[] @relation("DeviceOwner")
+  sentInvitations WorkspaceInvitation[] @relation("InvitationCreator")
+  activeWorkspace Workspace? @relation("CurrentWorkspace", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
 }
 
 model Session {
@@ -56,10 +63,15 @@ model Device {
   lastSeenAt DateTime  @default(now())
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
+  workspaceId String?
+  workspace  Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  ownerUserId String?
+  owner       User?     @relation("DeviceOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   readings   Reading[]
   deviceLink DeviceLink?
 
-  @@index([status, lastSeenAt])
+  @@index([workspaceId, status, lastSeenAt])
+  @@index([ownerUserId])
 }
 
 model DeviceLink {
@@ -85,4 +97,66 @@ model Reading {
   device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([deviceId, recordedAt(sort: Desc)])
+}
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  accessCode  String?  @unique
+  iconDataUrl String?  @db.Text
+  createdAt   DateTime @default(now())
+  memberships WorkspaceMember[]
+  invitations WorkspaceInvitation[]
+  devices     Device[]
+  activeUsers User[] @relation("CurrentWorkspace")
+}
+
+model WorkspaceMember {
+  workspaceId String
+  userId      String
+  role        String   @default("member")
+  createdAt   DateTime @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+}
+
+model WorkspaceInvitation {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  createdByUserId String
+  email           String
+  role            String   @default("member")
+  tokenHash       String   @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdAt       DateTime @default(now())
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy       User      @relation("InvitationCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, email])
+  @@index([expiresAt])
+}
+
+model PendingRegistration {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  displayName String
+  passwordHash String
+  workspaceName String?
+  workspaceId String?
+  invitationId String? @unique
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model GlobalSetting {
+  id                       String   @id @default("global")
+  publicRegistrationEnabled Boolean @default(false)
+  updatedAt                DateTime @updatedAt
 }

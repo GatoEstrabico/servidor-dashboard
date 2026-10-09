@@ -87,6 +87,8 @@ button:disabled { cursor: wait; opacity: .7; }
 .status-ping { width: 6px; height: 6px; border-radius: 50%; background: #5dc58d; }
 .account-row { display: flex; align-items: center; gap: 9px; padding: 13px 5px 3px; border-top: 1px solid rgba(224, 238, 226, .1); }
 .account-avatar, .top-avatar { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 1px solid #91b59b; border-radius: 50%; color: #e9f5eb; background: #477459; font-size: 12px; font-weight: 700; }
+.account-avatar { overflow: hidden; }
+.account-avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
 .account-info { min-width: 0; flex: 1; overflow: hidden; color: #e6eee7; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .account-info small { font-size: 9px; }
 .icon-button { position: relative; display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 0; border-radius: 4px; color: #76837c; background: transparent; }
@@ -100,6 +102,12 @@ button:disabled { cursor: wait; opacity: .7; }
 .breadcrumb span { margin: 0 9px; color: #c3cac4; }
 .breadcrumb strong { color: #39443e; font-weight: 600; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
+.language-flags { display: flex; align-items: center; gap: 2px; }
+.language-flag { display: grid; width: 29px; height: 29px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; cursor: pointer; font-size: 17px; line-height: 1; }
+.language-flag-image { display: block; width: 20px; height: 14px; object-fit: cover; border-radius: 2px; box-shadow: 0 0 0 1px rgba(30, 45, 36, .12); }
+.language-flag:hover { background: #f0f4ee; }
+.language-flag.active { border-color: #c9ddce; background: #edf5ed; }
+.language-flag:focus-visible, .language-option:focus-visible, .settings-tab:focus-visible { outline: 2px solid #478d70; outline-offset: 2px; }
 .last-update { display: flex; align-items: center; gap: 8px; margin-right: 9px; color: #7d8981; font-size: 10px; }
 .last-update .live-dot, .table-footer .live-dot { width: 6px; height: 6px; flex-basis: 6px; }
 .notification-wrap { position: relative; }
@@ -148,7 +156,7 @@ button:disabled { cursor: wait; opacity: .7; }
 .metric-icon.amber { color: #b27a34; background: #faf2e5; }
 .metric-icon.rose { color: #a26058; background: #f8eeec; }
 .metric-value { margin-top: 7px; color: #202a25; font-family: Manrope, sans-serif; font-size: 25px; font-weight: 700; line-height: 1.15; }
-.metric-value > span { color: #8b9690; font-family: 'DM Sans', sans-serif; font-size: 10px; font-weight: 400; }
+.metric-value > span { margin-left: 4px; color: #8b9690; font-family: 'DM Sans', sans-serif; font-size: 10px; font-weight: 400; }
 .metric-foot { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: #89938e; font-size: 9px; }
 .metric-foot.positive { color: #4c8b68; }
 .metric-foot.warning-text { color: #b07b39; }
@@ -217,6 +225,17 @@ button:disabled { cursor: wait; opacity: .7; }
 .settings-header { display: flex; align-items: flex-start; justify-content: space-between; }
 .settings-header .eyebrow { margin-bottom: 5px; }
 .settings-header h2 { margin: 0; font-family: Manrope, sans-serif; font-size: 22px; }
+.settings-tabs { display: flex; gap: 3px; width: 100%; overflow-x: auto; border-bottom: 1px solid #e5eae4; scrollbar-width: thin; }
+.settings-tab { flex: 0 0 auto; border: 0; border-bottom: 3px solid transparent; padding: 11px 14px 9px; color: #77837c; background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.settings-tab:hover { color: #2d5946; background: #f4f7f2; }
+.settings-tab.active { border-bottom-color: #39845f; color: #2d5946; }
+.settings-pane { display: grid; min-width: 0; align-content: start; gap: 14px; }
+.language-setting { display: grid; gap: 12px; padding: 12px; border: 1px solid #e6ebe5; border-radius: 5px; background: #f8faf7; }
+.language-options { display: flex; gap: 8px; flex-wrap: wrap; }
+.language-option { display: inline-flex; min-height: 35px; align-items: center; gap: 8px; padding: 0 11px; border: 1px solid #dfe5df; border-radius: 4px; color: #53615a; background: #fff; cursor: pointer; font-size: 11px; font-weight: 600; }
+.language-option-flag { display: block; width: 20px; height: 14px; flex: 0 0 20px; object-fit: cover; border-radius: 2px; box-shadow: 0 0 0 1px rgba(30, 45, 36, .12); }
+.language-option:hover { border-color: #a8c6af; }
+.language-option.active { border-color: #8db99a; color: #27654d; background: #edf5ed; }
 .theme-setting { display: flex; align-items: center; gap: 11px; padding: 12px; border: 1px solid #e6ebe5; border-radius: 5px; background: #f8faf7; cursor: pointer; }
 .theme-setting-icon { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 4px; color: #4d765e; background: #eaf2eb; }
 .theme-setting-copy { display: grid; flex: 1; gap: 3px; color: #334139; font-size: 12px; }
@@ -255,16 +274,20 @@ button:disabled { cursor: wait; opacity: .7; }
 @media (max-width: 760px) {
   .login-layout { display: block; min-height: 100vh; }
   .login-story { display: none; }
-  .login-side { min-height: 100vh; padding: 32px 25px 70px; }
-  .mobile-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 52px; color: #244338; font-family: Manrope, sans-serif; font-size: 11px; font-weight: 800; }
+  .login-side { min-height: 100vh; padding: 24px 25px max(24px, env(safe-area-inset-bottom)); }
+  .mobile-brand { display: flex; min-height: 56px; align-items: center; justify-content: center; gap: 0; margin-bottom: 32px; color: #244338; font-family: Manrope, sans-serif; font-size: 11px; font-weight: 800; }
+  .mobile-brand .uerj-logo { width: 56px; height: 56px; padding: 3px; border-radius: 50%; }
+  .mobile-brand > span { display: none; }
   .mobile-brand .brand-mark { color: #397955; border-color: #dce9dc; background: #f0f6ef; }
-  .login-footer { right: 25px; left: 25px; }
+  .login-footer { position: static; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; margin: 26px 0 0; font-size: 8px; line-height: 1.4; }
   .sidebar { display: none; }
   .main-area { margin-left: 0; }
   .topbar { height: 53px; padding: 0 13px; }
   .breadcrumb { font-size: 10px; }
   .breadcrumb span { margin: 0 5px; }
   .last-update { display: none; }
+  .language-flags { gap: 0; }
+  .language-flag { width: 27px; height: 29px; font-size: 16px; }
   .dashboard-content { padding: 22px 13px calc(92px + env(safe-area-inset-bottom)); scroll-margin-top: 62px; }
   .page-heading { align-items: flex-start; gap: 8px; }
   .page-heading h1 { font-size: 23px; }
@@ -395,6 +418,7 @@ button:disabled { cursor: wait; opacity: .7; }
 :root.dark-mode .table-footer,
 :root.dark-mode .device-details,
 :root.dark-mode .password-settings-form { border-color: #303b35; }
+:root.dark-mode .device-details { background: #1a231f; }
 :root.dark-mode .section-heading p,
 :root.dark-mode .table-count,
 :root.dark-mode .table-footer,
@@ -420,6 +444,15 @@ button:disabled { cursor: wait; opacity: .7; }
 :root.dark-mode .status-badge.offline { border-color: #4b3b37; color: #d2a098; background: #302523; }
 :root.dark-mode .empty-state strong { color: #d6e1d9; }
 :root.dark-mode .settings-dialog { border-color: #3a463f; color: #e3eae5; background: #1a231f; }
+:root.dark-mode .settings-tabs { border-color: #303b35; }
+:root.dark-mode .settings-tab { color: #a0aea5; }
+:root.dark-mode .settings-tab:hover { color: #d6e1d9; background: #222d27; }
+:root.dark-mode .settings-tab.active { border-bottom-color: #74bb8b; color: #a5d6b4; }
+:root.dark-mode .language-setting { border-color: #354139; background: #222d27; }
+:root.dark-mode .language-option { border-color: #39463e; color: #c4d0c8; background: #1a231f; }
+:root.dark-mode .language-option.active { border-color: #527d5e; color: #a5d6b4; background: #26372d; }
+:root.dark-mode .language-flag:hover { background: #26352c; }
+:root.dark-mode .language-flag.active { border-color: #527d5e; background: #26372d; }
 :root.dark-mode .theme-setting { border-color: #354139; background: #222d27; }
 :root.dark-mode .theme-setting-icon { color: #a6d0b2; background: #2a3a30; }
 :root.dark-mode .theme-setting-copy { color: #e3eae5; }

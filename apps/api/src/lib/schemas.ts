@@ -57,6 +57,30 @@ export const updateWorkspaceMemberSchema = z.object({
   role: z.enum(['admin', 'member'])
 }).strict();
 export const registrationSettingSchema = z.object({ enabled: z.boolean() }).strict();
+const whatsappMessageTemplate = z.string().trim().min(1).max(500).refine((message) => {
+  const validPlaceholders = new Set(['laboratorio', 'aparelho', 'status', 'localizacao', 'identificador']);
+  const placeholders = message.match(/\{\{[^{}]+\}\}/g) ?? [];
+  return placeholders.every((placeholder) => validPlaceholders.has(placeholder.slice(2, -2)));
+}, 'A mensagem contém um campo desconhecido.');
+export const whatsappNotificationSettingsSchema = z.object({
+  senderName: trimmed(80),
+  onlineMessage: whatsappMessageTemplate,
+  warningMessage: whatsappMessageTemplate,
+  offlineMessage: whatsappMessageTemplate
+}).strict();
+export const emailNotificationSettingsSchema = z.object({
+  smtpHost: trimmed(255),
+  smtpPort: z.number().int().min(1).max(65535),
+  smtpSecure: z.boolean(),
+  smtpUser: z.string().trim().min(1).max(254),
+  smtpPassword: z.string().max(512).optional(),
+  clearSmtpPassword: z.boolean().default(false),
+  senderName: trimmed(80),
+  senderEmail: z.string().trim().email().max(254),
+  onlineMessage: whatsappMessageTemplate,
+  warningMessage: whatsappMessageTemplate,
+  offlineMessage: whatsappMessageTemplate
+}).strict();
 
 export const updateProfileSchema = z.object({
   displayName: trimmed(80),
@@ -108,6 +132,13 @@ export const ingestionSchema = z.object({
   location: z.string().trim().max(200).nullable().optional(),
   status: z.enum(['online', 'offline', 'warning']).default('online'),
   readings: z.array(readingSchema).max(100).default([])
+}).strict();
+
+export const simulateDemoDeviceSchema = z.object({
+  status: z.enum(['online', 'warning', 'offline']),
+  temperature: z.number().finite().min(-50).max(150),
+  humidity: z.number().finite().min(0).max(100),
+  gas: z.number().finite().min(0).max(100_000)
 }).strict();
 
 export type IngestionPayload = z.infer<typeof ingestionSchema>;

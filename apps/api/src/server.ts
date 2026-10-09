@@ -7,7 +7,6 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import nodemailer from 'nodemailer';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from './lib/prisma.js';
@@ -25,12 +24,38 @@ import {
   registrationSchema,
   registrationSettingSchema,
   resetPasswordSchema,
+  simulateDemoDeviceSchema,
   tokenSchema,
   deviceLinkWorkspacesSchema,
+  emailNotificationSettingsSchema,
+  whatsappNotificationSettingsSchema,
   updateProfileSchema,
   updateWorkspaceSchema,
   updateWorkspaceMemberSchema
 } from './lib/schemas.js';
+import {
+  clearWhatsAppWebLogs,
+  closeWhatsAppWebSocket,
+  connectWhatsAppWeb,
+  disconnectWhatsAppWeb,
+  formatWhatsAppNotificationMessage,
+  getWhatsAppNotificationSettings,
+  getWhatsAppWebLogs,
+  getWhatsAppWebStatus,
+  resumeWhatsAppWebSession,
+  saveWhatsAppNotificationSettings,
+  sendWhatsAppWebMessage
+} from './lib/whatsapp-web.js';
+import {
+  clearEmailNotificationLogs,
+  defaultEmailNotificationMessages,
+  getEmailNotificationLogs,
+  getEmailNotificationSettings,
+  initializeEmailService,
+  saveEmailNotificationSettings,
+  sendEmailMessage,
+  verifyEmailConnection
+} from './lib/email-service.js';
 
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env') });
 
@@ -71,20 +96,24 @@ const envSchema = z.object({
   }
 });
 const env = envSchema.parse(process.env);
+const parsedSmtpFrom = env.SMTP_FROM?.match(/^(.*?)\s*<([^<>]+)>$/);
+await initializeEmailService({
+  smtpHost: env.SMTP_HOST ?? '',
+  smtpPort: env.SMTP_PORT,
+  smtpSecure: env.SMTP_SECURE === 'true',
+  smtpUser: env.SMTP_USER ?? '',
+  smtpPassword: env.SMTP_PASSWORD ?? '',
+  senderName: parsedSmtpFrom?.[1].replace(/^"|"$/g, '').trim() || 'LAB/MONITOR',
+  senderEmail: parsedSmtpFrom?.[2] ?? env.SMTP_FROM?.trim() ?? '',
+  ...defaultEmailNotificationMessages
+}, env.SESSION_SECRET);
 const bootstrapAdminEmail = env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
 const app = Fastify({ logger: true, bodyLimit: 512 * 1024 });
 const cookieName = env.COOKIE_SECURE === 'true' ? '__Host-monitor_session' : 'monitor_session';
 const sessionDurationMs = 12 * 60 * 60 * 1000;
 const secureCookie = env.COOKIE_SECURE === 'true';
+const simulatedDeviceExternalId = 'e2e-windows-sensor-01';
 const dummyPasswordHash = await argon2.hash(randomBytes(32).toString('hex'), { type: argon2.argon2id });
-const mailer = env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD && env.SMTP_FROM
-  ? nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    secure: env.SMTP_SECURE === 'true',
-    auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD }
-  })
-  : null;
 const whatsappConfigured = Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID);
 
 function hash(value: string): string {
@@ -122,6 +151,27 @@ function alarmStatusLabel(status: string): string {
   return 'offline';
 }
 
+function canManageWhatsApp(email: string): boolean {
+  return Boolean(bootstrapAdminEmail && email.trim().toLowerCase() === bootstrapAdminEmail);
+}
+
+function emailIsConfigured(): boolean {
+  const settings = getEmailNotificationSettings();
+  return Boolean(settings.smtpHost && settings.smtpUser && settings.passwordConfigured && settings.senderEmail);
+}
+
+function formatEmailAlarmMessage(settings: ReturnType<typeof getEmailNotificationSettings>, device: { name: string; externalId: string; location: string | null }, status: string): string {
+  const template = status === 'online' ? settings.onlineMessage : status === 'warning' ? settings.warningMessage : settings.offlineMessage;
+  const values: Record<string, string> = {
+    laboratorio: settings.senderName,
+    aparelho: device.name,
+    status: alarmStatusLabel(status),
+    localizacao: device.location || 'não informada',
+    identificador: device.externalId
+  };
+  return template.replace(/\{\{([^{}]+)\}\}/g, (_placeholder, key: string) => values[key] ?? '');
+}
+
 async function sendAlarmNotifications(device: { name: string; externalId: string; location: string | null; workspaceId: string | null }, status: string) {
   if (!device.workspaceId) return;
   const recipients = await prisma.user.findMany({
@@ -130,17 +180,23 @@ async function sendAlarmNotifications(device: { name: string; externalId: string
   });
   const emailRecipients = recipients.filter((recipient) => recipient.emailNotifications);
   const whatsappRecipients = recipients.filter((recipient) => recipient.whatsappNotifications && recipient.whatsappNumber);
-  const message = `O aparelho ${device.name} está ${alarmStatusLabel(status)}. Localização: ${device.location || 'não informada'}.`;
+  const emailSettings = emailRecipients.length && emailIsConfigured() ? getEmailNotificationSettings() : null;
+  const message = emailSettings
+    ? formatEmailAlarmMessage(emailSettings, device, status)
+    : `O aparelho ${device.name} está ${alarmStatusLabel(status)}. Localização: ${device.location || 'não informada'}.`;
+  const whatsappSettings = whatsappRecipients.length ? await getWhatsAppNotificationSettings() : null;
+  const whatsappMessage = whatsappSettings
+    ? formatWhatsAppNotificationMessage(whatsappSettings, device, status, alarmStatusLabel(status))
+    : message;
   const deliveries: Promise<void>[] = [];
 
-  if (emailRecipients.length && mailer && env.SMTP_FROM) {
+  if (emailRecipients.length && emailSettings) {
     for (const recipient of emailRecipients) {
-      deliveries.push(mailer.sendMail({
-        from: env.SMTP_FROM,
+      deliveries.push(sendEmailMessage('Alerta de monitoramento', {
         to: recipient.email,
         subject: `Alerta de monitoramento: ${device.name}`,
-        text: `${message}\nIdentificador: ${device.externalId}`
-      }).then(() => undefined).catch((error: unknown) => {
+        text: message
+      }).catch((error: unknown) => {
         app.log.error({ err: error, deviceId: device.externalId, channel: 'email' }, 'Falha ao enviar notificacao de alarme');
       }));
     }
@@ -148,7 +204,15 @@ async function sendAlarmNotifications(device: { name: string; externalId: string
     app.log.warn({ deviceId: device.externalId }, 'Notificacoes por e-mail indisponiveis: configure as variaveis SMTP.');
   }
 
-  if (whatsappRecipients.length && whatsappConfigured && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
+  if (whatsappRecipients.length && getWhatsAppWebStatus().state === 'connected') {
+    for (const recipient of whatsappRecipients) {
+      const phone = recipient.whatsappNumber;
+      if (!phone) continue;
+      deliveries.push(sendWhatsAppWebMessage(phone, whatsappMessage, status === 'online' ? 'success' : 'alert').catch((error: unknown) => {
+        app.log.error({ err: error, deviceId: device.externalId, channel: 'whatsapp_web' }, 'Falha ao enviar notificacao por WhatsApp Web');
+      }));
+    }
+  } else if (whatsappRecipients.length && whatsappConfigured && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
     const endpoint = `https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
     for (const recipient of whatsappRecipients) {
       const phone = recipient.whatsappNumber;
@@ -166,14 +230,16 @@ async function sendAlarmNotifications(device: { name: string; externalId: string
           template: {
             name: env.WHATSAPP_TEMPLATE_NAME,
             language: { code: env.WHATSAPP_TEMPLATE_LANGUAGE },
-            components: [{
-              type: 'body',
-              parameters: [
-                { type: 'text', text: device.name },
-                { type: 'text', text: alarmStatusLabel(status) },
-                { type: 'text', text: device.location || 'não informada' }
-              ]
-            }]
+            ...(env.WHATSAPP_TEMPLATE_NAME === 'hello_world' ? {} : {
+              components: [{
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: device.name },
+                  { type: 'text', text: alarmStatusLabel(status) },
+                  { type: 'text', text: device.location || 'não informada' }
+                ]
+              }]
+            })
           }
         }),
         signal: AbortSignal.timeout(10_000)
@@ -233,7 +299,8 @@ async function getUserContext(userId: string) {
     await prisma.user.update({ where: { id: user.id }, data: { activeWorkspaceId } });
   }
 
-  const isPlatformAdmin = user.isPlatformAdmin || Boolean(bootstrapAdminEmail && user.email.toLowerCase() === bootstrapAdminEmail);
+  const isBootstrapAdmin = Boolean(bootstrapAdminEmail && user.email.toLowerCase() === bootstrapAdminEmail);
+  const isPlatformAdmin = user.isPlatformAdmin || isBootstrapAdmin;
 
   return {
     id: user.id,
@@ -245,6 +312,7 @@ async function getUserContext(userId: string) {
     whatsappNotifications: user.whatsappNotifications,
     emailVerifiedAt: user.emailVerifiedAt,
     isPlatformAdmin,
+    isBootstrapAdmin,
     activeWorkspaceId,
     workspaces
   };
@@ -316,13 +384,13 @@ function buildDashboardUrl(params: Record<string, string>) {
 
 app.get('/api/auth/registration-settings', async () => {
   const setting = await getRegistrationSetting();
-  return { enabled: setting.publicRegistrationEnabled, emailAvailable: Boolean(mailer && env.SMTP_FROM) };
+  return { enabled: setting.publicRegistrationEnabled, emailAvailable: emailIsConfigured() };
 });
 
 app.post('/api/admin/registration-settings', async (request, reply) => {
   const auth = await requireSession(request, reply);
   if (!auth) return;
-  if (!auth.user.isPlatformAdmin) return reply.code(403).send({ error: 'Apenas a administração da plataforma pode alterar esta opção.' });
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador da plataforma.' });
   const parsed = registrationSettingSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'Configuração de cadastro inválida.' });
   const setting = await prisma.globalSetting.upsert({
@@ -331,6 +399,118 @@ app.post('/api/admin/registration-settings', async (request, reply) => {
     create: { id: 'global', publicRegistrationEnabled: parsed.data.enabled }
   });
   return { enabled: setting.publicRegistrationEnabled };
+});
+
+app.get('/api/admin/email/settings', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de e-mail.' });
+  reply.header('Cache-Control', 'no-store');
+  return { settings: getEmailNotificationSettings() };
+});
+
+app.post('/api/admin/email/settings', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de e-mail.' });
+  const parsed = emailNotificationSettingsSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Confira os dados SMTP e os modelos de mensagem.' });
+  try {
+    return { settings: await saveEmailNotificationSettings(parsed.data) };
+  } catch (error) {
+    app.log.error({ err: error }, 'Falha ao salvar configuracao SMTP');
+    return reply.code(500).send({ error: 'Não foi possível salvar a configuração de e-mail.' });
+  }
+});
+
+app.get('/api/admin/email/logs', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de e-mail.' });
+  reply.header('Cache-Control', 'no-store');
+  return { logs: getEmailNotificationLogs() };
+});
+
+app.post('/api/admin/email/logs/clear', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de e-mail.' });
+  clearEmailNotificationLogs();
+  return { ok: true };
+});
+
+app.post('/api/admin/email/test', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de e-mail.' });
+  try {
+    await verifyEmailConnection();
+    return { ok: true, message: 'Conexão SMTP verificada.' };
+  } catch (error) {
+    return reply.code(503).send({
+      error: error instanceof Error ? error.message : 'Não foi possível testar o servidor SMTP.'
+    });
+  }
+});
+
+app.get('/api/admin/whatsapp', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  reply.header('Cache-Control', 'no-store');
+  return getWhatsAppWebStatus();
+});
+
+app.get('/api/admin/whatsapp/settings', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  reply.header('Cache-Control', 'no-store');
+  return { settings: await getWhatsAppNotificationSettings() };
+});
+
+app.post('/api/admin/whatsapp/settings', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  const parsed = whatsappNotificationSettingsSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Confira o nome e os modelos de mensagem do WhatsApp.' });
+  return { settings: await saveWhatsAppNotificationSettings(parsed.data) };
+});
+
+app.get('/api/admin/whatsapp/logs', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  reply.header('Cache-Control', 'no-store');
+  return { logs: getWhatsAppWebLogs() };
+});
+
+app.post('/api/admin/whatsapp/logs/clear', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  clearWhatsAppWebLogs();
+  return { ok: true };
+});
+
+app.post('/api/admin/whatsapp/connect', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  try {
+    return await connectWhatsAppWeb();
+  } catch (error) {
+    app.log.error({ err: error }, 'Falha ao iniciar conexao do WhatsApp Web');
+    return reply.code(503).send({ error: 'Não foi possível iniciar a conexão com o WhatsApp.' });
+  }
+});
+
+app.post('/api/admin/whatsapp/disconnect', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  return disconnectWhatsAppWeb();
 });
 
 app.get<{ Params: { token: string } }>('/api/auth/invitations/:token', async (request, reply) => {
@@ -347,7 +527,7 @@ app.get<{ Params: { token: string } }>('/api/auth/invitations/:token', async (re
 app.post('/api/auth/register', { config: { rateLimit: { max: 5, timeWindow: '15 minutes' } } }, async (request, reply) => {
   const parsed = registrationSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'Confira o e-mail, nome, senha e ambiente.' });
-  if (!mailer || !env.SMTP_FROM) return reply.code(503).send({ error: 'Cadastro indisponível: configure o envio de e-mail no servidor.' });
+  if (!emailIsConfigured()) return reply.code(503).send({ error: 'Cadastro indisponível: configure o envio de e-mail no servidor.' });
 
   const email = parsed.data.email.toLowerCase();
   let invitation: Awaited<ReturnType<typeof prisma.workspaceInvitation.findUnique>> = null;
@@ -388,8 +568,7 @@ app.post('/api/auth/register', { config: { rateLimit: { max: 5, timeWindow: '15 
     }
   });
   try {
-    await mailer.sendMail({
-      from: env.SMTP_FROM,
+    await sendEmailMessage('Ativação de conta', {
       to: email,
       subject: 'Confirme sua conta - LAB/MONITOR',
       text: `Olá, ${parsed.data.displayName}. Confirme seu e-mail em até 24 horas pelo link abaixo:\n\n${buildDashboardUrl({ activationToken: rawToken })}`
@@ -492,7 +671,8 @@ app.get('/api/workspaces', async (request, reply) => {
   return {
     workspaces: auth.user.workspaces,
     activeWorkspaceId: auth.user.activeWorkspaceId,
-    isPlatformAdmin: auth.user.isPlatformAdmin
+    isPlatformAdmin: auth.user.isPlatformAdmin,
+    isBootstrapAdmin: auth.user.isBootstrapAdmin
   };
 });
 
@@ -619,6 +799,7 @@ app.post('/api/workspaces/active', async (request, reply) => {
 app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/members', async (request, reply) => {
   const auth = await requireSession(request, reply);
   if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   const role = getWorkspaceRole(auth.user, request.params.workspaceId);
   if (!canManageWorkspace(role)) return reply.code(403).send({ error: 'Sem permissão para gerenciar este ambiente.' });
   const members = await prisma.workspaceMember.findMany({
@@ -639,6 +820,7 @@ app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/membe
 app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/invitations', async (request, reply) => {
   const auth = await requireSession(request, reply);
   if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   if (!canManageWorkspace(getWorkspaceRole(auth.user, request.params.workspaceId))) {
     return reply.code(403).send({ error: 'Sem permissão para gerenciar este ambiente.' });
   }
@@ -653,12 +835,13 @@ app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/invit
 app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/invitations', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   if (!canManageWorkspace(getWorkspaceRole(auth.user, request.params.workspaceId))) {
     return reply.code(403).send({ error: 'Sem permissão para convidar pessoas para este ambiente.' });
   }
   const parsed = inviteWorkspaceMemberSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'Informe um e-mail válido.' });
-  if (!mailer || !env.SMTP_FROM) return reply.code(503).send({ error: 'Convites indisponíveis: configure o envio de e-mail no servidor.' });
+  if (!emailIsConfigured()) return reply.code(503).send({ error: 'Convites indisponíveis: configure o envio de e-mail no servidor.' });
 
   const email = parsed.data.email.toLowerCase();
   if (auth.user.email.toLowerCase() === email && getWorkspaceRole(auth.user, request.params.workspaceId)) {
@@ -688,8 +871,7 @@ app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/invi
     select: { id: true, email: true, role: true, expiresAt: true }
   });
   try {
-    await mailer.sendMail({
-      from: env.SMTP_FROM,
+    await sendEmailMessage('Convite de ambiente', {
       to: email,
       subject: `Convite para ${workspace.name} - LAB/MONITOR`,
       text: `Você foi convidado para o ambiente ${workspace.name}. Aceite o convite em até 7 dias:\n\n${buildDashboardUrl({ invitationToken: rawToken })}`
@@ -732,6 +914,7 @@ app.post('/api/workspaces/invitations/accept', async (request, reply) => {
 app.patch<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/members', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   const callerRole = getWorkspaceRole(auth.user, request.params.workspaceId);
   if (!canManageWorkspace(callerRole)) return reply.code(403).send({ error: 'Sem permissão para alterar membros.' });
   const parsed = updateWorkspaceMemberSchema.safeParse(request.body);
@@ -755,6 +938,7 @@ app.patch<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/mem
 app.delete<{ Params: { workspaceId: string; userId: string } }>('/api/workspaces/:workspaceId/members/:userId', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de usuários.' });
   const callerRole = getWorkspaceRole(auth.user, request.params.workspaceId);
   if (!canManageWorkspace(callerRole)) return reply.code(403).send({ error: 'Sem permissão para remover membros.' });
   const target = await prisma.workspaceMember.findUnique({
@@ -781,7 +965,7 @@ app.post('/api/auth/forgot-password', { config: { rateLimit: { max: 3, timeWindo
   if (!parsed.success) return reply.code(400).send({ error: 'Informe um e-mail valido.' });
 
   const user = await prisma.user.findUnique({ where: { email: parsed.data.email.toLowerCase() } });
-  if (user && mailer && env.SMTP_FROM) {
+  if (user && emailIsConfigured()) {
     const rawToken = randomBytes(32).toString('base64url');
     await prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
     await prisma.passwordResetToken.create({
@@ -791,8 +975,7 @@ app.post('/api/auth/forgot-password', { config: { rateLimit: { max: 3, timeWindo
     const resetUrl = new URL('/', env.DASHBOARD_ORIGIN);
     resetUrl.searchParams.set('resetToken', rawToken);
     try {
-      await mailer.sendMail({
-        from: env.SMTP_FROM,
+      await sendEmailMessage('Recuperação de senha', {
         to: user.email,
         subject: 'Redefinicao de senha - LAB/MONITOR',
         text: `Recebemos um pedido para redefinir a senha da sua conta. Acesse este link em ate 30 minutos:\n\n${resetUrl.href}\n\nSe voce nao solicitou a redefinicao, ignore esta mensagem.`
@@ -801,7 +984,7 @@ app.post('/api/auth/forgot-password', { config: { rateLimit: { max: 3, timeWindo
       await prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
       app.log.error({ err: error }, 'Falha ao enviar e-mail de redefinicao');
     }
-  } else if (!mailer) {
+  } else if (!emailIsConfigured()) {
     app.log.warn('Recuperacao de senha indisponivel: configure as variaveis SMTP.');
   }
 
@@ -974,7 +1157,12 @@ app.get('/api/devices', async (request, reply) => {
     orderBy: [{ status: 'asc' }, { name: 'asc' }],
     include: { readings: { orderBy: { recordedAt: 'desc' }, take: 15 } }
   });
-  return { devices };
+  return {
+    devices: devices.map(({ ownerUserId, ...device }) => ({
+      ...device,
+      canSimulate: device.externalId === simulatedDeviceExternalId && ownerUserId === auth.user.id
+    }))
+  };
 });
 
 app.get('/api/account/devices', async (request, reply) => {
@@ -1060,6 +1248,44 @@ app.get<{ Params: { id: string } }>('/api/devices/:id', async (request, reply) =
   return { device };
 });
 
+app.post<{ Params: { id: string } }>('/api/devices/:id/simulation', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!auth.user.activeWorkspaceId) return reply.code(409).send({ error: 'Selecione um ambiente.' });
+  const parsed = simulateDemoDeviceSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Valores de simulação inválidos.' });
+  const device = await prisma.device.findUnique({
+    where: { id: request.params.id, workspaceId: auth.user.activeWorkspaceId }
+  });
+  if (!device) return reply.code(404).send({ error: 'Aparelho não encontrado neste ambiente.' });
+  if (device.externalId !== simulatedDeviceExternalId || device.ownerUserId !== auth.user.id) {
+    return reply.code(403).send({ error: 'A simulação está disponível apenas para o aparelho fictício da sua conta.' });
+  }
+
+  const recordedAt = new Date();
+  const updatedDevice = await prisma.$transaction(async (tx) => {
+    const updated = await tx.device.update({
+      where: { id: device.id },
+      data: { status: parsed.data.status, lastSeenAt: recordedAt }
+    });
+    await tx.reading.createMany({
+      data: [
+        { deviceId: device.id, type: 'temperatura', value: parsed.data.temperature, unit: 'C', recordedAt },
+        { deviceId: device.id, type: 'umidade', value: parsed.data.humidity, unit: '%', recordedAt },
+        { deviceId: device.id, type: 'gas', value: parsed.data.gas, unit: 'ppm', recordedAt }
+      ]
+    });
+    const readings = await tx.reading.findMany({
+      where: { deviceId: device.id },
+      orderBy: { recordedAt: 'desc' },
+      take: 15
+    });
+    return { ...updated, readings };
+  });
+  if (device.status !== updatedDevice.status) await notifyAlarmStatusChange(updatedDevice, updatedDevice.status);
+  return { device: { ...updatedDevice, canSimulate: true } };
+});
+
 app.post('/api/ingest/devices', async (request, reply) => {
   const authorization = request.headers.authorization ?? '';
   const suppliedKey = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
@@ -1121,6 +1347,9 @@ app.setErrorHandler((error, _request, reply) => {
 
 try {
   await app.listen({ port: env.API_PORT, host: '0.0.0.0' });
+  void resumeWhatsAppWebSession().catch((error: unknown) => {
+    app.log.error({ err: error }, 'Falha ao restaurar sessao do WhatsApp Web');
+  });
 } catch (error) {
   app.log.error(error);
   await prisma.$disconnect();
@@ -1129,6 +1358,7 @@ try {
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, async () => {
+    closeWhatsAppWebSocket();
     await app.close();
     await prisma.$disconnect();
     process.exit(0);

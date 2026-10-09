@@ -1,7 +1,12 @@
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
-import { Activity, AlertTriangle, ArrowDownToLine, Bell, Building2, Check, ChevronDown, CircleAlert, CircleCheck, CircleMinus, Clock3, Copy, Cpu, Flame, ImagePlus, LayoutDashboard, LockKeyhole, LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, Pencil, Plus, RefreshCw, Search, Settings, Share2, ShieldCheck, Signal, Sun, Thermometer, UsersRound, Waves, X } from 'lucide-vue-next';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { AsYouType, getCountries, getCountryCallingCode, parsePhoneNumberFromString } from 'libphonenumber-js';
+import MessageTemplateEditor from './components/MessageTemplateEditor.vue';
+import { Activity, AlertTriangle, ArrowDownToLine, Bell, Building2, Check, ChevronDown, CircleAlert, CircleCheck, CircleMinus, Clock3, Copy, Cpu, Flame, ImagePlus, LayoutDashboard, LockKeyhole, List, LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, Pencil, Plus, RefreshCw, Search, Trash2, Settings, Share2, ShieldCheck, Signal, Sun, Thermometer, UsersRound, Waves, X } from 'lucide-vue-next';
 const user = ref(null);
 const devices = ref([]);
+const simulationValues = ref({});
+const simulationSavingId = ref(null);
+const simulationMessages = ref({});
 const notifications = ref([]);
 const notificationOpen = ref(false);
 const csrfToken = ref('');
@@ -42,8 +47,53 @@ const canManageActiveWorkspace = computed(() => ['owner', 'admin'].includes(acti
 const workspaceMembers = ref([]);
 const workspaceInvitations = ref([]);
 const registrationEnabled = ref(false);
-const usePlatformAdminControls = computed(() => Boolean(user.value?.isPlatformAdmin));
+const isWhatsAppDashboardAdmin = computed(() => Boolean(user.value?.isBootstrapAdmin));
 const managementTab = ref('overview');
+const userManagementTab = ref('members');
+const whatsappTab = ref('log');
+const emailTab = ref('log');
+const whatsappStatus = ref({ state: 'disconnected', qrDataUrl: null, phoneNumber: null });
+const whatsappLogs = ref([]);
+const whatsappSettings = ref({
+    senderName: 'LAB/MONITOR',
+    onlineMessage: '{{laboratorio}}: {{aparelho}} voltou ao normal. Localização: {{localizacao}}.',
+    warningMessage: '{{laboratorio}}: {{aparelho}} está em atenção. Localização: {{localizacao}}.',
+    offlineMessage: '{{laboratorio}}: {{aparelho}} está offline. Localização: {{localizacao}}.'
+});
+const whatsappSettingsSaving = ref(false);
+const whatsappSettingsMessage = ref('');
+const whatsappPreviewMessage = computed(() => whatsappSettings.value.warningMessage.replace(/\{\{([^{}]+)\}\}/g, (_placeholder, key) => ({
+    laboratorio: whatsappSettings.value.senderName,
+    aparelho: 'Sensor de demonstração',
+    status: 'em atenção',
+    localizacao: 'Laboratório Central',
+    identificador: 'sensor-01'
+}[key] ?? '')));
+const emailSettings = ref({
+    smtpHost: '', smtpPort: 587, smtpSecure: false, smtpUser: '', senderName: 'LAB/MONITOR', senderEmail: '',
+    onlineMessage: '{{laboratorio}}: {{aparelho}} voltou ao normal. Localização: {{localizacao}}.',
+    warningMessage: '{{laboratorio}}: {{aparelho}} está em atenção. Localização: {{localizacao}}.',
+    offlineMessage: '{{laboratorio}}: {{aparelho}} está offline. Localização: {{localizacao}}.', passwordConfigured: false
+});
+const emailPassword = ref('');
+const emailClearPassword = ref(false);
+const emailLogs = ref([]);
+const emailSettingsSaving = ref(false);
+const emailWorking = ref(false);
+const emailConnectionState = ref('idle');
+const emailMessage = ref('');
+const emailError = ref('');
+let emailRefreshTimer;
+const emailPreviewMessage = computed(() => emailSettings.value.warningMessage.replace(/\{\{([^{}]+)\}\}/g, (_placeholder, key) => ({
+    laboratorio: emailSettings.value.senderName,
+    aparelho: 'Sensor de demonstração',
+    status: 'em atenção',
+    localizacao: 'Laboratório Central',
+    identificador: 'sensor-01'
+}[key] ?? '')));
+const whatsappWorking = ref(false);
+const whatsappError = ref('');
+let whatsappRefreshTimer;
 const forgotEmail = ref('');
 const forgotMessage = ref('');
 const forgotError = ref('');
@@ -59,6 +109,14 @@ const mobileWorkspaceSelectorOpen = ref(false);
 const workspaceDialogOpen = ref(false);
 const workspaceDialogAction = ref('create');
 const language = ref('pt-BR');
+const whatsappCountries = computed(() => {
+    const displayNames = new Intl.DisplayNames([language.value === 'en' ? 'en' : 'pt-BR'], { type: 'region' });
+    return getCountries().map((country) => ({
+        country,
+        name: displayNames.of(country) ?? country,
+        dialCode: `+${getCountryCallingCode(country)}`
+    })).sort((left, right) => left.name.localeCompare(right.name, language.value));
+});
 const darkMode = ref(false);
 const currentPassword = ref('');
 const newPassword = ref('');
@@ -69,6 +127,7 @@ const accountSaving = ref(false);
 const profileName = ref('');
 const profileEmail = ref('');
 const profileAvatar = ref(null);
+const profileWhatsappCountry = ref('BR');
 const profileWhatsappNumber = ref('');
 const profileEmailNotifications = ref(true);
 const profileWhatsappNotifications = ref(false);
@@ -148,6 +207,15 @@ const englishText = {
     'Offline': 'Offline',
     'medicoes recentes': 'recent readings',
     'Aparelhos': 'Devices',
+    'Simular leituras': 'Simulate readings',
+    'Temperatura (°C)': 'Temperature (°C)',
+    'Umidade (%)': 'Humidity (%)',
+    'Gás (ppm)': 'Gas (ppm)',
+    'Estado simulado': 'Simulated status',
+    'Aplicar simulação': 'Apply simulation',
+    'Simulação aplicada. Alertas são disparados quando o estado muda.': 'Simulation applied. Alerts are triggered when the status changes.',
+    'Em atenção': 'Needs attention',
+    'A simulação está disponível somente para o aparelho fictício proprietário desta conta.': 'Simulation is only available for this account-owned fictional device.',
     'Inventario e leituras mais recentes': 'Inventory and latest readings',
     'Exportar lista': 'Export list',
     'Exportar': 'Export',
@@ -200,8 +268,10 @@ const englishText = {
     'o e-mail da conta': 'the account email',
     'Notificações por WhatsApp': 'WhatsApp notifications',
     'É necessário cadastrar o número e ativar o canal': 'Add a number and enable the channel',
-    'WhatsApp (formato internacional)': 'WhatsApp (international format)',
-    'Use o formato E.164, incluindo o código do país (por exemplo, +55...). O WhatsApp requer uma conta Meta Cloud API configurada pelo administrador.': 'Use E.164 format, including the country code. WhatsApp requires a Meta Cloud API account configured by an administrator.',
+    'País e código do WhatsApp': 'WhatsApp country and calling code',
+    'Número do WhatsApp': 'WhatsApp number',
+    'Digite o número local com DDD.': 'Enter the local number including area code.',
+    'O WhatsApp requer uma conta conectada pelo administrador.': 'WhatsApp requires an account connected by the administrator.',
     'Senha atual': 'Current password',
     'Salvar perfil': 'Save profile',
     'Salvando...': 'Saving...',
@@ -307,6 +377,65 @@ const englishText = {
     'Isso excluirá o ambiente e o removerá para todos os membros.': 'This deletes the workspace for all members.',
     'Isso remove sua participação, mas mantém o ambiente para os outros membros.': 'This removes your membership but keeps the workspace for other members.',
     'Usuários': 'Users',
+    'Membros': 'Members',
+    'WhatsApp API': 'WhatsApp API',
+    'E-mail API': 'Email API',
+    'Servidor SMTP': 'SMTP server',
+    'Porta SMTP': 'SMTP port',
+    'Conexão segura (TLS)': 'Secure connection (TLS)',
+    'Usuário SMTP': 'SMTP username',
+    'Senha SMTP': 'SMTP password',
+    'Deixe em branco para manter a senha salva.': 'Leave blank to keep the saved password.',
+    'Apagar senha salva': 'Clear saved password',
+    'Nome do remetente': 'Sender name',
+    'E-mail do remetente': 'Sender email address',
+    'Mensagem de e-mail ao normalizar': 'Email recovery message',
+    'Mensagem de e-mail em atenção': 'Email warning message',
+    'Mensagem de e-mail offline': 'Email offline message',
+    'Prévia do e-mail em atenção': 'Email warning preview',
+    'Salvar configuração de e-mail': 'Save email settings',
+    'Configuração de e-mail salva.': 'Email settings saved.',
+    'As mensagens são enviadas em HTML e texto simples. A senha SMTP é cifrada no servidor.': 'Messages are sent as HTML and plain text. The SMTP password is encrypted on the server.',
+    'Testar conexão SMTP': 'Test SMTP connection',
+    'Conexão SMTP verificada.': 'SMTP connection verified.',
+    'Conexão SMTP não testada': 'SMTP connection not tested',
+    'Conexão SMTP ativa': 'SMTP connection active',
+    'Falha na conexão SMTP': 'SMTP connection failed',
+    'Apagar log de e-mail': 'Clear email log',
+    'Tem certeza que deseja apagar todo o log de e-mail?': 'Are you sure you want to clear the entire email log?',
+    'Nenhum e-mail enviado.': 'No emails sent.',
+    'O log guarda resultados e destinatários mascarados, nunca o conteúdo.': 'The log stores results and masked recipients, never message content.',
+    'eventos': 'events',
+    'Log de eventos': 'Event log',
+    'Configuração de e-mail': 'Email settings',
+    'Conexão SMTP': 'SMTP connection',
+    'Configuração': 'Settings',
+    'Nome exibido nas mensagens': 'Name shown in messages',
+    'Mensagem ao normalizar': 'Recovery message',
+    'Mensagem em atenção': 'Warning message',
+    'Mensagem offline': 'Offline message',
+    'Prévia da mensagem em atenção': 'Warning message preview',
+    'Salvar configuração': 'Save settings',
+    'Configuração salva.': 'Settings saved.',
+    'Use {{laboratorio}}, {{aparelho}}, {{status}}, {{localizacao}} e {{identificador}} como campos dinâmicos.': 'Use {{laboratorio}}, {{aparelho}}, {{status}}, {{localizacao}} and {{identificador}} as dynamic fields.',
+    'Estas mensagens são usadas pela conexão via QR. O nome não altera o perfil da conta WhatsApp.': 'These messages are used by the QR connection. The name does not change the WhatsApp account profile.',
+    'Apagar log': 'Clear log',
+    'Tem certeza que deseja apagar todo o log do WhatsApp?': 'Are you sure you want to clear the entire WhatsApp log?',
+    'Log': 'Log',
+    'Conexão': 'Connection',
+    'Últimos 100 eventos em memória; o histórico é limpo quando a API reinicia.': 'Latest 100 in-memory events; history clears when the API restarts.',
+    'Nenhum evento registrado.': 'No events recorded.',
+    'O log não armazena o conteúdo das mensagens nem números completos.': 'The log does not store message content or full phone numbers.',
+    'Conexão WhatsApp Web': 'WhatsApp Web connection',
+    'Desconectado': 'Disconnected',
+    'Conectando': 'Connecting',
+    'Aguardando leitura do QR code': 'Waiting for QR code scan',
+    'Conectado': 'Connected',
+    'Iniciar conexão': 'Start connection',
+    'Desconectar conta': 'Disconnect account',
+    'Escaneie o QR code com o WhatsApp da conta que enviará os alertas.': 'Scan the QR code with the WhatsApp account that will send alerts.',
+    'Os alertas serão enviados somente a usuários que ativaram WhatsApp no perfil.': 'Alerts are sent only to users who enabled WhatsApp in their profile.',
+    'Este conector não é oficial. O WhatsApp pode desconectar ou bloquear contas que automatizam mensagens.': 'This connector is unofficial. WhatsApp may disconnect or block accounts that automate messages.',
     'Voltar': 'Back',
     'Gerencie membros, papéis e convites do ambiente ativo.': 'Manage members, roles, and invitations for the active workspace.',
     'Convidar usuário': 'Invite user',
@@ -395,6 +524,13 @@ async function loadDevices() {
         }
         knownDeviceStatuses = new Map(result.devices.map((device) => [device.id, device.status]));
         devices.value = result.devices;
+        const nextSimulationValues = { ...simulationValues.value };
+        for (const device of result.devices) {
+            if (device.canSimulate && !nextSimulationValues[device.id]) {
+                nextSimulationValues[device.id] = { status: device.status, temperature: 22.5, humidity: 48, gas: 180 };
+            }
+        }
+        simulationValues.value = nextSimulationValues;
         refreshedAt.value = new Date();
         pageError.value = '';
     }
@@ -449,7 +585,7 @@ async function loadWorkspaces() {
         const result = await api('/api/workspaces');
         workspaces.value = result.workspaces;
         activeWorkspaceId.value = result.activeWorkspaceId;
-        user.value = { ...user.value, activeWorkspaceId: result.activeWorkspaceId, workspaces: result.workspaces, isPlatformAdmin: result.isPlatformAdmin };
+        user.value = { ...user.value, activeWorkspaceId: result.activeWorkspaceId, workspaces: result.workspaces, isPlatformAdmin: result.isPlatformAdmin, isBootstrapAdmin: result.isBootstrapAdmin };
         if (result.activeWorkspaceId) {
             await loadWorkspaceMembers();
         }
@@ -463,7 +599,7 @@ async function loadWorkspaces() {
     }
 }
 async function loadWorkspaceMembers() {
-    if (!user.value || !activeWorkspaceId.value) {
+    if (!user.value || !activeWorkspaceId.value || !isWhatsAppDashboardAdmin.value) {
         workspaceMembers.value = [];
         workspaceInvitations.value = [];
         return;
@@ -690,7 +826,7 @@ async function shareWorkspaceCode() {
     }
 }
 async function toggleRegistrationSetting() {
-    if (!user.value?.isPlatformAdmin)
+    if (!isWhatsAppDashboardAdmin.value)
         return;
     try {
         const result = await api('/api/admin/registration-settings', {
@@ -702,6 +838,222 @@ async function toggleRegistrationSetting() {
     }
     catch (error) {
         pageError.value = error instanceof Error ? error.message : 'Nao foi possivel alterar a abertura de cadastro.';
+    }
+}
+async function loadWhatsAppStatus() {
+    if (!isWhatsAppDashboardAdmin.value)
+        return;
+    try {
+        whatsappStatus.value = await api('/api/admin/whatsapp');
+        whatsappError.value = '';
+    }
+    catch (error) {
+        whatsappError.value = error instanceof Error ? error.message : 'Falha ao consultar o estado do WhatsApp.';
+    }
+}
+async function loadWhatsAppLogs() {
+    if (!isWhatsAppDashboardAdmin.value)
+        return;
+    try {
+        const result = await api('/api/admin/whatsapp/logs');
+        whatsappLogs.value = result.logs;
+        whatsappError.value = '';
+    }
+    catch (error) {
+        whatsappError.value = error instanceof Error ? error.message : 'Falha ao carregar o log do WhatsApp.';
+    }
+}
+async function loadWhatsAppSettings() {
+    if (!isWhatsAppDashboardAdmin.value)
+        return;
+    try {
+        const result = await api('/api/admin/whatsapp/settings');
+        whatsappSettings.value = result.settings;
+        whatsappSettingsMessage.value = '';
+        whatsappError.value = '';
+    }
+    catch (error) {
+        whatsappError.value = error instanceof Error ? error.message : 'Falha ao carregar as configurações do WhatsApp.';
+    }
+}
+async function saveWhatsAppSettings() {
+    whatsappSettingsSaving.value = true;
+    whatsappSettingsMessage.value = '';
+    whatsappError.value = '';
+    try {
+        const result = await api('/api/admin/whatsapp/settings', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify(whatsappSettings.value)
+        });
+        whatsappSettings.value = result.settings;
+        whatsappSettingsMessage.value = 'Configuração salva.';
+    }
+    catch (error) {
+        whatsappError.value = error instanceof Error ? error.message : 'Não foi possível salvar as configurações do WhatsApp.';
+    }
+    finally {
+        whatsappSettingsSaving.value = false;
+    }
+}
+async function clearWhatsAppLogs() {
+    if (!isWhatsAppDashboardAdmin.value || !whatsappLogs.value.length)
+        return;
+    if (!window.confirm(t('Tem certeza que deseja apagar todo o log do WhatsApp?')))
+        return;
+    whatsappWorking.value = true;
+    whatsappError.value = '';
+    try {
+        await api('/api/admin/whatsapp/logs/clear', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value }
+        });
+        whatsappLogs.value = [];
+    }
+    catch (error) {
+        whatsappError.value = error instanceof Error ? error.message : 'Não foi possível apagar o log do WhatsApp.';
+    }
+    finally {
+        whatsappWorking.value = false;
+    }
+}
+async function connectWhatsApp() {
+    whatsappWorking.value = true;
+    whatsappError.value = '';
+    try {
+        whatsappStatus.value = await api('/api/admin/whatsapp/connect', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value }
+        });
+    }
+    catch (error) {
+        whatsappError.value = error instanceof Error ? error.message : 'Não foi possível iniciar a conexão.';
+    }
+    finally {
+        whatsappWorking.value = false;
+    }
+}
+async function disconnectWhatsApp() {
+    whatsappWorking.value = true;
+    whatsappError.value = '';
+    try {
+        whatsappStatus.value = await api('/api/admin/whatsapp/disconnect', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value }
+        });
+    }
+    catch (error) {
+        whatsappError.value = error instanceof Error ? error.message : 'Não foi possível desconectar o WhatsApp.';
+    }
+    finally {
+        whatsappWorking.value = false;
+    }
+}
+async function applyDeviceSimulation(device) {
+    const values = simulationValues.value[device.id];
+    if (!device.canSimulate || !values)
+        return;
+    simulationSavingId.value = device.id;
+    simulationMessages.value = { ...simulationMessages.value, [device.id]: '' };
+    try {
+        await api(`/api/devices/${device.id}/simulation`, {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify(values)
+        });
+        simulationMessages.value = { ...simulationMessages.value, [device.id]: 'Simulação aplicada. Alertas são disparados quando o estado muda.' };
+        await loadDevices();
+    }
+    catch (error) {
+        simulationMessages.value = {
+            ...simulationMessages.value,
+            [device.id]: error instanceof Error ? error.message : 'Não foi possível aplicar a simulação.'
+        };
+    }
+    finally {
+        simulationSavingId.value = null;
+    }
+}
+async function loadEmailSettings() {
+    if (!isWhatsAppDashboardAdmin.value)
+        return;
+    try {
+        const result = await api('/api/admin/email/settings');
+        emailSettings.value = result.settings;
+        emailPassword.value = '';
+        emailClearPassword.value = false;
+        emailError.value = '';
+    }
+    catch (error) {
+        emailError.value = error instanceof Error ? error.message : 'Falha ao carregar a configuração de e-mail.';
+    }
+}
+async function saveEmailSettings() {
+    emailSettingsSaving.value = true;
+    emailMessage.value = '';
+    emailError.value = '';
+    try {
+        const { passwordConfigured: _passwordConfigured, ...settings } = emailSettings.value;
+        const result = await api('/api/admin/email/settings', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken.value },
+            body: JSON.stringify({ ...settings, smtpPassword: emailPassword.value, clearSmtpPassword: emailClearPassword.value })
+        });
+        emailSettings.value = result.settings;
+        emailPassword.value = '';
+        emailClearPassword.value = false;
+        emailMessage.value = 'Configuração de e-mail salva.';
+    }
+    catch (error) {
+        emailError.value = error instanceof Error ? error.message : 'Não foi possível salvar a configuração de e-mail.';
+    }
+    finally {
+        emailSettingsSaving.value = false;
+    }
+}
+async function loadEmailLogs() {
+    if (!isWhatsAppDashboardAdmin.value)
+        return;
+    try {
+        const result = await api('/api/admin/email/logs');
+        emailLogs.value = result.logs;
+        emailError.value = '';
+    }
+    catch (error) {
+        emailError.value = error instanceof Error ? error.message : 'Falha ao carregar o log de e-mail.';
+    }
+}
+async function clearEmailLogs() {
+    if (!emailLogs.value.length || !window.confirm(t('Tem certeza que deseja apagar todo o log de e-mail?')))
+        return;
+    emailWorking.value = true;
+    try {
+        await api('/api/admin/email/logs/clear', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken.value } });
+        emailLogs.value = [];
+    }
+    catch (error) {
+        emailError.value = error instanceof Error ? error.message : 'Não foi possível apagar o log de e-mail.';
+    }
+    finally {
+        emailWorking.value = false;
+    }
+}
+async function testEmailConnection() {
+    emailWorking.value = true;
+    emailConnectionState.value = 'idle';
+    emailError.value = '';
+    try {
+        await api('/api/admin/email/test', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken.value } });
+        emailConnectionState.value = 'connected';
+        emailMessage.value = 'Conexão SMTP verificada.';
+        await loadEmailLogs();
+    }
+    catch (error) {
+        emailConnectionState.value = 'error';
+        emailError.value = error instanceof Error ? error.message : 'Falha na conexão SMTP.';
+    }
+    finally {
+        emailWorking.value = false;
     }
 }
 async function changeWorkspace(workspaceId) {
@@ -854,9 +1206,20 @@ function syncProfileForm() {
     profileName.value = user.value.displayName;
     profileEmail.value = user.value.email;
     profileAvatar.value = user.value.avatarDataUrl;
-    profileWhatsappNumber.value = user.value.whatsappNumber ?? '';
+    const savedWhatsappNumber = user.value.whatsappNumber;
+    const parsedWhatsappNumber = savedWhatsappNumber ? parsePhoneNumberFromString(savedWhatsappNumber) : undefined;
+    profileWhatsappCountry.value = parsedWhatsappNumber?.country ?? 'BR';
+    profileWhatsappNumber.value = parsedWhatsappNumber?.formatNational() ?? '';
     profileEmailNotifications.value = user.value.emailNotifications;
     profileWhatsappNotifications.value = user.value.whatsappNotifications;
+}
+function formatWhatsappNumberInput(event) {
+    const input = event.target;
+    profileWhatsappNumber.value = new AsYouType(profileWhatsappCountry.value).input(input.value.replace(/\D/g, ''));
+}
+function reformatWhatsappNumberForCountry() {
+    const digits = profileWhatsappNumber.value.replace(/\D/g, '');
+    profileWhatsappNumber.value = digits ? new AsYouType(profileWhatsappCountry.value).input(digits) : '';
 }
 function openSettings() {
     syncProfileForm();
@@ -909,6 +1272,17 @@ async function updateNotificationPreferences() {
         notificationError.value = 'Informe sua senha atual para salvar.';
         return;
     }
+    const parsedWhatsappNumber = profileWhatsappNumber.value.trim()
+        ? parsePhoneNumberFromString(profileWhatsappNumber.value, profileWhatsappCountry.value)
+        : undefined;
+    if (profileWhatsappNumber.value.trim() && !parsedWhatsappNumber?.isValid()) {
+        notificationError.value = 'Confira o país, o DDD e o número do WhatsApp.';
+        return;
+    }
+    if (profileWhatsappNotifications.value && !parsedWhatsappNumber) {
+        notificationError.value = 'Informe um número de WhatsApp válido para ativar as notificações.';
+        return;
+    }
     accountSaving.value = true;
     try {
         const result = await api('/api/account/profile', {
@@ -918,7 +1292,7 @@ async function updateNotificationPreferences() {
                 displayName: user.value.displayName,
                 email: user.value.email,
                 avatarDataUrl: user.value.avatarDataUrl,
-                whatsappNumber: profileWhatsappNumber.value,
+                whatsappNumber: parsedWhatsappNumber?.number ?? null,
                 emailNotifications: profileEmailNotifications.value,
                 whatsappNotifications: profileWhatsappNotifications.value,
                 currentPassword: notificationCurrentPassword.value
@@ -1162,6 +1536,40 @@ async function navigateMobileSection(section) {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     window.history.replaceState({}, '', `#${sectionId}`);
 }
+watch([managementTab, whatsappTab], ([tab, subtab]) => {
+    if (whatsappRefreshTimer)
+        clearInterval(whatsappRefreshTimer);
+    whatsappRefreshTimer = undefined;
+    if (tab === 'whatsapp' && isWhatsAppDashboardAdmin.value) {
+        void loadWhatsAppStatus();
+        void loadWhatsAppLogs();
+        if (subtab === 'configuration')
+            void loadWhatsAppSettings();
+        else
+            whatsappRefreshTimer = setInterval(() => {
+                if (subtab === 'connection')
+                    void loadWhatsAppStatus();
+                else
+                    void loadWhatsAppLogs();
+            }, 2000);
+    }
+});
+watch([managementTab, emailTab], ([tab, subtab], [previousTab]) => {
+    if (emailRefreshTimer)
+        clearInterval(emailRefreshTimer);
+    emailRefreshTimer = undefined;
+    if (tab !== 'email' || !isWhatsAppDashboardAdmin.value)
+        return;
+    if (previousTab !== 'email') {
+        void loadEmailSettings();
+        void loadEmailLogs();
+    }
+    else if (subtab === 'log') {
+        void loadEmailLogs();
+    }
+    if (subtab === 'log')
+        emailRefreshTimer = setInterval(() => void loadEmailLogs(), 3000);
+});
 onMounted(() => {
     darkMode.value = localStorage.getItem('lab-monitor-dark-mode') === 'true';
     document.documentElement.classList.toggle('dark-mode', darkMode.value);
@@ -1183,6 +1591,10 @@ onMounted(() => {
 onUnmounted(() => {
     if (refreshTimer)
         clearInterval(refreshTimer);
+    if (whatsappRefreshTimer)
+        clearInterval(whatsappRefreshTimer);
+    if (emailRefreshTimer)
+        clearInterval(emailRefreshTimer);
     window.removeEventListener('scroll', syncMobileTab);
     window.removeEventListener('hashchange', syncMobileTab);
     document.removeEventListener('click', handleNotificationOutsideClick);
@@ -1691,6 +2103,7 @@ else if (!__VLS_ctx.user) {
 else {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
         ...{ class: "app-shell" },
+        ...{ class: ({ 'app-shell-whatsapp-admin': __VLS_ctx.isWhatsAppDashboardAdmin }) },
     });
     __VLS_asFunctionalElement(__VLS_intrinsicElements.aside, __VLS_intrinsicElements.aside)({
         ...{ class: "sidebar" },
@@ -1862,29 +2275,87 @@ else {
         ...{ class: "nav-count" },
     });
     (__VLS_ctx.devices.length);
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-        ...{ onClick: (...[$event]) => {
-                if (!!(__VLS_ctx.loading))
-                    return;
-                if (!!(!__VLS_ctx.user))
-                    return;
-                __VLS_ctx.managementTab = 'users';
-            } },
-        ...{ class: "nav-link" },
-        ...{ class: ({ active: __VLS_ctx.managementTab === 'users' }) },
-        type: "button",
-    });
-    const __VLS_48 = {}.Settings;
-    /** @type {[typeof __VLS_components.Settings, ]} */ ;
-    // @ts-ignore
-    const __VLS_49 = __VLS_asFunctionalComponent(__VLS_48, new __VLS_48({
-        size: (17),
-    }));
-    const __VLS_50 = __VLS_49({
-        size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_49));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Usuários'));
+    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.managementTab = 'users';
+                } },
+            ...{ class: "nav-link" },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'users' }) },
+            type: "button",
+        });
+        const __VLS_48 = {}.Settings;
+        /** @type {[typeof __VLS_components.Settings, ]} */ ;
+        // @ts-ignore
+        const __VLS_49 = __VLS_asFunctionalComponent(__VLS_48, new __VLS_48({
+            size: (17),
+        }));
+        const __VLS_50 = __VLS_49({
+            size: (17),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_49));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('Usuários'));
+    }
+    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.managementTab = 'whatsapp';
+                } },
+            ...{ class: "nav-link" },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'whatsapp' }) },
+            type: "button",
+        });
+        const __VLS_52 = {}.MessageCircle;
+        /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
+        // @ts-ignore
+        const __VLS_53 = __VLS_asFunctionalComponent(__VLS_52, new __VLS_52({
+            size: (17),
+        }));
+        const __VLS_54 = __VLS_53({
+            size: (17),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_53));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('WhatsApp API'));
+    }
+    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.managementTab = 'email';
+                } },
+            ...{ class: "nav-link" },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'email' }) },
+            type: "button",
+        });
+        const __VLS_56 = {}.Mail;
+        /** @type {[typeof __VLS_components.Mail, ]} */ ;
+        // @ts-ignore
+        const __VLS_57 = __VLS_asFunctionalComponent(__VLS_56, new __VLS_56({
+            size: (17),
+        }));
+        const __VLS_58 = __VLS_57({
+            size: (17),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_57));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('E-mail API'));
+    }
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
         ...{ class: "sidebar-bottom" },
     });
@@ -1929,15 +2400,15 @@ else {
         title: (__VLS_ctx.t('Sair')),
         'aria-label': (__VLS_ctx.t('Sair')),
     });
-    const __VLS_52 = {}.LogOut;
+    const __VLS_60 = {}.LogOut;
     /** @type {[typeof __VLS_components.LogOut, ]} */ ;
     // @ts-ignore
-    const __VLS_53 = __VLS_asFunctionalComponent(__VLS_52, new __VLS_52({
+    const __VLS_61 = __VLS_asFunctionalComponent(__VLS_60, new __VLS_60({
         size: (17),
     }));
-    const __VLS_54 = __VLS_53({
+    const __VLS_62 = __VLS_61({
         size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_53));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_61));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
         ...{ class: "main-area" },
     });
@@ -1956,7 +2427,7 @@ else {
     (__VLS_ctx.t('Monitoramento'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-    (__VLS_ctx.t('Visao geral'));
+    (__VLS_ctx.t(__VLS_ctx.managementTab === 'users' ? 'Usuários' : __VLS_ctx.managementTab === 'whatsapp' ? 'WhatsApp API' : __VLS_ctx.managementTab === 'email' ? 'E-mail API' : 'Visao geral'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
         ...{ class: "top-actions" },
     });
@@ -2031,15 +2502,15 @@ else {
         'aria-expanded': (__VLS_ctx.notificationOpen),
         'aria-haspopup': "dialog",
     });
-    const __VLS_56 = {}.Bell;
+    const __VLS_64 = {}.Bell;
     /** @type {[typeof __VLS_components.Bell, ]} */ ;
     // @ts-ignore
-    const __VLS_57 = __VLS_asFunctionalComponent(__VLS_56, new __VLS_56({
+    const __VLS_65 = __VLS_asFunctionalComponent(__VLS_64, new __VLS_64({
         size: (18),
     }));
-    const __VLS_58 = __VLS_57({
+    const __VLS_66 = __VLS_65({
         size: (18),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_57));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_65));
     if (__VLS_ctx.unreadNotificationCount) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "notification-count" },
@@ -2098,26 +2569,26 @@ else {
                     ...{ class: "notification-icon" },
                 });
                 if (notification.status === 'online') {
-                    const __VLS_60 = {}.CircleCheck;
+                    const __VLS_68 = {}.CircleCheck;
                     /** @type {[typeof __VLS_components.CircleCheck, ]} */ ;
                     // @ts-ignore
-                    const __VLS_61 = __VLS_asFunctionalComponent(__VLS_60, new __VLS_60({
+                    const __VLS_69 = __VLS_asFunctionalComponent(__VLS_68, new __VLS_68({
                         size: (17),
                     }));
-                    const __VLS_62 = __VLS_61({
+                    const __VLS_70 = __VLS_69({
                         size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_61));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_69));
                 }
                 else {
-                    const __VLS_64 = {}.AlertTriangle;
+                    const __VLS_72 = {}.AlertTriangle;
                     /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
                     // @ts-ignore
-                    const __VLS_65 = __VLS_asFunctionalComponent(__VLS_64, new __VLS_64({
+                    const __VLS_73 = __VLS_asFunctionalComponent(__VLS_72, new __VLS_72({
                         size: (17),
                     }));
-                    const __VLS_66 = __VLS_65({
+                    const __VLS_74 = __VLS_73({
                         size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_65));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_73));
                 }
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "notification-copy" },
@@ -2142,15 +2613,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "notification-empty" },
             });
-            const __VLS_68 = {}.Bell;
+            const __VLS_76 = {}.Bell;
             /** @type {[typeof __VLS_components.Bell, ]} */ ;
             // @ts-ignore
-            const __VLS_69 = __VLS_asFunctionalComponent(__VLS_68, new __VLS_68({
+            const __VLS_77 = __VLS_asFunctionalComponent(__VLS_76, new __VLS_76({
                 size: (22),
             }));
-            const __VLS_70 = __VLS_69({
+            const __VLS_78 = __VLS_77({
                 size: (22),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_69));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_77));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
             (__VLS_ctx.t('Nenhuma notificação'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -2181,7 +2652,7 @@ else {
         id: "inicio",
         ...{ class: "dashboard-content" },
     });
-    if (__VLS_ctx.managementTab === 'users') {
+    if (__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "user-management-panel" },
         });
@@ -2205,7 +2676,7 @@ else {
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
-                    if (!(__VLS_ctx.managementTab === 'users'))
+                    if (!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
                         return;
                     __VLS_ctx.managementTab = 'overview';
                 } },
@@ -2213,162 +2684,1385 @@ else {
             type: "button",
         });
         (__VLS_ctx.t('Voltar'));
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
-            ...{ class: "settings-pane user-management-card" },
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
+            ...{ class: "settings-tabs whatsapp-tabs user-management-tabs" },
+            role: "tablist",
+            'aria-label': (__VLS_ctx.t('Usuários')),
         });
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-            ...{ class: "settings-section-heading" },
-        });
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
-        (__VLS_ctx.t('Convidar usuário'));
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-            ...{ class: "invite-form" },
-        });
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
-            ...{ class: "settings-input" },
-            type: "email",
-            placeholder: (__VLS_ctx.t('usuario@empresa.com')),
-        });
-        (__VLS_ctx.inviteEmail);
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
-            value: (__VLS_ctx.inviteRole),
-            ...{ class: "settings-input select-input" },
-        });
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
-            value: "member",
-        });
-        (__VLS_ctx.t('Membro'));
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
-            value: "admin",
-        });
-        (__VLS_ctx.t('Administrador'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-            ...{ onClick: (__VLS_ctx.inviteUser) },
-            ...{ class: "primary-button" },
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.userManagementTab = 'members';
+                } },
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.userManagementTab === 'members' }) },
             type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.userManagementTab === 'members'),
         });
-        (__VLS_ctx.t('Convidar'));
-        if (__VLS_ctx.inviteMessage) {
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
-                ...{ class: "success-message" },
-                role: "status",
-            });
-            (__VLS_ctx.t(__VLS_ctx.inviteMessage));
-        }
-        if (__VLS_ctx.inviteError) {
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
-                ...{ class: "error-message" },
-                role: "alert",
-            });
-            (__VLS_ctx.t(__VLS_ctx.inviteError));
-        }
-        if (__VLS_ctx.workspaceMembers.length) {
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                ...{ class: "member-list" },
-            });
-            for (const [member] of __VLS_getVForSourceType((__VLS_ctx.workspaceMembers))) {
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                    key: (member.id),
-                    ...{ class: "member-row" },
-                });
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-                (member.displayName || member.email);
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
-                (member.email);
-                if (member.isPlatformAdmin) {
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                        ...{ class: "protected-member-role" },
-                        title: (__VLS_ctx.t('O papel deste administrador da plataforma não pode ser alterado.')),
-                        'aria-label': (__VLS_ctx.t('Administrador da plataforma')),
-                    });
-                    const __VLS_72 = {}.LockKeyhole;
-                    /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
-                    // @ts-ignore
-                    const __VLS_73 = __VLS_asFunctionalComponent(__VLS_72, new __VLS_72({
-                        size: (14),
-                    }));
-                    const __VLS_74 = __VLS_73({
-                        size: (14),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_73));
-                    (__VLS_ctx.t('Administrador da plataforma'));
-                }
-                else {
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
-                        ...{ onChange: (...[$event]) => {
-                                if (!!(__VLS_ctx.loading))
-                                    return;
-                                if (!!(!__VLS_ctx.user))
-                                    return;
-                                if (!(__VLS_ctx.managementTab === 'users'))
-                                    return;
-                                if (!(__VLS_ctx.workspaceMembers.length))
-                                    return;
-                                if (!!(member.isPlatformAdmin))
-                                    return;
-                                __VLS_ctx.updateMemberRole(member.id, $event.target.value);
-                            } },
-                        value: (member.role),
-                        ...{ class: "settings-input select-input small" },
-                    });
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
-                        value: "member",
-                    });
-                    (__VLS_ctx.t('Membro'));
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
-                        value: "admin",
-                    });
-                    (__VLS_ctx.t('Administrador'));
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
-                        value: "owner",
-                        disabled: (member.email === __VLS_ctx.user?.email),
-                    });
-                    (__VLS_ctx.t('Proprietário'));
-                }
-                if (member.email !== __VLS_ctx.user?.email) {
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-                        ...{ onClick: (...[$event]) => {
-                                if (!!(__VLS_ctx.loading))
-                                    return;
-                                if (!!(!__VLS_ctx.user))
-                                    return;
-                                if (!(__VLS_ctx.managementTab === 'users'))
-                                    return;
-                                if (!(__VLS_ctx.workspaceMembers.length))
-                                    return;
-                                if (!(member.email !== __VLS_ctx.user?.email))
-                                    return;
-                                __VLS_ctx.removeMember(member.id);
-                            } },
-                        ...{ class: "text-button" },
-                        type: "button",
-                    });
-                    (__VLS_ctx.t('Remover'));
-                }
-            }
-        }
-        if (__VLS_ctx.workspaceInvitations.length) {
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                ...{ class: "member-list" },
+        const __VLS_80 = {}.UsersRound;
+        /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
+        // @ts-ignore
+        const __VLS_81 = __VLS_asFunctionalComponent(__VLS_80, new __VLS_80({
+            size: (15),
+        }));
+        const __VLS_82 = __VLS_81({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_81));
+        (__VLS_ctx.t('Membros'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.userManagementTab = 'registration';
+                } },
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.userManagementTab === 'registration' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.userManagementTab === 'registration'),
+        });
+        const __VLS_84 = {}.ShieldCheck;
+        /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
+        // @ts-ignore
+        const __VLS_85 = __VLS_asFunctionalComponent(__VLS_84, new __VLS_84({
+            size: (15),
+        }));
+        const __VLS_86 = __VLS_85({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_85));
+        (__VLS_ctx.t('Cadastro público'));
+        if (__VLS_ctx.userManagementTab === 'registration') {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                ...{ class: "settings-pane user-management-card" },
             });
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "settings-section-heading" },
             });
             __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
-            (__VLS_ctx.t('Convites pendentes'));
-            for (const [invitation] of __VLS_getVForSourceType((__VLS_ctx.workspaceInvitations))) {
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                    key: (invitation.id),
-                    ...{ class: "member-row invitation-row" },
+            (__VLS_ctx.t('Cadastro público'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "theme-setting" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "theme-setting-icon" },
+            });
+            const __VLS_88 = {}.ShieldCheck;
+            /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
+            // @ts-ignore
+            const __VLS_89 = __VLS_asFunctionalComponent(__VLS_88, new __VLS_88({
+                size: (18),
+            }));
+            const __VLS_90 = __VLS_89({
+                size: (18),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_89));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "theme-setting-copy" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.t('Permitir criação de contas'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+            (__VLS_ctx.registrationEnabled ? __VLS_ctx.t('Habilitado na tela de login') : __VLS_ctx.t('Desabilitado'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                ...{ onChange: (__VLS_ctx.toggleRegistrationSetting) },
+                ...{ class: "theme-switch" },
+                type: "checkbox",
+                checked: (__VLS_ctx.registrationEnabled),
+            });
+        }
+        else {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                ...{ class: "settings-pane user-management-card" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "settings-section-heading" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+            (__VLS_ctx.t('Convidar usuário'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "invite-form" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                ...{ class: "settings-input" },
+                type: "email",
+                placeholder: (__VLS_ctx.t('usuario@empresa.com')),
+            });
+            (__VLS_ctx.inviteEmail);
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
+                value: (__VLS_ctx.inviteRole),
+                ...{ class: "settings-input select-input" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                value: "member",
+            });
+            (__VLS_ctx.t('Membro'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                value: "admin",
+            });
+            (__VLS_ctx.t('Administrador'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (__VLS_ctx.inviteUser) },
+                ...{ class: "primary-button" },
+                type: "button",
+            });
+            (__VLS_ctx.t('Convidar'));
+            if (__VLS_ctx.inviteMessage) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "success-message" },
+                    role: "status",
                 });
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-                (invitation.email);
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
-                (__VLS_ctx.workspaceRoleLabel(invitation.role));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                (new Date(invitation.expiresAt).toLocaleDateString('pt-BR'));
+                (__VLS_ctx.t(__VLS_ctx.inviteMessage));
             }
+            if (__VLS_ctx.inviteError) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "error-message" },
+                    role: "alert",
+                });
+                (__VLS_ctx.t(__VLS_ctx.inviteError));
+            }
+            if (__VLS_ctx.workspaceMembers.length) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "member-list" },
+                });
+                for (const [member] of __VLS_getVForSourceType((__VLS_ctx.workspaceMembers))) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        key: (member.id),
+                        ...{ class: "member-row" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (member.displayName || member.email);
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                    (member.email);
+                    if (member.isPlatformAdmin) {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                            ...{ class: "protected-member-role" },
+                            title: (__VLS_ctx.t('O papel deste administrador da plataforma não pode ser alterado.')),
+                            'aria-label': (__VLS_ctx.t('Administrador da plataforma')),
+                        });
+                        const __VLS_92 = {}.LockKeyhole;
+                        /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_93 = __VLS_asFunctionalComponent(__VLS_92, new __VLS_92({
+                            size: (14),
+                        }));
+                        const __VLS_94 = __VLS_93({
+                            size: (14),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_93));
+                        (__VLS_ctx.t('Administrador da plataforma'));
+                    }
+                    else {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
+                            ...{ onChange: (...[$event]) => {
+                                    if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(!__VLS_ctx.user))
+                                        return;
+                                    if (!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                                        return;
+                                    if (!!(__VLS_ctx.userManagementTab === 'registration'))
+                                        return;
+                                    if (!(__VLS_ctx.workspaceMembers.length))
+                                        return;
+                                    if (!!(member.isPlatformAdmin))
+                                        return;
+                                    __VLS_ctx.updateMemberRole(member.id, $event.target.value);
+                                } },
+                            value: (member.role),
+                            ...{ class: "settings-input select-input small" },
+                        });
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                            value: "member",
+                        });
+                        (__VLS_ctx.t('Membro'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                            value: "admin",
+                        });
+                        (__VLS_ctx.t('Administrador'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                            value: "owner",
+                            disabled: (member.email === __VLS_ctx.user?.email),
+                        });
+                        (__VLS_ctx.t('Proprietário'));
+                    }
+                    if (member.email !== __VLS_ctx.user?.email) {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                            ...{ onClick: (...[$event]) => {
+                                    if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(!__VLS_ctx.user))
+                                        return;
+                                    if (!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                                        return;
+                                    if (!!(__VLS_ctx.userManagementTab === 'registration'))
+                                        return;
+                                    if (!(__VLS_ctx.workspaceMembers.length))
+                                        return;
+                                    if (!(member.email !== __VLS_ctx.user?.email))
+                                        return;
+                                    __VLS_ctx.removeMember(member.id);
+                                } },
+                            ...{ class: "text-button" },
+                            type: "button",
+                        });
+                        (__VLS_ctx.t('Remover'));
+                    }
+                }
+            }
+            if (__VLS_ctx.workspaceInvitations.length) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "member-list" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "settings-section-heading" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+                (__VLS_ctx.t('Convites pendentes'));
+                for (const [invitation] of __VLS_getVForSourceType((__VLS_ctx.workspaceInvitations))) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        key: (invitation.id),
+                        ...{ class: "member-row invitation-row" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (invitation.email);
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                    (__VLS_ctx.workspaceRoleLabel(invitation.role));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    (new Date(invitation.expiresAt).toLocaleDateString('pt-BR'));
+                }
+            }
+        }
+    }
+    else if (__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "whatsapp-management-panel" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "page-heading" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "eyebrow" },
+        });
+        (__VLS_ctx.t('GERENCIAMENTO'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h1, __VLS_intrinsicElements.h1)({});
+        (__VLS_ctx.t('WhatsApp API'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "heading-sub" },
+        });
+        (__VLS_ctx.t(__VLS_ctx.whatsappTab === 'log' ? 'Log de eventos' : __VLS_ctx.whatsappTab === 'configuration' ? 'Configuração' : 'Conexão WhatsApp Web'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.whatsappTab === 'log' ? __VLS_ctx.loadWhatsAppLogs() : __VLS_ctx.loadWhatsAppStatus();
+                } },
+            ...{ class: "secondary-button" },
+            type: "button",
+            disabled: (__VLS_ctx.whatsappWorking),
+            'aria-label': (__VLS_ctx.t('Atualizar')),
+            title: (__VLS_ctx.t('Atualizar')),
+        });
+        const __VLS_96 = {}.RefreshCw;
+        /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
+        // @ts-ignore
+        const __VLS_97 = __VLS_asFunctionalComponent(__VLS_96, new __VLS_96({
+            size: (16),
+        }));
+        const __VLS_98 = __VLS_97({
+            size: (16),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_97));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
+            ...{ class: "settings-tabs whatsapp-tabs" },
+            role: "tablist",
+            'aria-label': (__VLS_ctx.t('WhatsApp API')),
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.whatsappTab = 'log';
+                } },
+            id: "whatsappLogTab",
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.whatsappTab === 'log' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.whatsappTab === 'log'),
+            'aria-controls': "whatsappLogPanel",
+        });
+        const __VLS_100 = {}.List;
+        /** @type {[typeof __VLS_components.List, ]} */ ;
+        // @ts-ignore
+        const __VLS_101 = __VLS_asFunctionalComponent(__VLS_100, new __VLS_100({
+            size: (15),
+        }));
+        const __VLS_102 = __VLS_101({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_101));
+        (__VLS_ctx.t('Log'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.whatsappTab = 'configuration';
+                } },
+            id: "whatsappConfigurationTab",
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.whatsappTab === 'configuration' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.whatsappTab === 'configuration'),
+            'aria-controls': "whatsappConfigurationPanel",
+        });
+        const __VLS_104 = {}.Settings;
+        /** @type {[typeof __VLS_components.Settings, ]} */ ;
+        // @ts-ignore
+        const __VLS_105 = __VLS_asFunctionalComponent(__VLS_104, new __VLS_104({
+            size: (15),
+        }));
+        const __VLS_106 = __VLS_105({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_105));
+        (__VLS_ctx.t('Configuração'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.whatsappTab = 'connection';
+                } },
+            id: "whatsappConnectionTab",
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.whatsappTab === 'connection' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.whatsappTab === 'connection'),
+            'aria-controls': "whatsappConnectionPanel",
+        });
+        const __VLS_108 = {}.MessageCircle;
+        /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
+        // @ts-ignore
+        const __VLS_109 = __VLS_asFunctionalComponent(__VLS_108, new __VLS_108({
+            size: (15),
+        }));
+        const __VLS_110 = __VLS_109({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_109));
+        (__VLS_ctx.t('Conexão'));
+        if (__VLS_ctx.whatsappError) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "notice-error" },
+                role: "alert",
+            });
+            const __VLS_112 = {}.AlertTriangle;
+            /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
+            // @ts-ignore
+            const __VLS_113 = __VLS_asFunctionalComponent(__VLS_112, new __VLS_112({
+                size: (17),
+            }));
+            const __VLS_114 = __VLS_113({
+                size: (17),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_113));
+            (__VLS_ctx.t(__VLS_ctx.whatsappError));
+        }
+        if (__VLS_ctx.whatsappTab === 'log') {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                id: "whatsappLogPanel",
+                ...{ class: "whatsapp-log-section" },
+                role: "tabpanel",
+                'aria-labelledby': "whatsappLogTab",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-log-heading" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-log-actions" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.whatsappLogs.length);
+            (__VLS_ctx.t('eventos'));
+            if (__VLS_ctx.whatsappLogs.length) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (__VLS_ctx.clearWhatsAppLogs) },
+                    ...{ class: "danger-button whatsapp-log-clear" },
+                    type: "button",
+                    disabled: (__VLS_ctx.whatsappWorking),
+                });
+                const __VLS_116 = {}.Trash2;
+                /** @type {[typeof __VLS_components.Trash2, ]} */ ;
+                // @ts-ignore
+                const __VLS_117 = __VLS_asFunctionalComponent(__VLS_116, new __VLS_116({
+                    size: (14),
+                }));
+                const __VLS_118 = __VLS_117({
+                    size: (14),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_117));
+                (__VLS_ctx.t('Apagar log'));
+            }
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t('Últimos 100 eventos em memória; o histórico é limpo quando a API reinicia.'));
+            if (__VLS_ctx.whatsappLogs.length) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "whatsapp-log-list" },
+                    role: "list",
+                });
+                for (const [entry] of __VLS_getVForSourceType((__VLS_ctx.whatsappLogs))) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+                        key: (entry.id),
+                        ...{ class: "whatsapp-log-row" },
+                        ...{ class: (`whatsapp-log-${entry.level}`) },
+                        role: "listitem",
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                        ...{ class: "whatsapp-log-icon" },
+                    });
+                    if (entry.level === 'success') {
+                        const __VLS_120 = {}.CircleCheck;
+                        /** @type {[typeof __VLS_components.CircleCheck, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_121 = __VLS_asFunctionalComponent(__VLS_120, new __VLS_120({
+                            size: (16),
+                        }));
+                        const __VLS_122 = __VLS_121({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_121));
+                    }
+                    else if (entry.level === 'error') {
+                        const __VLS_124 = {}.CircleAlert;
+                        /** @type {[typeof __VLS_components.CircleAlert, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_125 = __VLS_asFunctionalComponent(__VLS_124, new __VLS_124({
+                            size: (16),
+                        }));
+                        const __VLS_126 = __VLS_125({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_125));
+                    }
+                    else {
+                        const __VLS_128 = {}.Activity;
+                        /** @type {[typeof __VLS_components.Activity, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_129 = __VLS_asFunctionalComponent(__VLS_128, new __VLS_128({
+                            size: (16),
+                        }));
+                        const __VLS_130 = __VLS_129({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_129));
+                    }
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                        ...{ class: "whatsapp-log-copy" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (entry.event);
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                    (entry.details);
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.time, __VLS_intrinsicElements.time)({
+                        datetime: (entry.createdAt),
+                    });
+                    (new Date(entry.createdAt).toLocaleString(__VLS_ctx.dateLocale));
+                }
+            }
+            else {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "whatsapp-log-empty" },
+                });
+                const __VLS_132 = {}.List;
+                /** @type {[typeof __VLS_components.List, ]} */ ;
+                // @ts-ignore
+                const __VLS_133 = __VLS_asFunctionalComponent(__VLS_132, new __VLS_132({
+                    size: (20),
+                }));
+                const __VLS_134 = __VLS_133({
+                    size: (20),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_133));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                (__VLS_ctx.t('Nenhum evento registrado.'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                (__VLS_ctx.t('O log não armazena o conteúdo das mensagens nem números completos.'));
+            }
+        }
+        else if (__VLS_ctx.whatsappTab === 'configuration') {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                id: "whatsappConfigurationPanel",
+                ...{ class: "whatsapp-config-section" },
+                role: "tabpanel",
+                'aria-labelledby': "whatsappConfigurationTab",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-config-form" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "whatsapp-config-field" },
+                for: "whatsappSenderName",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t('Nome exibido nas mensagens'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                id: "whatsappSenderName",
+                value: (__VLS_ctx.whatsappSettings.senderName),
+                ...{ class: "settings-input" },
+                type: "text",
+                maxlength: "80",
+            });
+            /** @type {[typeof MessageTemplateEditor, ]} */ ;
+            // @ts-ignore
+            const __VLS_136 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+                id: "whatsappOnlineMessage",
+                modelValue: (__VLS_ctx.whatsappSettings.onlineMessage),
+                label: (__VLS_ctx.t('Mensagem ao normalizar')),
+                maxlength: (500),
+            }));
+            const __VLS_137 = __VLS_136({
+                id: "whatsappOnlineMessage",
+                modelValue: (__VLS_ctx.whatsappSettings.onlineMessage),
+                label: (__VLS_ctx.t('Mensagem ao normalizar')),
+                maxlength: (500),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_136));
+            /** @type {[typeof MessageTemplateEditor, ]} */ ;
+            // @ts-ignore
+            const __VLS_139 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+                id: "whatsappWarningMessage",
+                modelValue: (__VLS_ctx.whatsappSettings.warningMessage),
+                label: (__VLS_ctx.t('Mensagem em atenção')),
+                maxlength: (500),
+            }));
+            const __VLS_140 = __VLS_139({
+                id: "whatsappWarningMessage",
+                modelValue: (__VLS_ctx.whatsappSettings.warningMessage),
+                label: (__VLS_ctx.t('Mensagem em atenção')),
+                maxlength: (500),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_139));
+            /** @type {[typeof MessageTemplateEditor, ]} */ ;
+            // @ts-ignore
+            const __VLS_142 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+                id: "whatsappOfflineMessage",
+                modelValue: (__VLS_ctx.whatsappSettings.offlineMessage),
+                label: (__VLS_ctx.t('Mensagem offline')),
+                maxlength: (500),
+            }));
+            const __VLS_143 = __VLS_142({
+                id: "whatsappOfflineMessage",
+                modelValue: (__VLS_ctx.whatsappSettings.offlineMessage),
+                label: (__VLS_ctx.t('Mensagem offline')),
+                maxlength: (500),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_142));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "settings-help" },
+            });
+            (__VLS_ctx.t('Use &#123;&#123;laboratorio&#125;&#125;, &#123;&#123;aparelho&#125;&#125;, &#123;&#123;status&#125;&#125;, &#123;&#123;localizacao&#125;&#125; e &#123;&#123;identificador&#125;&#125; como campos dinâmicos.'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.aside, __VLS_intrinsicElements.aside)({
+                ...{ class: "whatsapp-message-preview" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.t('Prévia da mensagem em atenção'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({});
+            (__VLS_ctx.whatsappPreviewMessage);
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "settings-help" },
+            });
+            (__VLS_ctx.t('Estas mensagens são usadas pela conexão via QR. O nome não altera o perfil da conta WhatsApp.'));
+            if (__VLS_ctx.whatsappSettingsMessage) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "success-message" },
+                    role: "status",
+                });
+                (__VLS_ctx.t(__VLS_ctx.whatsappSettingsMessage));
+            }
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (__VLS_ctx.saveWhatsAppSettings) },
+                ...{ class: "primary-button settings-save-button" },
+                type: "button",
+                disabled: (__VLS_ctx.whatsappSettingsSaving),
+            });
+            if (__VLS_ctx.whatsappSettingsSaving) {
+                const __VLS_145 = {}.LoaderCircle;
+                /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+                // @ts-ignore
+                const __VLS_146 = __VLS_asFunctionalComponent(__VLS_145, new __VLS_145({
+                    ...{ class: "spin" },
+                    size: (16),
+                }));
+                const __VLS_147 = __VLS_146({
+                    ...{ class: "spin" },
+                    size: (16),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_146));
+            }
+            (__VLS_ctx.whatsappSettingsSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar configuração'));
+        }
+        else {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                id: "whatsappConnectionPanel",
+                ...{ class: "whatsapp-manager-section" },
+                role: "tabpanel",
+                'aria-labelledby': "whatsappConnectionTab",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-manager-copy" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-status-line" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "whatsapp-status-dot" },
+                ...{ class: (`whatsapp-status-${__VLS_ctx.whatsappStatus.state}`) },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.t(__VLS_ctx.whatsappStatus.state === 'connected' ? 'Conectado' : __VLS_ctx.whatsappStatus.state === 'qr' ? 'Aguardando leitura do QR code' : __VLS_ctx.whatsappStatus.state === 'connecting' ? 'Conectando' : 'Desconectado'));
+            if (__VLS_ctx.whatsappStatus.state === 'connected' && __VLS_ctx.whatsappStatus.phoneNumber) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "whatsapp-phone" },
+                });
+                (__VLS_ctx.whatsappStatus.phoneNumber);
+            }
+            if (__VLS_ctx.whatsappStatus.state === 'qr') {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                    ...{ class: "whatsapp-manager-help" },
+                });
+                (__VLS_ctx.t('Escaneie o QR code com o WhatsApp da conta que enviará os alertas.'));
+            }
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "whatsapp-manager-help" },
+            });
+            (__VLS_ctx.t('Os alertas serão enviados somente a usuários que ativaram WhatsApp no perfil.'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "whatsapp-manager-warning" },
+            });
+            (__VLS_ctx.t('Este conector não é oficial. O WhatsApp pode desconectar ou bloquear contas que automatizam mensagens.'));
+            if (__VLS_ctx.whatsappStatus.state === 'disconnected') {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (__VLS_ctx.connectWhatsApp) },
+                    ...{ class: "primary-button whatsapp-action" },
+                    type: "button",
+                    disabled: (__VLS_ctx.whatsappWorking),
+                });
+                if (__VLS_ctx.whatsappWorking) {
+                    const __VLS_149 = {}.LoaderCircle;
+                    /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_150 = __VLS_asFunctionalComponent(__VLS_149, new __VLS_149({
+                        ...{ class: "spin" },
+                        size: (16),
+                    }));
+                    const __VLS_151 = __VLS_150({
+                        ...{ class: "spin" },
+                        size: (16),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_150));
+                }
+                else {
+                    const __VLS_153 = {}.MessageCircle;
+                    /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_154 = __VLS_asFunctionalComponent(__VLS_153, new __VLS_153({
+                        size: (16),
+                    }));
+                    const __VLS_155 = __VLS_154({
+                        size: (16),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_154));
+                }
+                (__VLS_ctx.t('Iniciar conexão'));
+            }
+            else {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (__VLS_ctx.disconnectWhatsApp) },
+                    ...{ class: "secondary-button whatsapp-action" },
+                    type: "button",
+                    disabled: (__VLS_ctx.whatsappWorking),
+                });
+                if (__VLS_ctx.whatsappWorking) {
+                    const __VLS_157 = {}.LoaderCircle;
+                    /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_158 = __VLS_asFunctionalComponent(__VLS_157, new __VLS_157({
+                        ...{ class: "spin" },
+                        size: (16),
+                    }));
+                    const __VLS_159 = __VLS_158({
+                        ...{ class: "spin" },
+                        size: (16),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_158));
+                }
+                else {
+                    const __VLS_161 = {}.X;
+                    /** @type {[typeof __VLS_components.X, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_162 = __VLS_asFunctionalComponent(__VLS_161, new __VLS_161({
+                        size: (16),
+                    }));
+                    const __VLS_163 = __VLS_162({
+                        size: (16),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_162));
+                }
+                (__VLS_ctx.t('Desconectar conta'));
+            }
+            if (__VLS_ctx.whatsappStatus.state === 'qr') {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "whatsapp-qr-panel" },
+                });
+                if (__VLS_ctx.whatsappStatus.qrDataUrl) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.img)({
+                        ...{ class: "whatsapp-qr-image" },
+                        src: (__VLS_ctx.whatsappStatus.qrDataUrl),
+                        alt: (__VLS_ctx.t('Escaneie o QR code com o WhatsApp da conta que enviará os alertas.')),
+                    });
+                }
+                else {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        ...{ class: "whatsapp-qr-placeholder" },
+                    });
+                    const __VLS_165 = {}.LoaderCircle;
+                    /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_166 = __VLS_asFunctionalComponent(__VLS_165, new __VLS_165({
+                        ...{ class: "spin" },
+                        size: (24),
+                    }));
+                    const __VLS_167 = __VLS_166({
+                        ...{ class: "spin" },
+                        size: (24),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_166));
+                }
+            }
+            else if (__VLS_ctx.whatsappStatus.state === 'connecting') {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "whatsapp-qr-placeholder" },
+                });
+                const __VLS_169 = {}.LoaderCircle;
+                /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+                // @ts-ignore
+                const __VLS_170 = __VLS_asFunctionalComponent(__VLS_169, new __VLS_169({
+                    ...{ class: "spin" },
+                    size: (24),
+                }));
+                const __VLS_171 = __VLS_170({
+                    ...{ class: "spin" },
+                    size: (24),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_170));
+            }
+        }
+    }
+    else if (__VLS_ctx.managementTab === 'email' && __VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "whatsapp-management-panel email-management-panel" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "page-heading" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "eyebrow" },
+        });
+        (__VLS_ctx.t('GERENCIAMENTO'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h1, __VLS_intrinsicElements.h1)({});
+        (__VLS_ctx.t('E-mail API'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "heading-sub" },
+        });
+        (__VLS_ctx.t(__VLS_ctx.emailTab === 'log' ? 'Log de eventos' : __VLS_ctx.emailTab === 'configuration' ? 'Configuração de e-mail' : 'Conexão SMTP'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'email' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.emailTab === 'log' ? __VLS_ctx.loadEmailLogs() : __VLS_ctx.loadEmailSettings();
+                } },
+            ...{ class: "secondary-button" },
+            type: "button",
+            disabled: (__VLS_ctx.emailWorking || __VLS_ctx.emailSettingsSaving),
+            'aria-label': (__VLS_ctx.t('Atualizar')),
+            title: (__VLS_ctx.t('Atualizar')),
+        });
+        const __VLS_173 = {}.RefreshCw;
+        /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
+        // @ts-ignore
+        const __VLS_174 = __VLS_asFunctionalComponent(__VLS_173, new __VLS_173({
+            size: (16),
+        }));
+        const __VLS_175 = __VLS_174({
+            size: (16),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_174));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
+            ...{ class: "settings-tabs whatsapp-tabs" },
+            role: "tablist",
+            'aria-label': (__VLS_ctx.t('E-mail API')),
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'email' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.emailTab = 'log';
+                } },
+            id: "emailLogTab",
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.emailTab === 'log' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.emailTab === 'log'),
+            'aria-controls': "emailLogPanel",
+        });
+        const __VLS_177 = {}.List;
+        /** @type {[typeof __VLS_components.List, ]} */ ;
+        // @ts-ignore
+        const __VLS_178 = __VLS_asFunctionalComponent(__VLS_177, new __VLS_177({
+            size: (15),
+        }));
+        const __VLS_179 = __VLS_178({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_178));
+        (__VLS_ctx.t('Log'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'email' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.emailTab = 'configuration';
+                } },
+            id: "emailConfigurationTab",
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.emailTab === 'configuration' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.emailTab === 'configuration'),
+            'aria-controls': "emailConfigurationPanel",
+        });
+        const __VLS_181 = {}.Settings;
+        /** @type {[typeof __VLS_components.Settings, ]} */ ;
+        // @ts-ignore
+        const __VLS_182 = __VLS_asFunctionalComponent(__VLS_181, new __VLS_181({
+            size: (15),
+        }));
+        const __VLS_183 = __VLS_182({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_182));
+        (__VLS_ctx.t('Configuração'));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    if (!(__VLS_ctx.managementTab === 'email' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.emailTab = 'connection';
+                } },
+            id: "emailConnectionTab",
+            ...{ class: "settings-tab" },
+            ...{ class: ({ active: __VLS_ctx.emailTab === 'connection' }) },
+            type: "button",
+            role: "tab",
+            'aria-selected': (__VLS_ctx.emailTab === 'connection'),
+            'aria-controls': "emailConnectionPanel",
+        });
+        const __VLS_185 = {}.Mail;
+        /** @type {[typeof __VLS_components.Mail, ]} */ ;
+        // @ts-ignore
+        const __VLS_186 = __VLS_asFunctionalComponent(__VLS_185, new __VLS_185({
+            size: (15),
+        }));
+        const __VLS_187 = __VLS_186({
+            size: (15),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_186));
+        (__VLS_ctx.t('Conexão'));
+        if (__VLS_ctx.emailError) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "notice-error" },
+                role: "alert",
+            });
+            const __VLS_189 = {}.AlertTriangle;
+            /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
+            // @ts-ignore
+            const __VLS_190 = __VLS_asFunctionalComponent(__VLS_189, new __VLS_189({
+                size: (17),
+            }));
+            const __VLS_191 = __VLS_190({
+                size: (17),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_190));
+            (__VLS_ctx.t(__VLS_ctx.emailError));
+        }
+        if (__VLS_ctx.emailMessage) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "success-message" },
+                role: "status",
+            });
+            (__VLS_ctx.t(__VLS_ctx.emailMessage));
+        }
+        if (__VLS_ctx.emailTab === 'log') {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                id: "emailLogPanel",
+                ...{ class: "whatsapp-log-section" },
+                role: "tabpanel",
+                'aria-labelledby': "emailLogTab",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-log-heading" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-log-actions" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.emailLogs.length);
+            (__VLS_ctx.t('eventos'));
+            if (__VLS_ctx.emailLogs.length) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (__VLS_ctx.clearEmailLogs) },
+                    ...{ class: "danger-button whatsapp-log-clear" },
+                    type: "button",
+                    disabled: (__VLS_ctx.emailWorking),
+                });
+                const __VLS_193 = {}.Trash2;
+                /** @type {[typeof __VLS_components.Trash2, ]} */ ;
+                // @ts-ignore
+                const __VLS_194 = __VLS_asFunctionalComponent(__VLS_193, new __VLS_193({
+                    size: (14),
+                }));
+                const __VLS_195 = __VLS_194({
+                    size: (14),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_194));
+                (__VLS_ctx.t('Apagar log de e-mail'));
+            }
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t('Últimos 100 eventos em memória; o histórico é limpo quando a API reinicia.'));
+            if (__VLS_ctx.emailLogs.length) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "whatsapp-log-list" },
+                    role: "list",
+                });
+                for (const [entry] of __VLS_getVForSourceType((__VLS_ctx.emailLogs))) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+                        key: (entry.id),
+                        ...{ class: "whatsapp-log-row" },
+                        ...{ class: (`whatsapp-log-${entry.level}`) },
+                        role: "listitem",
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                        ...{ class: "whatsapp-log-icon" },
+                    });
+                    if (entry.level === 'success') {
+                        const __VLS_197 = {}.CircleCheck;
+                        /** @type {[typeof __VLS_components.CircleCheck, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_198 = __VLS_asFunctionalComponent(__VLS_197, new __VLS_197({
+                            size: (16),
+                        }));
+                        const __VLS_199 = __VLS_198({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_198));
+                    }
+                    else if (entry.level === 'error') {
+                        const __VLS_201 = {}.CircleAlert;
+                        /** @type {[typeof __VLS_components.CircleAlert, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_202 = __VLS_asFunctionalComponent(__VLS_201, new __VLS_201({
+                            size: (16),
+                        }));
+                        const __VLS_203 = __VLS_202({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_202));
+                    }
+                    else {
+                        const __VLS_205 = {}.Activity;
+                        /** @type {[typeof __VLS_components.Activity, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_206 = __VLS_asFunctionalComponent(__VLS_205, new __VLS_205({
+                            size: (16),
+                        }));
+                        const __VLS_207 = __VLS_206({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_206));
+                    }
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                        ...{ class: "whatsapp-log-copy" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (entry.event);
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                    (entry.details);
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.time, __VLS_intrinsicElements.time)({
+                        datetime: (entry.createdAt),
+                    });
+                    (new Date(entry.createdAt).toLocaleString(__VLS_ctx.dateLocale));
+                }
+            }
+            else {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    ...{ class: "whatsapp-log-empty" },
+                });
+                const __VLS_209 = {}.List;
+                /** @type {[typeof __VLS_components.List, ]} */ ;
+                // @ts-ignore
+                const __VLS_210 = __VLS_asFunctionalComponent(__VLS_209, new __VLS_209({
+                    size: (20),
+                }));
+                const __VLS_211 = __VLS_210({
+                    size: (20),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_210));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                (__VLS_ctx.t('Nenhum e-mail enviado.'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                (__VLS_ctx.t('O log guarda resultados e destinatários mascarados, nunca o conteúdo.'));
+            }
+        }
+        else if (__VLS_ctx.emailTab === 'configuration') {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                id: "emailConfigurationPanel",
+                ...{ class: "whatsapp-config-section" },
+                role: "tabpanel",
+                'aria-labelledby': "emailConfigurationTab",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-config-form" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "email-config-grid" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "whatsapp-config-field" },
+                for: "emailSmtpHost",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t('Servidor SMTP'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                id: "emailSmtpHost",
+                value: (__VLS_ctx.emailSettings.smtpHost),
+                ...{ class: "settings-input" },
+                type: "text",
+                autocomplete: "off",
+                placeholder: "smtp.example.com",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "whatsapp-config-field" },
+                for: "emailSmtpPort",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t('Porta SMTP'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                id: "emailSmtpPort",
+                ...{ class: "settings-input" },
+                type: "number",
+                min: "1",
+                max: "65535",
+            });
+            (__VLS_ctx.emailSettings.smtpPort);
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "whatsapp-config-field" },
+                for: "emailSmtpUser",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t('Usuário SMTP'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                id: "emailSmtpUser",
+                value: (__VLS_ctx.emailSettings.smtpUser),
+                ...{ class: "settings-input" },
+                type: "text",
+                autocomplete: "username",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "whatsapp-config-field" },
+                for: "emailSenderAddress",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t('E-mail do remetente'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                id: "emailSenderAddress",
+                ...{ class: "settings-input" },
+                type: "email",
+                autocomplete: "email",
+            });
+            (__VLS_ctx.emailSettings.senderEmail);
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "whatsapp-config-field" },
+                for: "emailSenderName",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t('Nome do remetente'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                id: "emailSenderName",
+                value: (__VLS_ctx.emailSettings.senderName),
+                ...{ class: "settings-input" },
+                type: "text",
+                maxlength: "80",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "whatsapp-config-field" },
+                for: "emailSmtpPassword",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            (__VLS_ctx.t('Senha SMTP'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                id: "emailSmtpPassword",
+                ...{ class: "settings-input" },
+                type: "password",
+                autocomplete: "new-password",
+                placeholder: (__VLS_ctx.emailSettings.passwordConfigured ? __VLS_ctx.t('Deixe em branco para manter a senha salva.') : ''),
+            });
+            (__VLS_ctx.emailPassword);
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "theme-setting email-secure-toggle" },
+                for: "emailSmtpSecure",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "theme-setting-icon" },
+            });
+            const __VLS_213 = {}.ShieldCheck;
+            /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
+            // @ts-ignore
+            const __VLS_214 = __VLS_asFunctionalComponent(__VLS_213, new __VLS_213({
+                size: (17),
+            }));
+            const __VLS_215 = __VLS_214({
+                size: (17),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_214));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "theme-setting-copy" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.t('Conexão segura (TLS)'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+            (__VLS_ctx.t('Ative para SMTP com TLS implícito, geralmente na porta 465.'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                id: "emailSmtpSecure",
+                ...{ class: "theme-switch" },
+                type: "checkbox",
+            });
+            (__VLS_ctx.emailSettings.smtpSecure);
+            if (__VLS_ctx.emailSettings.passwordConfigured) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                    ...{ class: "theme-setting email-secure-toggle" },
+                    for: "emailClearPassword",
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "theme-setting-icon" },
+                });
+                const __VLS_217 = {}.LockKeyhole;
+                /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
+                // @ts-ignore
+                const __VLS_218 = __VLS_asFunctionalComponent(__VLS_217, new __VLS_217({
+                    size: (17),
+                }));
+                const __VLS_219 = __VLS_218({
+                    size: (17),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_218));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "theme-setting-copy" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                (__VLS_ctx.t('Apagar senha salva'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                (__VLS_ctx.t('Remova a senha cifrada do servidor.'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                    id: "emailClearPassword",
+                    ...{ class: "theme-switch" },
+                    type: "checkbox",
+                });
+                (__VLS_ctx.emailClearPassword);
+            }
+            /** @type {[typeof MessageTemplateEditor, ]} */ ;
+            // @ts-ignore
+            const __VLS_221 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+                id: "emailOnlineMessage",
+                modelValue: (__VLS_ctx.emailSettings.onlineMessage),
+                label: (__VLS_ctx.t('Mensagem de e-mail ao normalizar')),
+                maxlength: (1000),
+            }));
+            const __VLS_222 = __VLS_221({
+                id: "emailOnlineMessage",
+                modelValue: (__VLS_ctx.emailSettings.onlineMessage),
+                label: (__VLS_ctx.t('Mensagem de e-mail ao normalizar')),
+                maxlength: (1000),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_221));
+            /** @type {[typeof MessageTemplateEditor, ]} */ ;
+            // @ts-ignore
+            const __VLS_224 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+                id: "emailWarningMessage",
+                modelValue: (__VLS_ctx.emailSettings.warningMessage),
+                label: (__VLS_ctx.t('Mensagem de e-mail em atenção')),
+                maxlength: (1000),
+            }));
+            const __VLS_225 = __VLS_224({
+                id: "emailWarningMessage",
+                modelValue: (__VLS_ctx.emailSettings.warningMessage),
+                label: (__VLS_ctx.t('Mensagem de e-mail em atenção')),
+                maxlength: (1000),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_224));
+            /** @type {[typeof MessageTemplateEditor, ]} */ ;
+            // @ts-ignore
+            const __VLS_227 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+                id: "emailOfflineMessage",
+                modelValue: (__VLS_ctx.emailSettings.offlineMessage),
+                label: (__VLS_ctx.t('Mensagem de e-mail offline')),
+                maxlength: (1000),
+            }));
+            const __VLS_228 = __VLS_227({
+                id: "emailOfflineMessage",
+                modelValue: (__VLS_ctx.emailSettings.offlineMessage),
+                label: (__VLS_ctx.t('Mensagem de e-mail offline')),
+                maxlength: (1000),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_227));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "settings-help" },
+            });
+            (__VLS_ctx.t('Use &#123;&#123;laboratorio&#125;&#125;, &#123;&#123;aparelho&#125;&#125;, &#123;&#123;status&#125;&#125;, &#123;&#123;localizacao&#125;&#125; e &#123;&#123;identificador&#125;&#125; como campos dinâmicos.'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.aside, __VLS_intrinsicElements.aside)({
+                ...{ class: "whatsapp-message-preview" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.t('Prévia do e-mail em atenção'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({});
+            (__VLS_ctx.emailPreviewMessage);
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "settings-help" },
+            });
+            (__VLS_ctx.t('As mensagens são enviadas em HTML e texto simples. A senha SMTP é cifrada no servidor.'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (__VLS_ctx.saveEmailSettings) },
+                ...{ class: "primary-button settings-save-button" },
+                type: "button",
+                disabled: (__VLS_ctx.emailSettingsSaving),
+            });
+            if (__VLS_ctx.emailSettingsSaving) {
+                const __VLS_230 = {}.LoaderCircle;
+                /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+                // @ts-ignore
+                const __VLS_231 = __VLS_asFunctionalComponent(__VLS_230, new __VLS_230({
+                    ...{ class: "spin" },
+                    size: (16),
+                }));
+                const __VLS_232 = __VLS_231({
+                    ...{ class: "spin" },
+                    size: (16),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_231));
+            }
+            (__VLS_ctx.emailSettingsSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar configuração de e-mail'));
+        }
+        else {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                id: "emailConnectionPanel",
+                ...{ class: "whatsapp-manager-section" },
+                role: "tabpanel",
+                'aria-labelledby': "emailConnectionTab",
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-manager-copy" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-status-line" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "whatsapp-status-dot" },
+                ...{ class: (`whatsapp-status-${__VLS_ctx.emailConnectionState === 'connected' ? 'connected' : __VLS_ctx.emailConnectionState === 'error' ? 'qr' : 'disconnected'}`) },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.t(__VLS_ctx.emailConnectionState === 'connected' ? 'Conexão SMTP ativa' : __VLS_ctx.emailConnectionState === 'error' ? 'Falha na conexão SMTP' : 'Conexão SMTP não testada'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "whatsapp-manager-help" },
+            });
+            (__VLS_ctx.emailSettings.smtpHost ? `${__VLS_ctx.emailSettings.smtpHost}:${__VLS_ctx.emailSettings.smtpPort}` : __VLS_ctx.t('Servidor SMTP'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                ...{ class: "whatsapp-manager-help" },
+            });
+            (__VLS_ctx.t('O teste valida autenticação SMTP sem enviar uma mensagem.'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (__VLS_ctx.testEmailConnection) },
+                ...{ class: "primary-button whatsapp-action" },
+                type: "button",
+                disabled: (__VLS_ctx.emailWorking || !__VLS_ctx.emailSettings.passwordConfigured),
+            });
+            if (__VLS_ctx.emailWorking) {
+                const __VLS_234 = {}.LoaderCircle;
+                /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+                // @ts-ignore
+                const __VLS_235 = __VLS_asFunctionalComponent(__VLS_234, new __VLS_234({
+                    ...{ class: "spin" },
+                    size: (16),
+                }));
+                const __VLS_236 = __VLS_235({
+                    ...{ class: "spin" },
+                    size: (16),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_235));
+            }
+            else {
+                const __VLS_238 = {}.ShieldCheck;
+                /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
+                // @ts-ignore
+                const __VLS_239 = __VLS_asFunctionalComponent(__VLS_238, new __VLS_238({
+                    size: (16),
+                }));
+                const __VLS_240 = __VLS_239({
+                    size: (16),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_239));
+            }
+            (__VLS_ctx.t('Testar conexão SMTP'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "email-connection-mark" },
+            });
+            const __VLS_242 = {}.Mail;
+            /** @type {[typeof __VLS_components.Mail, ]} */ ;
+            // @ts-ignore
+            const __VLS_243 = __VLS_asFunctionalComponent(__VLS_242, new __VLS_242({
+                size: (36),
+            }));
+            const __VLS_244 = __VLS_243({
+                size: (36),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_243));
         }
     }
     else {
@@ -2391,30 +4085,30 @@ else {
             ...{ class: "secondary-button" },
             disabled: (__VLS_ctx.loading),
         });
-        const __VLS_76 = {}.RefreshCw;
+        const __VLS_246 = {}.RefreshCw;
         /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
         // @ts-ignore
-        const __VLS_77 = __VLS_asFunctionalComponent(__VLS_76, new __VLS_76({
+        const __VLS_247 = __VLS_asFunctionalComponent(__VLS_246, new __VLS_246({
             size: (16),
         }));
-        const __VLS_78 = __VLS_77({
+        const __VLS_248 = __VLS_247({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_77));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_247));
         (__VLS_ctx.t('Atualizar'));
         if (__VLS_ctx.pageError) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "notice-error" },
                 role: "alert",
             });
-            const __VLS_80 = {}.AlertTriangle;
+            const __VLS_250 = {}.AlertTriangle;
             /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
             // @ts-ignore
-            const __VLS_81 = __VLS_asFunctionalComponent(__VLS_80, new __VLS_80({
+            const __VLS_251 = __VLS_asFunctionalComponent(__VLS_250, new __VLS_250({
                 size: (17),
             }));
-            const __VLS_82 = __VLS_81({
+            const __VLS_252 = __VLS_251({
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_81));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_251));
             (__VLS_ctx.t(__VLS_ctx.pageError));
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
@@ -2432,15 +4126,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "metric-icon" },
         });
-        const __VLS_84 = {}.Cpu;
+        const __VLS_254 = {}.Cpu;
         /** @type {[typeof __VLS_components.Cpu, ]} */ ;
         // @ts-ignore
-        const __VLS_85 = __VLS_asFunctionalComponent(__VLS_84, new __VLS_84({
+        const __VLS_255 = __VLS_asFunctionalComponent(__VLS_254, new __VLS_254({
             size: (17),
         }));
-        const __VLS_86 = __VLS_85({
+        const __VLS_256 = __VLS_255({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_85));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_255));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-value" },
         });
@@ -2465,15 +4159,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "metric-icon green" },
         });
-        const __VLS_88 = {}.Signal;
+        const __VLS_258 = {}.Signal;
         /** @type {[typeof __VLS_components.Signal, ]} */ ;
         // @ts-ignore
-        const __VLS_89 = __VLS_asFunctionalComponent(__VLS_88, new __VLS_88({
+        const __VLS_259 = __VLS_asFunctionalComponent(__VLS_258, new __VLS_258({
             size: (17),
         }));
-        const __VLS_90 = __VLS_89({
+        const __VLS_260 = __VLS_259({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_89));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_259));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-value" },
         });
@@ -2483,15 +4177,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-foot positive" },
         });
-        const __VLS_92 = {}.Check;
+        const __VLS_262 = {}.Check;
         /** @type {[typeof __VLS_components.Check, ]} */ ;
         // @ts-ignore
-        const __VLS_93 = __VLS_asFunctionalComponent(__VLS_92, new __VLS_92({
+        const __VLS_263 = __VLS_asFunctionalComponent(__VLS_262, new __VLS_262({
             size: (13),
         }));
-        const __VLS_94 = __VLS_93({
+        const __VLS_264 = __VLS_263({
             size: (13),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_93));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_263));
         (__VLS_ctx.t('Operando normalmente'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
             ...{ class: "metric" },
@@ -2504,15 +4198,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "metric-icon amber" },
         });
-        const __VLS_96 = {}.AlertTriangle;
+        const __VLS_266 = {}.AlertTriangle;
         /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
         // @ts-ignore
-        const __VLS_97 = __VLS_asFunctionalComponent(__VLS_96, new __VLS_96({
+        const __VLS_267 = __VLS_asFunctionalComponent(__VLS_266, new __VLS_266({
             size: (17),
         }));
-        const __VLS_98 = __VLS_97({
+        const __VLS_268 = __VLS_267({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_97));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_267));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-value" },
         });
@@ -2535,15 +4229,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "metric-icon rose" },
         });
-        const __VLS_100 = {}.Activity;
+        const __VLS_270 = {}.Activity;
         /** @type {[typeof __VLS_components.Activity, ]} */ ;
         // @ts-ignore
-        const __VLS_101 = __VLS_asFunctionalComponent(__VLS_100, new __VLS_100({
+        const __VLS_271 = __VLS_asFunctionalComponent(__VLS_270, new __VLS_270({
             size: (17),
         }));
-        const __VLS_102 = __VLS_101({
+        const __VLS_272 = __VLS_271({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_101));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_271));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-value" },
         });
@@ -2572,15 +4266,15 @@ else {
             ...{ class: "export-button" },
             title: (__VLS_ctx.t('Exportar lista')),
         });
-        const __VLS_104 = {}.ArrowDownToLine;
+        const __VLS_274 = {}.ArrowDownToLine;
         /** @type {[typeof __VLS_components.ArrowDownToLine, ]} */ ;
         // @ts-ignore
-        const __VLS_105 = __VLS_asFunctionalComponent(__VLS_104, new __VLS_104({
+        const __VLS_275 = __VLS_asFunctionalComponent(__VLS_274, new __VLS_274({
             size: (16),
         }));
-        const __VLS_106 = __VLS_105({
+        const __VLS_276 = __VLS_275({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_105));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_275));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('Exportar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
@@ -2597,15 +4291,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
             ...{ class: "search-field" },
         });
-        const __VLS_108 = {}.Search;
+        const __VLS_278 = {}.Search;
         /** @type {[typeof __VLS_components.Search, ]} */ ;
         // @ts-ignore
-        const __VLS_109 = __VLS_asFunctionalComponent(__VLS_108, new __VLS_108({
+        const __VLS_279 = __VLS_asFunctionalComponent(__VLS_278, new __VLS_278({
             size: (16),
         }));
-        const __VLS_110 = __VLS_109({
+        const __VLS_280 = __VLS_279({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_109));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_279));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
             type: "search",
             placeholder: (__VLS_ctx.t('Buscar aparelho...')),
@@ -2629,7 +4323,11 @@ else {
                                 return;
                             if (!!(!__VLS_ctx.user))
                                 return;
-                            if (!!(__VLS_ctx.managementTab === 'users'))
+                            if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                                return;
+                            if (!!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                                return;
+                            if (!!(__VLS_ctx.managementTab === 'email' && __VLS_ctx.isWhatsAppDashboardAdmin))
                                 return;
                             if (!(__VLS_ctx.filteredDevices.length))
                                 return;
@@ -2646,15 +4344,15 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "device-icon" },
                 });
-                const __VLS_112 = {}.Cpu;
+                const __VLS_282 = {}.Cpu;
                 /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                 // @ts-ignore
-                const __VLS_113 = __VLS_asFunctionalComponent(__VLS_112, new __VLS_112({
+                const __VLS_283 = __VLS_asFunctionalComponent(__VLS_282, new __VLS_282({
                     size: (17),
                 }));
-                const __VLS_114 = __VLS_113({
+                const __VLS_284 = __VLS_283({
                     size: (17),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_113));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_283));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "device-identity-copy" },
                 });
@@ -2676,38 +4374,38 @@ else {
                         ...{ class: (sensor.reading ? `health-${device.status}` : 'health-missing') },
                         title: (`${sensor.name}: ${sensor.reading ? __VLS_ctx.deviceStatusLabel(device.status) : __VLS_ctx.t('sem leitura recebida')}`),
                     });
-                    const __VLS_116 = ((__VLS_ctx.readingIcon(sensor.key)));
+                    const __VLS_286 = ((__VLS_ctx.readingIcon(sensor.key)));
                     // @ts-ignore
-                    const __VLS_117 = __VLS_asFunctionalComponent(__VLS_116, new __VLS_116({
+                    const __VLS_287 = __VLS_asFunctionalComponent(__VLS_286, new __VLS_286({
                         size: (15),
                     }));
-                    const __VLS_118 = __VLS_117({
+                    const __VLS_288 = __VLS_287({
                         size: (15),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_117));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_287));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
                     (sensor.shortName);
-                    const __VLS_120 = ((sensor.reading ? __VLS_ctx.deviceStatusIcon(device.status) : __VLS_ctx.CircleMinus));
+                    const __VLS_290 = ((sensor.reading ? __VLS_ctx.deviceStatusIcon(device.status) : __VLS_ctx.CircleMinus));
                     // @ts-ignore
-                    const __VLS_121 = __VLS_asFunctionalComponent(__VLS_120, new __VLS_120({
+                    const __VLS_291 = __VLS_asFunctionalComponent(__VLS_290, new __VLS_290({
                         size: (15),
                     }));
-                    const __VLS_122 = __VLS_121({
+                    const __VLS_292 = __VLS_291({
                         size: (15),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_121));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_291));
                 }
-                const __VLS_124 = {}.ChevronDown;
+                const __VLS_294 = {}.ChevronDown;
                 /** @type {[typeof __VLS_components.ChevronDown, ]} */ ;
                 // @ts-ignore
-                const __VLS_125 = __VLS_asFunctionalComponent(__VLS_124, new __VLS_124({
+                const __VLS_295 = __VLS_asFunctionalComponent(__VLS_294, new __VLS_294({
                     ...{ class: "device-expand-icon" },
                     ...{ class: ({ expanded: __VLS_ctx.isDeviceExpanded(device.id) }) },
                     size: (18),
                 }));
-                const __VLS_126 = __VLS_125({
+                const __VLS_296 = __VLS_295({
                     ...{ class: "device-expand-icon" },
                     ...{ class: ({ expanded: __VLS_ctx.isDeviceExpanded(device.id) }) },
                     size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_125));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_295));
                 if (__VLS_ctx.isDeviceExpanded(device.id)) {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                         id: (`device-details-${device.id}`),
@@ -2717,41 +4415,41 @@ else {
                         ...{ class: "device-meta" },
                     });
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                    const __VLS_128 = {}.MapPin;
+                    const __VLS_298 = {}.MapPin;
                     /** @type {[typeof __VLS_components.MapPin, ]} */ ;
                     // @ts-ignore
-                    const __VLS_129 = __VLS_asFunctionalComponent(__VLS_128, new __VLS_128({
+                    const __VLS_299 = __VLS_asFunctionalComponent(__VLS_298, new __VLS_298({
                         size: (14),
                     }));
-                    const __VLS_130 = __VLS_129({
+                    const __VLS_300 = __VLS_299({
                         size: (14),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_129));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_299));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                     (__VLS_ctx.t('Localizacao'));
                     (device.location || __VLS_ctx.t('Nao informado'));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                    const __VLS_132 = {}.Cpu;
+                    const __VLS_302 = {}.Cpu;
                     /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                     // @ts-ignore
-                    const __VLS_133 = __VLS_asFunctionalComponent(__VLS_132, new __VLS_132({
+                    const __VLS_303 = __VLS_asFunctionalComponent(__VLS_302, new __VLS_302({
                         size: (14),
                     }));
-                    const __VLS_134 = __VLS_133({
+                    const __VLS_304 = __VLS_303({
                         size: (14),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_133));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_303));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                     (__VLS_ctx.t('Identificador'));
                     (device.externalId);
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                    const __VLS_136 = {}.Clock3;
+                    const __VLS_306 = {}.Clock3;
                     /** @type {[typeof __VLS_components.Clock3, ]} */ ;
                     // @ts-ignore
-                    const __VLS_137 = __VLS_asFunctionalComponent(__VLS_136, new __VLS_136({
+                    const __VLS_307 = __VLS_asFunctionalComponent(__VLS_306, new __VLS_306({
                         size: (14),
                     }));
-                    const __VLS_138 = __VLS_137({
+                    const __VLS_308 = __VLS_307({
                         size: (14),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_137));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_307));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                     (__VLS_ctx.t('Ultimo contato'));
                     (__VLS_ctx.formatTime(device.lastSeenAt));
@@ -2766,14 +4464,14 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                             ...{ class: "sensor-detail-label" },
                         });
-                        const __VLS_140 = ((__VLS_ctx.readingIcon(sensor.key)));
+                        const __VLS_310 = ((__VLS_ctx.readingIcon(sensor.key)));
                         // @ts-ignore
-                        const __VLS_141 = __VLS_asFunctionalComponent(__VLS_140, new __VLS_140({
+                        const __VLS_311 = __VLS_asFunctionalComponent(__VLS_310, new __VLS_310({
                             size: (15),
                         }));
-                        const __VLS_142 = __VLS_141({
+                        const __VLS_312 = __VLS_311({
                             size: (15),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_141));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_311));
                         (sensor.name);
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                         (sensor.reading ? `${sensor.reading.value} ${sensor.reading.unit}` : __VLS_ctx.t('Sem leitura'));
@@ -2783,6 +4481,132 @@ else {
                             });
                             (__VLS_ctx.formatTime(sensor.reading.recordedAt));
                         }
+                    }
+                    if (device.canSimulate && __VLS_ctx.simulationValues[device.id]) {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                            ...{ class: "demo-simulation-panel" },
+                            'aria-label': (__VLS_ctx.t('Simular leituras')),
+                        });
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                            ...{ class: "demo-simulation-heading" },
+                        });
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                        (__VLS_ctx.t('Simular leituras'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
+                        (device.name);
+                        const __VLS_314 = {}.Cpu;
+                        /** @type {[typeof __VLS_components.Cpu, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_315 = __VLS_asFunctionalComponent(__VLS_314, new __VLS_314({
+                            size: (17),
+                        }));
+                        const __VLS_316 = __VLS_315({
+                            size: (17),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_315));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                            ...{ class: "demo-simulation-fields" },
+                        });
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                        (__VLS_ctx.t('Temperatura (°C)'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                            ...{ class: "settings-input" },
+                            type: "number",
+                            min: "-50",
+                            max: "150",
+                            step: "0.1",
+                        });
+                        (__VLS_ctx.simulationValues[device.id].temperature);
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                        (__VLS_ctx.t('Umidade (%)'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                            ...{ class: "settings-input" },
+                            type: "number",
+                            min: "0",
+                            max: "100",
+                            step: "0.1",
+                        });
+                        (__VLS_ctx.simulationValues[device.id].humidity);
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                        (__VLS_ctx.t('Gás (ppm)'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                            ...{ class: "settings-input" },
+                            type: "number",
+                            min: "0",
+                            max: "100000",
+                            step: "1",
+                        });
+                        (__VLS_ctx.simulationValues[device.id].gas);
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                        (__VLS_ctx.t('Estado simulado'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
+                            value: (__VLS_ctx.simulationValues[device.id].status),
+                            ...{ class: "settings-input" },
+                        });
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                            value: "online",
+                        });
+                        (__VLS_ctx.t('Online'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                            value: "warning",
+                        });
+                        (__VLS_ctx.t('Em atenção'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                            value: "offline",
+                        });
+                        (__VLS_ctx.t('Offline'));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                            ...{ class: "demo-simulation-actions" },
+                        });
+                        if (__VLS_ctx.simulationMessages[device.id]) {
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+                                ...{ class: (__VLS_ctx.simulationMessages[device.id].startsWith('Simulação aplicada') ? 'success-message' : 'error-message') },
+                                role: "status",
+                            });
+                            (__VLS_ctx.t(__VLS_ctx.simulationMessages[device.id]));
+                        }
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                            ...{ onClick: (...[$event]) => {
+                                    if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(!__VLS_ctx.user))
+                                        return;
+                                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                                        return;
+                                    if (!!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                                        return;
+                                    if (!!(__VLS_ctx.managementTab === 'email' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                                        return;
+                                    if (!(__VLS_ctx.filteredDevices.length))
+                                        return;
+                                    if (!(__VLS_ctx.isDeviceExpanded(device.id)))
+                                        return;
+                                    if (!(device.canSimulate && __VLS_ctx.simulationValues[device.id]))
+                                        return;
+                                    __VLS_ctx.applyDeviceSimulation(device);
+                                } },
+                            ...{ class: "primary-button" },
+                            type: "button",
+                            disabled: (__VLS_ctx.simulationSavingId === device.id),
+                        });
+                        if (__VLS_ctx.simulationSavingId === device.id) {
+                            const __VLS_318 = {}.LoaderCircle;
+                            /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+                            // @ts-ignore
+                            const __VLS_319 = __VLS_asFunctionalComponent(__VLS_318, new __VLS_318({
+                                ...{ class: "spin" },
+                                size: (16),
+                            }));
+                            const __VLS_320 = __VLS_319({
+                                ...{ class: "spin" },
+                                size: (16),
+                            }, ...__VLS_functionalComponentArgsRest(__VLS_319));
+                        }
+                        (__VLS_ctx.t('Aplicar simulação'));
                     }
                 }
             }
@@ -2794,15 +4618,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "empty-icon" },
             });
-            const __VLS_144 = {}.Cpu;
+            const __VLS_322 = {}.Cpu;
             /** @type {[typeof __VLS_components.Cpu, ]} */ ;
             // @ts-ignore
-            const __VLS_145 = __VLS_asFunctionalComponent(__VLS_144, new __VLS_144({
+            const __VLS_323 = __VLS_asFunctionalComponent(__VLS_322, new __VLS_322({
                 size: (22),
             }));
-            const __VLS_146 = __VLS_145({
+            const __VLS_324 = __VLS_323({
                 size: (22),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_145));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_323));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
             (__VLS_ctx.t(__VLS_ctx.search ? 'Nenhum aparelho encontrado' : 'Nenhum aparelho conectado'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -2848,15 +4672,15 @@ else {
         href: "#inicio",
         'aria-current': (__VLS_ctx.activeMobileTab === 'home' ? 'page' : undefined),
     });
-    const __VLS_148 = {}.LayoutDashboard;
+    const __VLS_326 = {}.LayoutDashboard;
     /** @type {[typeof __VLS_components.LayoutDashboard, ]} */ ;
     // @ts-ignore
-    const __VLS_149 = __VLS_asFunctionalComponent(__VLS_148, new __VLS_148({
+    const __VLS_327 = __VLS_asFunctionalComponent(__VLS_326, new __VLS_326({
         size: (20),
     }));
-    const __VLS_150 = __VLS_149({
+    const __VLS_328 = __VLS_327({
         size: (20),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_149));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_327));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Inicio'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
@@ -2870,15 +4694,15 @@ else {
         ...{ class: "mobile-nav-item" },
         type: "button",
     });
-    const __VLS_152 = {}.Building2;
+    const __VLS_330 = {}.Building2;
     /** @type {[typeof __VLS_components.Building2, ]} */ ;
     // @ts-ignore
-    const __VLS_153 = __VLS_asFunctionalComponent(__VLS_152, new __VLS_152({
+    const __VLS_331 = __VLS_asFunctionalComponent(__VLS_330, new __VLS_330({
         size: (19),
     }));
-    const __VLS_154 = __VLS_153({
+    const __VLS_332 = __VLS_331({
         size: (19),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_153));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_331));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Ambientes'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.a, __VLS_intrinsicElements.a)({
@@ -2894,55 +4718,115 @@ else {
         href: "#aparelhos",
         'aria-current': (__VLS_ctx.activeMobileTab === 'devices' ? 'page' : undefined),
     });
-    const __VLS_156 = {}.Cpu;
+    const __VLS_334 = {}.Cpu;
     /** @type {[typeof __VLS_components.Cpu, ]} */ ;
     // @ts-ignore
-    const __VLS_157 = __VLS_asFunctionalComponent(__VLS_156, new __VLS_156({
+    const __VLS_335 = __VLS_asFunctionalComponent(__VLS_334, new __VLS_334({
         size: (20),
     }));
-    const __VLS_158 = __VLS_157({
+    const __VLS_336 = __VLS_335({
         size: (20),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_157));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_335));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Aparelhos'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-        ...{ onClick: (...[$event]) => {
-                if (!!(__VLS_ctx.loading))
-                    return;
-                if (!!(!__VLS_ctx.user))
-                    return;
-                __VLS_ctx.managementTab = 'users';
-                __VLS_ctx.activeMobileTab = 'users';
-            } },
-        ...{ class: "mobile-nav-item" },
-        ...{ class: ({ active: __VLS_ctx.managementTab === 'users' }) },
-        type: "button",
-    });
-    const __VLS_160 = {}.UsersRound;
-    /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
-    // @ts-ignore
-    const __VLS_161 = __VLS_asFunctionalComponent(__VLS_160, new __VLS_160({
-        size: (19),
-    }));
-    const __VLS_162 = __VLS_161({
-        size: (19),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_161));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Usuários'));
+    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.managementTab = 'users';
+                    __VLS_ctx.activeMobileTab = 'users';
+                } },
+            ...{ class: "mobile-nav-item" },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'users' }) },
+            type: "button",
+        });
+        const __VLS_338 = {}.UsersRound;
+        /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
+        // @ts-ignore
+        const __VLS_339 = __VLS_asFunctionalComponent(__VLS_338, new __VLS_338({
+            size: (19),
+        }));
+        const __VLS_340 = __VLS_339({
+            size: (19),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_339));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('Usuários'));
+    }
+    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.managementTab = 'whatsapp';
+                    __VLS_ctx.activeMobileTab = 'whatsapp';
+                } },
+            ...{ class: "mobile-nav-item" },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'whatsapp' }) },
+            type: "button",
+        });
+        const __VLS_342 = {}.MessageCircle;
+        /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
+        // @ts-ignore
+        const __VLS_343 = __VLS_asFunctionalComponent(__VLS_342, new __VLS_342({
+            size: (19),
+        }));
+        const __VLS_344 = __VLS_343({
+            size: (19),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_343));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('WhatsApp API'));
+    }
+    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.managementTab = 'email';
+                    __VLS_ctx.activeMobileTab = 'email';
+                } },
+            ...{ class: "mobile-nav-item" },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'email' }) },
+            type: "button",
+        });
+        const __VLS_346 = {}.Mail;
+        /** @type {[typeof __VLS_components.Mail, ]} */ ;
+        // @ts-ignore
+        const __VLS_347 = __VLS_asFunctionalComponent(__VLS_346, new __VLS_346({
+            size: (19),
+        }));
+        const __VLS_348 = __VLS_347({
+            size: (19),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_347));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('E-mail API'));
+    }
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
         ...{ onClick: (__VLS_ctx.logout) },
         ...{ class: "mobile-nav-item" },
         type: "button",
     });
-    const __VLS_164 = {}.LogOut;
+    const __VLS_350 = {}.LogOut;
     /** @type {[typeof __VLS_components.LogOut, ]} */ ;
     // @ts-ignore
-    const __VLS_165 = __VLS_asFunctionalComponent(__VLS_164, new __VLS_164({
+    const __VLS_351 = __VLS_asFunctionalComponent(__VLS_350, new __VLS_350({
         size: (19),
     }));
-    const __VLS_166 = __VLS_165({
+    const __VLS_352 = __VLS_351({
         size: (19),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_165));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_351));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Sair'));
     if (__VLS_ctx.mobileWorkspaceSelectorOpen) {
@@ -2990,15 +4874,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar seleção de ambientes')),
         });
-        const __VLS_168 = {}.X;
+        const __VLS_354 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_169 = __VLS_asFunctionalComponent(__VLS_168, new __VLS_168({
+        const __VLS_355 = __VLS_asFunctionalComponent(__VLS_354, new __VLS_354({
             size: (19),
         }));
-        const __VLS_170 = __VLS_169({
+        const __VLS_356 = __VLS_355({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_169));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_355));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "workspace-list workspace-selector-list" },
         });
@@ -3039,15 +4923,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
             (__VLS_ctx.workspaceRoleLabel(workspace.role));
             if (workspace.id === __VLS_ctx.activeWorkspaceId) {
-                const __VLS_172 = {}.Check;
+                const __VLS_358 = {}.Check;
                 /** @type {[typeof __VLS_components.Check, ]} */ ;
                 // @ts-ignore
-                const __VLS_173 = __VLS_asFunctionalComponent(__VLS_172, new __VLS_172({
+                const __VLS_359 = __VLS_asFunctionalComponent(__VLS_358, new __VLS_358({
                     size: (16),
                 }));
-                const __VLS_174 = __VLS_173({
+                const __VLS_360 = __VLS_359({
                     size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_173));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_359));
             }
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
@@ -3064,15 +4948,15 @@ else {
             ...{ class: "workspace-manage-button workspace-selector-manage" },
             type: "button",
         });
-        const __VLS_176 = {}.Plus;
+        const __VLS_362 = {}.Plus;
         /** @type {[typeof __VLS_components.Plus, ]} */ ;
         // @ts-ignore
-        const __VLS_177 = __VLS_asFunctionalComponent(__VLS_176, new __VLS_176({
+        const __VLS_363 = __VLS_asFunctionalComponent(__VLS_362, new __VLS_362({
             size: (15),
         }));
-        const __VLS_178 = __VLS_177({
+        const __VLS_364 = __VLS_363({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_177));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_363));
         (__VLS_ctx.t('Adicionar/editar ambiente'));
     }
     if (__VLS_ctx.workspaceDialogOpen) {
@@ -3120,15 +5004,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar gerenciamento de ambientes')),
         });
-        const __VLS_180 = {}.X;
+        const __VLS_366 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_181 = __VLS_asFunctionalComponent(__VLS_180, new __VLS_180({
+        const __VLS_367 = __VLS_asFunctionalComponent(__VLS_366, new __VLS_366({
             size: (19),
         }));
-        const __VLS_182 = __VLS_181({
+        const __VLS_368 = __VLS_367({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_181));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_367));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
             ...{ class: "settings-tabs workspace-manager-tabs" },
             role: "tablist",
@@ -3150,15 +5034,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'create'),
         });
-        const __VLS_184 = {}.Plus;
+        const __VLS_370 = {}.Plus;
         /** @type {[typeof __VLS_components.Plus, ]} */ ;
         // @ts-ignore
-        const __VLS_185 = __VLS_asFunctionalComponent(__VLS_184, new __VLS_184({
+        const __VLS_371 = __VLS_asFunctionalComponent(__VLS_370, new __VLS_370({
             size: (14),
         }));
-        const __VLS_186 = __VLS_185({
+        const __VLS_372 = __VLS_371({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_185));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_371));
         (__VLS_ctx.t('Criar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
@@ -3176,15 +5060,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'edit'),
         });
-        const __VLS_188 = {}.Pencil;
+        const __VLS_374 = {}.Pencil;
         /** @type {[typeof __VLS_components.Pencil, ]} */ ;
         // @ts-ignore
-        const __VLS_189 = __VLS_asFunctionalComponent(__VLS_188, new __VLS_188({
+        const __VLS_375 = __VLS_asFunctionalComponent(__VLS_374, new __VLS_374({
             size: (14),
         }));
-        const __VLS_190 = __VLS_189({
+        const __VLS_376 = __VLS_375({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_189));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_375));
         (__VLS_ctx.t('Editar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
@@ -3202,15 +5086,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'import'),
         });
-        const __VLS_192 = {}.ArrowDownToLine;
+        const __VLS_378 = {}.ArrowDownToLine;
         /** @type {[typeof __VLS_components.ArrowDownToLine, ]} */ ;
         // @ts-ignore
-        const __VLS_193 = __VLS_asFunctionalComponent(__VLS_192, new __VLS_192({
+        const __VLS_379 = __VLS_asFunctionalComponent(__VLS_378, new __VLS_378({
             size: (14),
         }));
-        const __VLS_194 = __VLS_193({
+        const __VLS_380 = __VLS_379({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_193));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_379));
         (__VLS_ctx.t('Importar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
@@ -3228,15 +5112,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'devices'),
         });
-        const __VLS_196 = {}.Cpu;
+        const __VLS_382 = {}.Cpu;
         /** @type {[typeof __VLS_components.Cpu, ]} */ ;
         // @ts-ignore
-        const __VLS_197 = __VLS_asFunctionalComponent(__VLS_196, new __VLS_196({
+        const __VLS_383 = __VLS_asFunctionalComponent(__VLS_382, new __VLS_382({
             size: (14),
         }));
-        const __VLS_198 = __VLS_197({
+        const __VLS_384 = __VLS_383({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_197));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_383));
         (__VLS_ctx.t('Aparelhos'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
@@ -3254,15 +5138,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'share'),
         });
-        const __VLS_200 = {}.Share2;
+        const __VLS_386 = {}.Share2;
         /** @type {[typeof __VLS_components.Share2, ]} */ ;
         // @ts-ignore
-        const __VLS_201 = __VLS_asFunctionalComponent(__VLS_200, new __VLS_200({
+        const __VLS_387 = __VLS_asFunctionalComponent(__VLS_386, new __VLS_386({
             size: (14),
         }));
-        const __VLS_202 = __VLS_201({
+        const __VLS_388 = __VLS_387({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_201));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_387));
         (__VLS_ctx.t('Compartilhar'));
         if (__VLS_ctx.workspaceDialogAction === 'create' || __VLS_ctx.workspaceDialogAction === 'edit') {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
@@ -3308,15 +5192,15 @@ else {
                     ...{ class: "secondary-button workspace-icon-upload" },
                     for: "workspaceIconFile",
                 });
-                const __VLS_204 = {}.ImagePlus;
+                const __VLS_390 = {}.ImagePlus;
                 /** @type {[typeof __VLS_components.ImagePlus, ]} */ ;
                 // @ts-ignore
-                const __VLS_205 = __VLS_asFunctionalComponent(__VLS_204, new __VLS_204({
+                const __VLS_391 = __VLS_asFunctionalComponent(__VLS_390, new __VLS_390({
                     size: (15),
                 }));
-                const __VLS_206 = __VLS_205({
+                const __VLS_392 = __VLS_391({
                     size: (15),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_205));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_391));
                 (__VLS_ctx.t('Escolher imagem'));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                     ...{ onChange: (__VLS_ctx.selectWorkspaceIcon) },
@@ -3468,15 +5352,15 @@ else {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                         ...{ class: "workspace-device-icon" },
                     });
-                    const __VLS_208 = {}.Cpu;
+                    const __VLS_394 = {}.Cpu;
                     /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                     // @ts-ignore
-                    const __VLS_209 = __VLS_asFunctionalComponent(__VLS_208, new __VLS_208({
+                    const __VLS_395 = __VLS_asFunctionalComponent(__VLS_394, new __VLS_394({
                         size: (17),
                     }));
-                    const __VLS_210 = __VLS_209({
+                    const __VLS_396 = __VLS_395({
                         size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_209));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_395));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                     (device.name);
@@ -3577,15 +5461,15 @@ else {
                     title: (__VLS_ctx.t('Copiar código do ambiente')),
                     'aria-label': (__VLS_ctx.t('Copiar código do ambiente')),
                 });
-                const __VLS_212 = {}.Copy;
+                const __VLS_398 = {}.Copy;
                 /** @type {[typeof __VLS_components.Copy, ]} */ ;
                 // @ts-ignore
-                const __VLS_213 = __VLS_asFunctionalComponent(__VLS_212, new __VLS_212({
+                const __VLS_399 = __VLS_asFunctionalComponent(__VLS_398, new __VLS_398({
                     size: (16),
                 }));
-                const __VLS_214 = __VLS_213({
+                const __VLS_400 = __VLS_399({
                     size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_213));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_399));
                 if (__VLS_ctx.workspaceShareMessage) {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
                         ...{ class: "success-message" },
@@ -3651,15 +5535,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar configuracoes')),
         });
-        const __VLS_216 = {}.X;
+        const __VLS_402 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_217 = __VLS_asFunctionalComponent(__VLS_216, new __VLS_216({
+        const __VLS_403 = __VLS_asFunctionalComponent(__VLS_402, new __VLS_402({
             size: (19),
         }));
-        const __VLS_218 = __VLS_217({
+        const __VLS_404 = __VLS_403({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_217));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_403));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
             ...{ class: "settings-tabs" },
             role: "tablist",
@@ -3727,26 +5611,26 @@ else {
                 ...{ class: "theme-setting-icon" },
             });
             if (!__VLS_ctx.darkMode) {
-                const __VLS_220 = {}.Moon;
+                const __VLS_406 = {}.Moon;
                 /** @type {[typeof __VLS_components.Moon, ]} */ ;
                 // @ts-ignore
-                const __VLS_221 = __VLS_asFunctionalComponent(__VLS_220, new __VLS_220({
+                const __VLS_407 = __VLS_asFunctionalComponent(__VLS_406, new __VLS_406({
                     size: (18),
                 }));
-                const __VLS_222 = __VLS_221({
+                const __VLS_408 = __VLS_407({
                     size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_221));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_407));
             }
             else {
-                const __VLS_224 = {}.Sun;
+                const __VLS_410 = {}.Sun;
                 /** @type {[typeof __VLS_components.Sun, ]} */ ;
                 // @ts-ignore
-                const __VLS_225 = __VLS_asFunctionalComponent(__VLS_224, new __VLS_224({
+                const __VLS_411 = __VLS_asFunctionalComponent(__VLS_410, new __VLS_410({
                     size: (18),
                 }));
-                const __VLS_226 = __VLS_225({
+                const __VLS_412 = __VLS_411({
                     size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_225));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_411));
             }
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
@@ -3822,44 +5706,6 @@ else {
                 alt: "",
             });
             (__VLS_ctx.t('English'));
-            if (__VLS_ctx.user?.isPlatformAdmin) {
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                    ...{ class: "workspace-admin-panel" },
-                });
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-                    ...{ class: "settings-section-heading" },
-                });
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
-                (__VLS_ctx.t('Cadastro público'));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
-                    ...{ class: "theme-setting" },
-                });
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                    ...{ class: "theme-setting-icon" },
-                });
-                const __VLS_228 = {}.ShieldCheck;
-                /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
-                // @ts-ignore
-                const __VLS_229 = __VLS_asFunctionalComponent(__VLS_228, new __VLS_228({
-                    size: (18),
-                }));
-                const __VLS_230 = __VLS_229({
-                    size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_229));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-                    ...{ class: "theme-setting-copy" },
-                });
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-                (__VLS_ctx.t('Permitir criação de contas'));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
-                (__VLS_ctx.registrationEnabled ? __VLS_ctx.t('Habilitado na tela de login') : __VLS_ctx.t('Desabilitado'));
-                __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
-                    ...{ onChange: (__VLS_ctx.toggleRegistrationSetting) },
-                    ...{ class: "theme-switch" },
-                    type: "checkbox",
-                    checked: (__VLS_ctx.registrationEnabled),
-                });
-            }
         }
         else if (__VLS_ctx.settingsTab === 'account') {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
@@ -4050,15 +5896,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-icon" },
             });
-            const __VLS_232 = {}.Mail;
+            const __VLS_414 = {}.Mail;
             /** @type {[typeof __VLS_components.Mail, ]} */ ;
             // @ts-ignore
-            const __VLS_233 = __VLS_asFunctionalComponent(__VLS_232, new __VLS_232({
+            const __VLS_415 = __VLS_asFunctionalComponent(__VLS_414, new __VLS_414({
                 size: (18),
             }));
-            const __VLS_234 = __VLS_233({
+            const __VLS_416 = __VLS_415({
                 size: (18),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_233));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_415));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
             });
@@ -4078,15 +5924,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-icon" },
             });
-            const __VLS_236 = {}.MessageCircle;
+            const __VLS_418 = {}.MessageCircle;
             /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_237 = __VLS_asFunctionalComponent(__VLS_236, new __VLS_236({
+            const __VLS_419 = __VLS_asFunctionalComponent(__VLS_418, new __VLS_418({
                 size: (18),
             }));
-            const __VLS_238 = __VLS_237({
+            const __VLS_420 = __VLS_419({
                 size: (18),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_237));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_419));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
             });
@@ -4099,23 +5945,47 @@ else {
                 type: "checkbox",
             });
             (__VLS_ctx.profileWhatsappNotifications);
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "whatsapp-phone-fields" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                for: "profileWhatsappCountry",
+            });
+            (__VLS_ctx.t('País e código do WhatsApp'));
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
+                ...{ onChange: (__VLS_ctx.reformatWhatsappNumberForCountry) },
+                id: "profileWhatsappCountry",
+                value: (__VLS_ctx.profileWhatsappCountry),
+                ...{ class: "settings-input" },
+                autocomplete: "country",
+            });
+            for (const [country] of __VLS_getVForSourceType((__VLS_ctx.whatsappCountries))) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+                    key: (country.country),
+                    value: (country.country),
+                });
+                (country.name);
+                (country.dialCode);
+            }
             __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
                 for: "profileWhatsappNumber",
             });
-            (__VLS_ctx.t('WhatsApp (formato internacional)'));
+            (__VLS_ctx.t('Número do WhatsApp'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                ...{ onInput: (__VLS_ctx.formatWhatsappNumberInput) },
                 id: "profileWhatsappNumber",
                 ...{ class: "settings-input" },
                 type: "tel",
                 maxlength: "24",
-                autocomplete: "tel",
-                placeholder: "+5521999999999",
+                autocomplete: "tel-national",
+                placeholder: (__VLS_ctx.profileWhatsappCountry === 'BR' ? '(00) 00000-0000' : ''),
+                value: (__VLS_ctx.profileWhatsappNumber),
             });
-            (__VLS_ctx.profileWhatsappNumber);
             __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
                 ...{ class: "settings-help" },
             });
-            (__VLS_ctx.t('Use o formato E.164, incluindo o código do país (por exemplo, +55...). O WhatsApp requer uma conta Meta Cloud API configurada pelo administrador.'));
+            (__VLS_ctx.t('Digite o número local com DDD.'));
+            (__VLS_ctx.t('O WhatsApp requer uma conta conectada pelo administrador.'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
                 for: "notificationCurrentPassword",
             });
@@ -4225,6 +6095,8 @@ else {
 /** @type {__VLS_StyleScopedClasses['nav-link']} */ ;
 /** @type {__VLS_StyleScopedClasses['nav-count']} */ ;
 /** @type {__VLS_StyleScopedClasses['nav-link']} */ ;
+/** @type {__VLS_StyleScopedClasses['nav-link']} */ ;
+/** @type {__VLS_StyleScopedClasses['nav-link']} */ ;
 /** @type {__VLS_StyleScopedClasses['sidebar-bottom']} */ ;
 /** @type {__VLS_StyleScopedClasses['sidebar-status']} */ ;
 /** @type {__VLS_StyleScopedClasses['live-dot']} */ ;
@@ -4268,6 +6140,18 @@ else {
 /** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
 /** @type {__VLS_StyleScopedClasses['heading-sub']} */ ;
 /** @type {__VLS_StyleScopedClasses['secondary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tabs']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-tabs']} */ ;
+/** @type {__VLS_StyleScopedClasses['user-management-tabs']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-pane']} */ ;
+/** @type {__VLS_StyleScopedClasses['user-management-card']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-section-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting-icon']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-switch']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-pane']} */ ;
 /** @type {__VLS_StyleScopedClasses['user-management-card']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-section-heading']} */ ;
@@ -4289,6 +6173,122 @@ else {
 /** @type {__VLS_StyleScopedClasses['settings-section-heading']} */ ;
 /** @type {__VLS_StyleScopedClasses['member-row']} */ ;
 /** @type {__VLS_StyleScopedClasses['invitation-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-management-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['page-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
+/** @type {__VLS_StyleScopedClasses['heading-sub']} */ ;
+/** @type {__VLS_StyleScopedClasses['secondary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tabs']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-tabs']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['notice-error']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-section']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-actions']} */ ;
+/** @type {__VLS_StyleScopedClasses['danger-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-clear']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-list']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-icon']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-empty']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-section']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-form']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-field']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-help']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-message-preview']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-help']} */ ;
+/** @type {__VLS_StyleScopedClasses['success-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-save-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-manager-section']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-manager-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-status-line']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-status-dot']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-phone']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-manager-help']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-manager-help']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-manager-warning']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-action']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['secondary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-action']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-qr-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-qr-image']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-qr-placeholder']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-qr-placeholder']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-management-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['email-management-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['page-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
+/** @type {__VLS_StyleScopedClasses['heading-sub']} */ ;
+/** @type {__VLS_StyleScopedClasses['secondary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tabs']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-tabs']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-tab']} */ ;
+/** @type {__VLS_StyleScopedClasses['notice-error']} */ ;
+/** @type {__VLS_StyleScopedClasses['success-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-section']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-actions']} */ ;
+/** @type {__VLS_StyleScopedClasses['danger-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-clear']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-list']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-icon']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-log-empty']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-section']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-form']} */ ;
+/** @type {__VLS_StyleScopedClasses['email-config-grid']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-field']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-field']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-field']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-field']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-field']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-config-field']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting']} */ ;
+/** @type {__VLS_StyleScopedClasses['email-secure-toggle']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting-icon']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-switch']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting']} */ ;
+/** @type {__VLS_StyleScopedClasses['email-secure-toggle']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting-icon']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-setting-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['theme-switch']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-help']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-message-preview']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-help']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-save-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-manager-section']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-manager-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-status-line']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-status-dot']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-manager-help']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-manager-help']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-action']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['email-connection-mark']} */ ;
 /** @type {__VLS_StyleScopedClasses['page-heading']} */ ;
 /** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
 /** @type {__VLS_StyleScopedClasses['heading-sub']} */ ;
@@ -4344,12 +6344,24 @@ else {
 /** @type {__VLS_StyleScopedClasses['sensor-detail-card']} */ ;
 /** @type {__VLS_StyleScopedClasses['sensor-detail-label']} */ ;
 /** @type {__VLS_StyleScopedClasses['sensor-reading-time']} */ ;
+/** @type {__VLS_StyleScopedClasses['demo-simulation-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['demo-simulation-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['demo-simulation-fields']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
+/** @type {__VLS_StyleScopedClasses['demo-simulation-actions']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
 /** @type {__VLS_StyleScopedClasses['empty-state']} */ ;
 /** @type {__VLS_StyleScopedClasses['empty-icon']} */ ;
 /** @type {__VLS_StyleScopedClasses['table-footer']} */ ;
 /** @type {__VLS_StyleScopedClasses['live-dot']} */ ;
 /** @type {__VLS_StyleScopedClasses['dashboard-footer']} */ ;
 /** @type {__VLS_StyleScopedClasses['mobile-nav']} */ ;
+/** @type {__VLS_StyleScopedClasses['mobile-nav-item']} */ ;
+/** @type {__VLS_StyleScopedClasses['mobile-nav-item']} */ ;
 /** @type {__VLS_StyleScopedClasses['mobile-nav-item']} */ ;
 /** @type {__VLS_StyleScopedClasses['mobile-nav-item']} */ ;
 /** @type {__VLS_StyleScopedClasses['mobile-nav-item']} */ ;
@@ -4455,12 +6467,6 @@ else {
 /** @type {__VLS_StyleScopedClasses['language-option-flag']} */ ;
 /** @type {__VLS_StyleScopedClasses['language-option']} */ ;
 /** @type {__VLS_StyleScopedClasses['language-option-flag']} */ ;
-/** @type {__VLS_StyleScopedClasses['workspace-admin-panel']} */ ;
-/** @type {__VLS_StyleScopedClasses['settings-section-heading']} */ ;
-/** @type {__VLS_StyleScopedClasses['theme-setting']} */ ;
-/** @type {__VLS_StyleScopedClasses['theme-setting-icon']} */ ;
-/** @type {__VLS_StyleScopedClasses['theme-setting-copy']} */ ;
-/** @type {__VLS_StyleScopedClasses['theme-switch']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-pane']} */ ;
 /** @type {__VLS_StyleScopedClasses['account-settings-form']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-section-heading']} */ ;
@@ -4499,6 +6505,8 @@ else {
 /** @type {__VLS_StyleScopedClasses['theme-setting-icon']} */ ;
 /** @type {__VLS_StyleScopedClasses['theme-setting-copy']} */ ;
 /** @type {__VLS_StyleScopedClasses['theme-switch']} */ ;
+/** @type {__VLS_StyleScopedClasses['whatsapp-phone-fields']} */ ;
+/** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-help']} */ ;
 /** @type {__VLS_StyleScopedClasses['settings-input']} */ ;
@@ -4510,6 +6518,7 @@ var __VLS_dollars;
 const __VLS_self = (await import('vue')).defineComponent({
     setup() {
         return {
+            MessageTemplateEditor: MessageTemplateEditor,
             Activity: Activity,
             AlertTriangle: AlertTriangle,
             ArrowDownToLine: ArrowDownToLine,
@@ -4517,6 +6526,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             Building2: Building2,
             Check: Check,
             ChevronDown: ChevronDown,
+            CircleAlert: CircleAlert,
             CircleCheck: CircleCheck,
             CircleMinus: CircleMinus,
             Clock3: Clock3,
@@ -4525,6 +6535,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             ImagePlus: ImagePlus,
             LayoutDashboard: LayoutDashboard,
             LockKeyhole: LockKeyhole,
+            List: List,
             LoaderCircle: LoaderCircle,
             LogOut: LogOut,
             Mail: Mail,
@@ -4535,6 +6546,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             Plus: Plus,
             RefreshCw: RefreshCw,
             Search: Search,
+            Trash2: Trash2,
             Settings: Settings,
             Share2: Share2,
             ShieldCheck: ShieldCheck,
@@ -4544,6 +6556,9 @@ const __VLS_self = (await import('vue')).defineComponent({
             X: X,
             user: user,
             devices: devices,
+            simulationValues: simulationValues,
+            simulationSavingId: simulationSavingId,
+            simulationMessages: simulationMessages,
             notifications: notifications,
             notificationOpen: notificationOpen,
             email: email,
@@ -4583,7 +6598,29 @@ const __VLS_self = (await import('vue')).defineComponent({
             workspaceMembers: workspaceMembers,
             workspaceInvitations: workspaceInvitations,
             registrationEnabled: registrationEnabled,
+            isWhatsAppDashboardAdmin: isWhatsAppDashboardAdmin,
             managementTab: managementTab,
+            userManagementTab: userManagementTab,
+            whatsappTab: whatsappTab,
+            emailTab: emailTab,
+            whatsappStatus: whatsappStatus,
+            whatsappLogs: whatsappLogs,
+            whatsappSettings: whatsappSettings,
+            whatsappSettingsSaving: whatsappSettingsSaving,
+            whatsappSettingsMessage: whatsappSettingsMessage,
+            whatsappPreviewMessage: whatsappPreviewMessage,
+            emailSettings: emailSettings,
+            emailPassword: emailPassword,
+            emailClearPassword: emailClearPassword,
+            emailLogs: emailLogs,
+            emailSettingsSaving: emailSettingsSaving,
+            emailWorking: emailWorking,
+            emailConnectionState: emailConnectionState,
+            emailMessage: emailMessage,
+            emailError: emailError,
+            emailPreviewMessage: emailPreviewMessage,
+            whatsappWorking: whatsappWorking,
+            whatsappError: whatsappError,
             forgotEmail: forgotEmail,
             forgotMessage: forgotMessage,
             forgotError: forgotError,
@@ -4598,6 +6635,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             workspaceDialogOpen: workspaceDialogOpen,
             workspaceDialogAction: workspaceDialogAction,
             language: language,
+            whatsappCountries: whatsappCountries,
             darkMode: darkMode,
             currentPassword: currentPassword,
             newPassword: newPassword,
@@ -4608,6 +6646,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             profileName: profileName,
             profileEmail: profileEmail,
             profileAvatar: profileAvatar,
+            profileWhatsappCountry: profileWhatsappCountry,
             profileWhatsappNumber: profileWhatsappNumber,
             profileEmailNotifications: profileEmailNotifications,
             profileWhatsappNotifications: profileWhatsappNotifications,
@@ -4639,11 +6678,25 @@ const __VLS_self = (await import('vue')).defineComponent({
             joinWorkspaceByCode: joinWorkspaceByCode,
             shareWorkspaceCode: shareWorkspaceCode,
             toggleRegistrationSetting: toggleRegistrationSetting,
+            loadWhatsAppStatus: loadWhatsAppStatus,
+            loadWhatsAppLogs: loadWhatsAppLogs,
+            saveWhatsAppSettings: saveWhatsAppSettings,
+            clearWhatsAppLogs: clearWhatsAppLogs,
+            connectWhatsApp: connectWhatsApp,
+            disconnectWhatsApp: disconnectWhatsApp,
+            applyDeviceSimulation: applyDeviceSimulation,
+            loadEmailSettings: loadEmailSettings,
+            saveEmailSettings: saveEmailSettings,
+            loadEmailLogs: loadEmailLogs,
+            clearEmailLogs: clearEmailLogs,
+            testEmailConnection: testEmailConnection,
             changeWorkspace: changeWorkspace,
             registerAccount: registerAccount,
             login: login,
             requestPasswordReset: requestPasswordReset,
             submitPasswordReset: submitPasswordReset,
+            formatWhatsappNumberInput: formatWhatsappNumberInput,
+            reformatWhatsappNumberForCountry: reformatWhatsappNumberForCountry,
             openSettings: openSettings,
             updateProfile: updateProfile,
             updateNotificationPreferences: updateNotificationPreferences,

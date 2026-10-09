@@ -72,13 +72,13 @@ Para notificações por WhatsApp, configure estas variáveis opcionais com as cr
 | `WHATSAPP_TEMPLATE_NAME` | Nome do modelo aprovado; padrão `lab_monitor_alarm` |
 | `WHATSAPP_TEMPLATE_LANGUAGE` | Idioma aprovado do modelo; padrão `pt_BR` |
 
-Configure ambas `WHATSAPP_ACCESS_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID` ou deixe ambas vazias. No WhatsApp Manager, crie e aprove um modelo da categoria Utility com idioma `pt_BR` e este corpo, que corresponde aos três parâmetros enviados pela API:
+Configure `WHATSAPP_ACCESS_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID` juntos. Se não for habilitar o WhatsApp, deixe as duas variáveis ausentes ou comentadas no `.env`; não as defina como strings vazias. Para testar sem configurar um número de produção, use o número de teste e os destinatários permitidos no painel da Meta, defina `WHATSAPP_TEMPLATE_NAME="hello_world"` e `WHATSAPP_TEMPLATE_LANGUAGE="en_US"`, e use o token e o ID do número de teste. Em produção, no WhatsApp Manager, crie e aprove um modelo da categoria Utility com idioma `pt_BR` e este corpo, que corresponde aos três parâmetros enviados pela API:
 
 ```text
 Alerta de monitoramento: {{1}} está {{2}}. Localização: {{3}}.
 ```
 
-Cada pessoa informa o telefone internacional (E.164, como `+5521999999999`) e ativa o canal no perfil. Alertas de e-mail usam o endereço da conta e também podem ser desativados pelo perfil. A Cloud API oficial não requer um intermediário pago, mas a Meta pode aplicar preços e limites conforme a conta, o país e a política vigente.
+Cada pessoa informa o telefone internacional (E.164, como `+5521999999999`) e ativa o canal no perfil. Alertas de e-mail usam o endereço da conta e também podem ser desativados pelo perfil. O modo de teste da Meta permite validar a integração com um número de teste e destinatários autorizados, mas não equivale a envio de produção gratuito. A Cloud API oficial não requer um intermediário pago; ainda assim, a Meta cobra modelos Utility entregues fora de uma janela de atendimento aberta. Consulte a [política e tarifas atuais](https://developers.facebook.com/docs/whatsapp/pricing) antes de habilitar alertas proativos em produção. Mensagens livres e modelos Utility enviados dentro da janela de atendimento podem ser gratuitos, conforme as regras vigentes da Meta.
 
 ## 4. Prepare o PostgreSQL
 

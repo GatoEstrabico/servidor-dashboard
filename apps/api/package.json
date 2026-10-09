@@ -18,16 +18,21 @@
     "@fastify/helmet": "^13.1.1",
     "@fastify/rate-limit": "^10.2.1",
     "@prisma/client": "^6.8.2",
+    "@whiskeysockets/baileys": "^6.7.24",
     "argon2": "^0.41.1",
     "dotenv": "^16.4.7",
     "fastify": "^5.3.3",
     "nodemailer": "^7.0.3",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.35.5",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.1",
-    "dotenv-cli": "^8.0.0",
     "@types/nodemailer": "^6.4.17",
+    "@types/qrcode": "^1.5.6",
+    "dotenv-cli": "^8.0.0",
     "prisma": "^6.8.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3"

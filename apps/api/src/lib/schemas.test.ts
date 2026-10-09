@@ -14,10 +14,13 @@ import {
   registrationSchema,
   registrationSettingSchema,
   resetPasswordSchema,
+  simulateDemoDeviceSchema,
   tokenSchema,
   updateWorkspaceMemberSchema,
   updateWorkspaceSchema,
-  updateProfileSchema
+  updateProfileSchema,
+  whatsappNotificationSettingsSchema,
+  emailNotificationSettingsSchema
 } from './schemas.js';
 
 test('aceita um aparelho com leituras validas', () => {
@@ -64,9 +67,47 @@ test('valida ambientes, convites e politica de cadastro', () => {
   assert.equal(registrationSettingSchema.safeParse({ enabled: false }).success, true);
 });
 
+test('valida nome e modelos de mensagem do WhatsApp', () => {
+  const settings = {
+    senderName: 'Laboratório Central',
+    onlineMessage: '{{laboratorio}}: {{aparelho}} está {{status}}.',
+    warningMessage: 'Atenção em {{aparelho}}. Local: {{localizacao}}.',
+    offlineMessage: '{{aparelho}} offline. ID: {{identificador}}.'
+  };
+  assert.equal(whatsappNotificationSettingsSchema.safeParse(settings).success, true);
+  assert.equal(whatsappNotificationSettingsSchema.safeParse({ ...settings, offlineMessage: '{{contato}} indisponível' }).success, false);
+  assert.equal(whatsappNotificationSettingsSchema.safeParse({ ...settings, warningMessage: ' ' }).success, false);
+});
+
+test('valida valores simulados do sensor ficticio', () => {
+  const values = { status: 'warning', temperature: 42.5, humidity: 80, gas: 1400 };
+  assert.equal(simulateDemoDeviceSchema.safeParse(values).success, true);
+  assert.equal(simulateDemoDeviceSchema.safeParse({ ...values, humidity: 101 }).success, false);
+  assert.equal(simulateDemoDeviceSchema.safeParse({ ...values, status: 'unknown' }).success, false);
+});
+
+test('valida configuração SMTP e modelos de e-mail', () => {
+  const settings = {
+    smtpHost: 'smtp.example.com',
+    smtpPort: 587,
+    smtpSecure: false,
+    smtpUser: 'monitor@example.com',
+    smtpPassword: '',
+    clearSmtpPassword: false,
+    senderName: 'Laboratório Central',
+    senderEmail: 'monitor@example.com',
+    onlineMessage: '{{laboratorio}}: {{aparelho}} voltou ao normal.',
+    warningMessage: '{{aparelho}} está em atenção.',
+    offlineMessage: '{{aparelho}} está offline.'
+  };
+  assert.equal(emailNotificationSettingsSchema.safeParse(settings).success, true);
+  assert.equal(emailNotificationSettingsSchema.safeParse({ ...settings, smtpPort: 70000 }).success, false);
+  assert.equal(emailNotificationSettingsSchema.safeParse({ ...settings, senderEmail: 'inválido' }).success, false);
+});
+
 test('valida os dados de vinculo de um aparelho', () => {
   assert.equal(deviceLinkLoginSchema.safeParse({
-    email: 'admin@laboratorio.local',
+    email: 'operador@example.com',
     password: 'senha-segura',
     externalId: 'aa:bb:cc:dd:ee:ff',
     name: 'Monitor LAB'

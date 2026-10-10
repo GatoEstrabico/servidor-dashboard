@@ -16,6 +16,9 @@ const notificationSettingsPath = resolve(process.cwd(), '.data/whatsapp-settings
 const logger = pino({ level: 'silent' });
 const whatsappLogger = getAppLogger('api-whatsapp');
 const libsignalLogger = getAppLogger('api-libsignal');
+const decryptFailureLogIntervalMs = 60_000;
+let lastDecryptFailureWarningAt = 0;
+let suppressedDecryptFailureCount = 0;
 const libsignalSessionInfoMessages = new Map([
   ['Closing session:', 'Sessao criptografica encerrada.'],
   ['Opening session:', 'Sessao criptografica aberta.'],
@@ -44,9 +47,19 @@ const originalConsoleError = console.error.bind(console);
 console.error = (...args: Parameters<typeof console.error>) => {
   const message = args[0];
   if (message === 'Failed to decrypt message with any known session...') {
-    libsignalLogger.warn({ event: 'decrypt_failed' }, 'Falha ao descriptografar mensagem com as sessoes conhecidas.');
+    suppressedDecryptFailureCount += 1;
+    const now = Date.now();
+    if (now - lastDecryptFailureWarningAt >= decryptFailureLogIntervalMs) {
+      whatsappLogger.warn(
+        { event: 'decrypt_failed', occurrences: suppressedDecryptFailureCount },
+        'Falhas de descriptografia; ocorrências repetidas serão resumidas a cada 60 segundos.'
+      );
+      lastDecryptFailureWarningAt = now;
+      suppressedDecryptFailureCount = 0;
+    }
     return;
   }
+  if (typeof message === 'string' && message.startsWith('Session error:SessionError: Over 2000 messages into the future!')) return;
   if (typeof message === 'string' && message.startsWith('Session error:') && message.includes('Bad MAC')) return;
   originalConsoleError(...args);
 };

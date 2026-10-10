@@ -174,6 +174,21 @@ export async function addFavoriteWhatsAppMedia(name: string, mediaDataUrl: strin
   return getFavoriteWhatsAppMedia();
 }
 
+export async function deleteFavoriteWhatsAppMedia(mediaId: string): Promise<FavoriteWhatsAppMedia[] | null> {
+  const catalog = await loadCatalog();
+  const item = catalog.find((media) => media.id === mediaId);
+  if (!item) return null;
+
+  const nextCatalog = catalog.filter((media) => media.id !== mediaId);
+  await persistCatalog(nextCatalog);
+  mediaCatalog = nextCatalog;
+  await Promise.all([
+    rm(mediaFilePath(item.stickerFileName), { force: true }),
+    rm(mediaFilePath(item.imageFileName), { force: true })
+  ]);
+  return getFavoriteWhatsAppMedia();
+}
+
 export async function getFavoriteWhatsAppMediaBuffer(mediaId: string, type: WhatsAppMediaType): Promise<Buffer | null> {
   const catalog = await loadCatalog();
   const item = catalog.find((media) => media.id === mediaId);

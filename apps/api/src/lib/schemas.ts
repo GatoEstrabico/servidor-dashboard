@@ -152,6 +152,18 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(12).max(128)
 }).strict();
 
+export const alertAudioUploadSchema = z.object({
+  audioDataUrl: z.string().max(1_400_000).regex(/^data:audio\/(mpeg|mp3|wav|x-wav|ogg|webm);base64,[A-Za-z0-9+/]+=*$/),
+  audioName: z.string().trim().min(1).max(80)
+}).strict();
+
+const alertSoundId = z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/);
+export const alertSoundPreferencesSchema = z.object({
+  online: alertSoundId,
+  warning: alertSoundId,
+  offline: alertSoundId
+}).strict();
+
 export const deviceLinkLoginSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(1).max(128),

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  alertAudioUploadSchema,
+  alertSoundPreferencesSchema,
   changePasswordSchema,
   assignWorkspaceDeviceSchema,
   createWorkspaceSchema,
@@ -146,6 +148,16 @@ test('valida importação de mídia GIF/WebP/imagem para favoritos', () => {
   }
   assert.equal(whatsappFavoriteMediaSchema.safeParse({ name: '', mediaDataUrl: 'data:image/gif;base64,R0lGODlh' }).success, false);
   assert.equal(whatsappFavoriteMediaSchema.safeParse({ name: 'PDF', mediaDataUrl: 'data:application/pdf;base64,UklGRg==' }).success, false);
+});
+
+test('valida upload global de áudio e sons independentes por tipo de alerta', () => {
+  for (const format of ['mpeg', 'mp3', 'wav', 'x-wav', 'ogg', 'webm']) {
+    assert.equal(alertAudioUploadSchema.safeParse({ audioDataUrl: `data:audio/${format};base64,QUJD`, audioName: 'Meu alerta' }).success, true);
+  }
+  assert.equal(alertAudioUploadSchema.safeParse({ audioDataUrl: 'data:image/png;base64,QUJD', audioName: 'Som' }).success, false);
+  assert.equal(alertSoundPreferencesSchema.safeParse({ online: 'default', warning: 'soft-tone', offline: 'alarm_2' }).success, true);
+  assert.equal(alertSoundPreferencesSchema.safeParse({ online: 'default', warning: '../tone', offline: 'alarm_2' }).success, false);
+  assert.equal(alertSoundPreferencesSchema.safeParse({ online: 'default', warning: 'soft-tone' }).success, false);
 });
 
 test('valida opções editáveis da WhatsApp Cloud API', () => {

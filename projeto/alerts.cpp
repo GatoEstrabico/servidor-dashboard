@@ -56,9 +56,13 @@ namespace {
   }
 }
 
-void registrarTransicoesAlertas(const Alertas& alertas) {
+bool registrarTransicoesAlertas(const Alertas& alertas) {
+  const bool houveMudanca = alertas.alerta_temperatura != alertasAnteriores.alerta_temperatura
+    || alertas.alerta_umidade != alertasAnteriores.alerta_umidade
+    || alertas.alerta_gas != alertasAnteriores.alerta_gas;
   registrarMudanca(alertas.alerta_temperatura, alertasAnteriores.alerta_temperatura, "temperatura");
   registrarMudanca(alertas.alerta_umidade, alertasAnteriores.alerta_umidade, "umidade");
   registrarMudanca(alertas.alerta_gas, alertasAnteriores.alerta_gas, "gas");
   alertasAnteriores = alertas;
+  return houveMudanca;
 }

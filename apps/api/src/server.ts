@@ -14,6 +14,8 @@ import { getAppLogger } from './lib/app-logger.js';
 import {
   assignWorkspaceDeviceSchema,
   activeWorkspaceSchema,
+  alertAudioUploadSchema,
+  alertSoundPreferencesSchema,
   changePasswordSchema,
   createWorkspaceSchema,
   deviceLinkLoginSchema,
@@ -43,9 +45,11 @@ import {
 } from './lib/schemas.js';
 import {
   addFavoriteWhatsAppMedia,
+  deleteFavoriteWhatsAppMedia,
   getFavoriteWhatsAppMedia,
   getFavoriteWhatsAppMediaPreview
 } from './lib/whatsapp-media-library.js';
+import { addAlertAudio, getAlertAudioFile, getAlertAudioLibrary } from './lib/alert-audio-library.js';
 import {
   clearWhatsAppWebLogs,
   closeWhatsAppWebSocket,
@@ -86,6 +90,7 @@ dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../..
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  ALERT_AUDIO_UPLOAD_ENABLED: z.enum(['true', 'false']).default('true'),
   SHOW_WORKSPACE_SETUP_WHEN_EMPTY: z.enum(['true', 'false']).default('true'),
   DASHBOARD_ORIGIN: z.string().url(),
   DASHBOARD_PUBLIC_URL: z.string().url().refine((value) => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
@@ -122,6 +127,7 @@ const envSchema = z.object({
   }
 });
 const env = envSchema.parse(process.env);
+const alertAudioUploadEnabled = env.ALERT_AUDIO_UPLOAD_ENABLED === 'true';
 const dashboardOrigins = [...new Set([env.DASHBOARD_ORIGIN, env.DASHBOARD_PUBLIC_URL].filter((value): value is string => Boolean(value)).map((value) => new URL(value).origin))];
 const parsedSmtpFrom = env.SMTP_FROM?.match(/^(.*?)\s*<([^<>]+)>$/);
 await initializeEmailService({
@@ -557,6 +563,28 @@ app.post('/api/admin/whatsapp/media', { bodyLimit: 1_600 * 1024 }, async (reques
     return { media: await addFavoriteWhatsAppMedia(parsed.data.name, parsed.data.mediaDataUrl) };
   } catch (error) {
     return reply.code(400).send({ error: error instanceof Error ? error.message : 'Não foi possível salvar a mídia favorita.' });
+  }
+});
+
+app.delete<{ Params: { mediaId: string } }>('/api/admin/whatsapp/media/:mediaId', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  try {
+    const media = await deleteFavoriteWhatsAppMedia(request.params.mediaId);
+    if (!media) return reply.code(404).send({ error: 'Mídia não encontrada.' });
+
+    const currentSettings = await getWhatsAppNotificationSettings();
+    const nextSettings = { ...currentSettings };
+    for (const alert of ['online', 'warning', 'offline'] as const) {
+      if (nextSettings[`${alert}MediaId`] !== request.params.mediaId) continue;
+      nextSettings[`${alert}MediaType`] = 'none';
+      nextSettings[`${alert}MediaId`] = null;
+    }
+    const settings = await saveWhatsAppNotificationSettings(nextSettings);
+    return { media, settings };
+  } catch (error) {
+    return reply.code(500).send({ error: error instanceof Error ? error.message : 'Não foi possível excluir a mídia.' });
   }
 });
 
@@ -1518,6 +1546,105 @@ app.post('/api/account/profile', async (request, reply) => {
       return reply.code(409).send({ error: 'Este e-mail ja esta sendo usado por outra conta.' });
     }
     throw error;
+  }
+});
+
+app.get('/api/account/alert-sounds', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  const userSettings = await prisma.user.findUnique({
+    where: { id: auth.user.id },
+    select: {
+      alertSoundDataUrl: true,
+      alertSoundName: true,
+      onlineAlertSoundId: true,
+      warningAlertSoundId: true,
+      offlineAlertSoundId: true
+    }
+  });
+  if (!userSettings) return reply.code(404).send({ error: 'Conta não encontrada.' });
+
+  let online = userSettings.onlineAlertSoundId;
+  let warning = userSettings.warningAlertSoundId;
+  let offline = userSettings.offlineAlertSoundId;
+  if (!online && !warning && !offline && userSettings.alertSoundDataUrl && userSettings.alertSoundName) {
+    const migratedAudio = await addAlertAudio(userSettings.alertSoundName, userSettings.alertSoundDataUrl);
+    online = migratedAudio.audio.id;
+    warning = migratedAudio.audio.id;
+    offline = migratedAudio.audio.id;
+    await prisma.user.update({
+      where: { id: auth.user.id },
+      data: {
+        onlineAlertSoundId: online,
+        warningAlertSoundId: warning,
+        offlineAlertSoundId: offline,
+        alertSoundDataUrl: null,
+        alertSoundName: null
+      }
+    });
+  }
+  const audios = await getAlertAudioLibrary();
+  const audioIds = new Set(audios.map((audio) => audio.id));
+  const useAvailableAudio = (audioId: string | null) => audioId && audioIds.has(audioId) ? audioId : 'default';
+  return {
+    audios,
+    uploadEnabled: alertAudioUploadEnabled,
+    preferences: {
+      online: useAvailableAudio(online),
+      warning: useAvailableAudio(warning),
+      offline: useAvailableAudio(offline)
+    }
+  };
+});
+
+app.post('/api/account/alert-sounds', { bodyLimit: 1_500 * 1024 }, async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!alertAudioUploadEnabled) return reply.code(403).send({ error: 'O envio de áudios está desativado pelo administrador.' });
+  const parsed = alertAudioUploadSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Envie um áudio MP3, WAV, OGG ou WebM de até 1 MB.' });
+  try {
+    const result = await addAlertAudio(parsed.data.audioName, parsed.data.audioDataUrl);
+    return { audios: result.audios, audio: result.audio };
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : 'Não foi possível salvar o áudio.' });
+  }
+});
+
+app.put('/api/account/alert-sound-preferences', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  const parsed = alertSoundPreferencesSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Selecione um áudio para cada tipo de alerta.' });
+  const audios = await getAlertAudioLibrary();
+  const audioIds = new Set(audios.map((audio) => audio.id));
+  if (Object.values(parsed.data).some((audioId) => !audioIds.has(audioId))) {
+    return reply.code(400).send({ error: 'Um dos áudios selecionados não está na biblioteca compartilhada.' });
+  }
+  await prisma.user.update({
+    where: { id: auth.user.id },
+    data: {
+      onlineAlertSoundId: parsed.data.online,
+      warningAlertSoundId: parsed.data.warning,
+      offlineAlertSoundId: parsed.data.offline
+    }
+  });
+  return { preferences: parsed.data };
+});
+
+app.get<{ Params: { audioId: string } }>('/api/account/alert-sounds/:audioId', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  try {
+    const audio = await getAlertAudioFile(request.params.audioId);
+    if (!audio) return reply.code(404).send({ error: 'Áudio não encontrado.' });
+    return reply
+      .header('Cache-Control', 'private, max-age=3600')
+      .header('X-Content-Type-Options', 'nosniff')
+      .type(audio.mimeType)
+      .send(audio.data);
+  } catch (error) {
+    return reply.code(404).send({ error: error instanceof Error ? error.message : 'Áudio não encontrado.' });
   }
 });
 

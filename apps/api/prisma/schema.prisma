@@ -12,6 +12,11 @@ model User {
   email          String               @unique
   displayName    String               @default("Usuario")
   avatarDataUrl  String?              @db.Text
+  alertSoundDataUrl String?            @db.Text
+  alertSoundName String?
+  onlineAlertSoundId String?
+  warningAlertSoundId String?
+  offlineAlertSoundId String?
   whatsappNumber String?
   emailNotifications    Boolean       @default(true)
   whatsappNotifications Boolean       @default(false)

@@ -18,6 +18,6 @@ bool dashboardLinkVincular(const String& serverUrl, const String& email, String&
                            const String& name, const String& location, bool allowInsecureHttp,
                            String& message);
 bool dashboardLinkRemover(String& message);
-void dashboardLinkEnviar(const DadosSistema& dados, const String& configuredName);
+void dashboardLinkEnviar(const DadosSistema& dados, const String& configuredName, bool alertaMudou = false);
 
 #endif

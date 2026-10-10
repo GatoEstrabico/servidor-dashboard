@@ -5,8 +5,8 @@ import MessageTemplateEditor from './components/MessageTemplateEditor.vue';
 import {
   Activity, AlertTriangle, ArrowDownToLine, Bell, Building2, Check, ChevronDown, EllipsisVertical,
   Bot, CircleAlert, CircleCheck, CircleMinus, Clock3, Copy, Cpu, Flame, ImagePlus, LayoutDashboard, LockKeyhole,
-  List, LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, Pencil, Plus, RefreshCw, Search, Trash2,
-  Settings, Share2, ShieldCheck, Signal, Sun, Thermometer, UsersRound, Waves, X
+  List, LoaderCircle, LogOut, Mail, MapPin, MessageCircle, Moon, Pencil, Play, Plus, RefreshCw, Search, Trash2,
+  Settings, Share2, ShieldCheck, Signal, Sun, Thermometer, UsersRound, Volume2, Waves, X
 } from 'lucide-vue-next';
 
 type User = {
@@ -85,6 +85,9 @@ type DeviceNotification = {
 type WorkspaceDeviceAlertPreference = { deviceId: string; name: string; emailEnabled: boolean; whatsappEnabled: boolean };
 type WorkspaceAlertPreferences = { notifyAllDevices: boolean; devices: WorkspaceDeviceAlertPreference[] };
 type Language = 'pt-BR' | 'en';
+type AlertAudioOption = { id: string; name: string; mimeType: string; url: string; isDefault: boolean };
+type AlertSoundPreferences = { online: string; warning: string; offline: string };
+type AlertSoundStatus = keyof AlertSoundPreferences;
 
 const user = ref<User | null>(null);
 const devices = ref<Device[]>([]);
@@ -181,6 +184,7 @@ const favoriteWhatsAppMediaError = ref('');
 const favoriteMediaName = ref('');
 const favoriteMediaDataUrl = ref('');
 const favoriteMediaSaving = ref(false);
+const favoriteMediaDeletingId = ref<string | null>(null);
 const whatsappCloudSettings = ref<WhatsAppCloudSettings>({ connectionMode: 'cloud', phoneNumberId: '', apiVersion: 'v23.0', templateName: 'lab_monitor_alarm', templateLanguage: 'pt_BR', accessTokenConfigured: false });
 const whatsappSavedConnectionMode = ref<'qr' | 'cloud'>('cloud');
 const whatsappCloudAccessToken = ref('');
@@ -251,7 +255,7 @@ const resetMessage = ref('');
 const resetError = ref('');
 const resetToken = ref('');
 const settingsOpen = ref(false);
-const settingsTab = ref<'preferences' | 'account' | 'notifications'>('preferences');
+const settingsTab = ref<'preferences' | 'account' | 'notifications' | 'sounds'>('preferences');
 const workspaceMenuOpen = ref(false);
 const mobileWorkspaceSelectorOpen = ref(false);
 const workspaceDialogOpen = ref(false);
@@ -266,6 +270,19 @@ const whatsappCountries = computed(() => {
   })).sort((left, right) => left.name.localeCompare(right.name, language.value));
 });
 const darkMode = ref(false);
+const alertSounds = ref<AlertAudioOption[]>([]);
+const alertSoundPreferences = ref<AlertSoundPreferences>({ online: 'default', warning: 'default', offline: 'default' });
+const alertSoundDraftPreferences = ref<AlertSoundPreferences>({ ...alertSoundPreferences.value });
+const alertAudioUploadDataUrl = ref('');
+const alertAudioUploadName = ref('');
+const alertAudioUploadEnabled = ref(false);
+const alertSoundSaving = ref(false);
+const alertAudioUploading = ref(false);
+const alertSoundError = ref('');
+const alertSoundMessage = ref('');
+const alertSoundPreviewStatus = ref<AlertSoundStatus | null>(null);
+let alertSoundPreviewAudio: HTMLAudioElement | null = null;
+let alertSoundPlaybackQueue: Promise<void> = Promise.resolve();
 const currentPassword = ref('');
 const newPassword = ref('');
 const newPasswordConfirm = ref('');
@@ -398,6 +415,7 @@ const englishText: Record<string, string> = {
   'Configuracoes': 'Settings',
   'SUA CONTA': 'YOUR ACCOUNT',
   'Preferências': 'Preferences',
+  'Sons': 'Sounds',
   'Conta': 'Account',
   'Configurações': 'Settings',
   'Idioma da dashboard': 'Dashboard language',
@@ -409,6 +427,30 @@ const englishText: Record<string, string> = {
   'Salvar notificações': 'Save notification settings',
   'Modo escuro': 'Dark mode',
   'Aparencia salva neste navegador': 'Appearance saved in this browser',
+  'Sons de alerta': 'Alert sounds',
+  'Retorno ao normal': 'Back to normal',
+  'Som de retorno ao normal': 'Back-to-normal sound',
+  'Som de atenção': 'Warning sound',
+  'Som de aparelho offline': 'Device-offline sound',
+  'Biblioteca compartilhada': 'Shared library',
+  'Adicione um áudio para disponibilizá-lo a todas as contas.': 'Add audio to make it available to all accounts.',
+  'O envio de áudios está desativado pelo administrador.': 'Audio uploads are disabled by the administrator.',
+  'Nome do áudio': 'Audio name',
+  'Escolher áudio': 'Choose audio',
+  'MP3, WAV, OGG ou WebM, até 1 MB': 'MP3, WAV, OGG, or WebM, up to 1 MB',
+  'Testar som': 'Test sound',
+  'Tocar som': 'Play sound',
+  'Parar som': 'Stop sound',
+  'Adicionar à biblioteca': 'Add to library',
+  'Salvar sons por alerta': 'Save sounds per alert',
+  'Áudio adicionado à biblioteca compartilhada.': 'Audio added to the shared library.',
+  'Sons por alerta salvos.': 'Alert sounds saved.',
+  'Carregando sons...': 'Loading sounds...',
+  'Selecione um som': 'Select a sound',
+  'Escolha um áudio MP3, WAV, OGG ou WebM de até 1 MB.': 'Choose an MP3, WAV, OGG, or WebM audio file up to 1 MB.',
+  'Não foi possível ler o arquivo de áudio.': 'Could not read the audio file.',
+  'Não foi possível salvar o som de alerta.': 'Could not save the alert sound.',
+  'O navegador bloqueou a reprodução do áudio.': 'The browser blocked audio playback.',
   'Idioma': 'Language',
   'Perfil': 'Profile',
   'Confirme sua senha para salvar': 'Confirm your password to save',
@@ -668,6 +710,10 @@ const englishText: Record<string, string> = {
   'Ex.: Alerta do sensor': 'E.g. Sensor alert',
   'Mídia selecionada': 'Media selected',
   'Escolher mídia': 'Choose media',
+  'Excluir a mídia': 'Delete this media',
+  'Esta ação não pode ser desfeita.': 'This action cannot be undone.',
+  'Mídia excluída da biblioteca.': 'Media deleted from the library.',
+  'Não foi possível excluir a mídia.': 'Could not delete the media.',
   'Carregando mídias...': 'Loading media...',
   'Nenhuma mídia favorita.': 'No favorite media.',
   'Imagem': 'Image',
@@ -919,6 +965,9 @@ async function loadDevices() {
     }
     if (newNotifications.length) {
       notifications.value = [...newNotifications.reverse(), ...notifications.value].slice(0, 50);
+      for (const status of new Set(newNotifications.map((notification) => notification.status))) {
+        playAlertSound(alertSoundPreferences.value[status]);
+      }
     }
     knownDeviceStatuses = new Map(result.devices.map((device) => [device.id, device.status]));
     devices.value = result.devices;
@@ -1340,6 +1389,26 @@ async function addFavoriteWhatsAppMedia() {
     favoriteWhatsAppMediaError.value = error instanceof Error ? error.message : 'Não foi possível salvar a mídia favorita.';
   } finally {
     favoriteMediaSaving.value = false;
+  }
+}
+
+async function removeFavoriteWhatsAppMedia(media: FavoriteWhatsAppMedia): Promise<void> {
+  if (favoriteMediaDeletingId.value) return;
+  if (!window.confirm(`${t('Excluir a mídia')} "${media.name}"? ${t('Esta ação não pode ser desfeita.')}`)) return;
+  favoriteMediaDeletingId.value = media.id;
+  favoriteWhatsAppMediaError.value = '';
+  try {
+    const result = await api<{ media: FavoriteWhatsAppMedia[]; settings: WhatsAppNotificationSettings }>(
+      `/api/admin/whatsapp/media/${encodeURIComponent(media.id)}`,
+      { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken.value } }
+    );
+    favoriteWhatsAppMedia.value = result.media;
+    whatsappSettings.value = result.settings;
+    whatsappSettingsMessage.value = 'Mídia excluída da biblioteca.';
+  } catch (error) {
+    favoriteWhatsAppMediaError.value = error instanceof Error ? error.message : 'Não foi possível excluir a mídia.';
+  } finally {
+    favoriteMediaDeletingId.value = null;
   }
 }
 
@@ -1853,6 +1922,135 @@ async function prepareInvitation(token: string) {
   }
 }
 
+async function loadAlertSoundPreference(): Promise<void> {
+  try {
+    const result = await api<{ audios: AlertAudioOption[]; preferences: AlertSoundPreferences; uploadEnabled: boolean }>('/api/account/alert-sounds');
+    alertSounds.value = result.audios;
+    alertAudioUploadEnabled.value = result.uploadEnabled;
+    alertSoundPreferences.value = result.preferences;
+    alertSoundDraftPreferences.value = { ...result.preferences };
+    alertSoundError.value = '';
+  } catch {
+    alertSoundError.value = 'Não foi possível carregar sons.';
+  }
+}
+
+function playAlertSound(audioId: string, reportFailure = false): void {
+  const source = alertSounds.value.find((audio) => audio.id === audioId)?.url ?? '/audio/alert.mp3';
+  alertSoundPlaybackQueue = alertSoundPlaybackQueue.then(() => new Promise<void>((resolve) => {
+    const audio = new Audio(source);
+    audio.volume = 0.7;
+    audio.addEventListener('ended', () => resolve(), { once: true });
+    audio.addEventListener('error', () => resolve(), { once: true });
+    void audio.play().catch(() => {
+      if (reportFailure) alertSoundError.value = 'O navegador bloqueou a reprodução do áudio.';
+      resolve();
+    });
+  }));
+}
+
+function stopAlertSoundPreview(): void {
+  const audio = alertSoundPreviewAudio;
+  alertSoundPreviewAudio = null;
+  alertSoundPreviewStatus.value = null;
+  if (!audio) return;
+  audio.pause();
+  audio.currentTime = 0;
+}
+
+function toggleAlertSoundPreview(status: AlertSoundStatus): void {
+  if (alertSoundPreviewStatus.value === status) {
+    stopAlertSoundPreview();
+    return;
+  }
+  stopAlertSoundPreview();
+  const audioId = alertSoundDraftPreferences.value[status];
+  const source = alertSounds.value.find((audio) => audio.id === audioId)?.url ?? '/audio/alert.mp3';
+  const audio = new Audio(source);
+  alertSoundPreviewAudio = audio;
+  alertSoundPreviewStatus.value = status;
+  audio.volume = 0.7;
+  const clearPreview = () => {
+    if (alertSoundPreviewAudio !== audio) return;
+    alertSoundPreviewAudio = null;
+    alertSoundPreviewStatus.value = null;
+  };
+  audio.addEventListener('ended', clearPreview, { once: true });
+  audio.addEventListener('error', clearPreview, { once: true });
+  void audio.play().catch(() => {
+    clearPreview();
+    alertSoundError.value = 'O navegador bloqueou a reprodução do áudio.';
+  });
+}
+
+async function selectAlertSoundFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  alertSoundError.value = '';
+  if (!file) return;
+  if (!['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm'].includes(file.type) || file.size > 1024 * 1024) {
+    alertSoundError.value = 'Escolha um áudio MP3, WAV, OGG ou WebM de até 1 MB.';
+    input.value = '';
+    return;
+  }
+  try {
+    alertAudioUploadDataUrl.value = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Não foi possível ler o arquivo de áudio.'));
+      reader.onerror = () => reject(new Error('Não foi possível ler o arquivo de áudio.'));
+      reader.readAsDataURL(file);
+    });
+    alertAudioUploadName.value = file.name.replace(/\.[^.]+$/, '').slice(0, 80);
+  } catch {
+    alertSoundError.value = 'Não foi possível ler o arquivo de áudio.';
+  } finally {
+    input.value = '';
+  }
+}
+
+async function uploadAlertSound(): Promise<void> {
+  if (!alertAudioUploadEnabled.value || alertAudioUploading.value || !alertAudioUploadDataUrl.value || !alertAudioUploadName.value.trim()) return;
+  alertAudioUploading.value = true;
+  alertSoundError.value = '';
+  alertSoundMessage.value = '';
+  try {
+    const result = await api<{ audios: AlertAudioOption[] }>('/api/account/alert-sounds', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ audioDataUrl: alertAudioUploadDataUrl.value, audioName: alertAudioUploadName.value })
+    });
+    alertSounds.value = result.audios;
+    alertAudioUploadDataUrl.value = '';
+    alertAudioUploadName.value = '';
+    alertSoundMessage.value = 'Áudio adicionado à biblioteca compartilhada.';
+  } catch (error) {
+    alertSoundError.value = error instanceof Error ? error.message : 'Não foi possível adicionar o áudio.';
+  } finally {
+    alertAudioUploading.value = false;
+  }
+}
+
+async function saveAlertSoundPreferences(): Promise<void> {
+  if (alertSoundSaving.value) return;
+  alertSoundSaving.value = true;
+  alertSoundError.value = '';
+  alertSoundMessage.value = '';
+  try {
+    const result = await api<{ preferences: AlertSoundPreferences }>('/api/account/alert-sound-preferences', {
+      method: 'PUT',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify(alertSoundDraftPreferences.value)
+    });
+    alertSoundPreferences.value = result.preferences;
+    alertSoundDraftPreferences.value = { ...result.preferences };
+    alertSoundMessage.value = 'Sons por alerta salvos.';
+  } catch (error) {
+    alertSoundError.value = error instanceof Error ? error.message : 'Não foi possível salvar os sons por alerta.';
+  } finally {
+    alertSoundSaving.value = false;
+  }
+}
+
 async function checkSession() {
   try {
     const [meResult, settingsResult] = await Promise.all([
@@ -1864,6 +2062,7 @@ async function checkSession() {
     registrationEnabled.value = settingsResult.enabled;
     syncProfileForm();
     await loadWorkspaces();
+    await loadAlertSoundPreference();
     await loadDevices();
   } catch {
     user.value = null;
@@ -1890,6 +2089,7 @@ async function login() {
     csrfToken.value = result.csrfToken;
     password.value = '';
     await loadWorkspaces();
+    await loadAlertSoundPreference();
     await loadDevices();
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : 'Falha ao entrar.';
@@ -1969,6 +2169,8 @@ function openSettings() {
   accountError.value = '';
   notificationMessage.value = '';
   notificationError.value = '';
+  alertSoundError.value = '';
+  alertSoundMessage.value = '';
   currentPassword.value = '';
   notificationCurrentPassword.value = '';
   settingsOpen.value = true;
@@ -2333,6 +2535,11 @@ async function logout() {
     registrationEnabled.value = false;
     devices.value = [];
     notifications.value = [];
+    alertSounds.value = [];
+    alertSoundPreferences.value = { online: 'default', warning: 'default', offline: 'default' };
+    alertSoundDraftPreferences.value = { ...alertSoundPreferences.value };
+    alertAudioUploadDataUrl.value = '';
+    alertAudioUploadName.value = '';
     notificationOpen.value = false;
     knownDeviceStatuses = undefined;
     csrfToken.value = '';
@@ -2956,6 +3163,7 @@ onUnmounted(() => {
                     <img :src="media.previewUrl" :alt="media.name" />
                     <strong>{{ media.name }}</strong>
                     <small>{{ media.animated ? t('Animada') : t('Estática') }}</small>
+                    <button class="whatsapp-media-delete" type="button" :disabled="favoriteMediaDeletingId !== null" :aria-label="`${t('Excluir a mídia')} ${media.name}`" :title="t('Excluir a mídia')" @click="removeFavoriteWhatsAppMedia(media)"><Trash2 :size="14" /></button>
                   </article>
                 </div>
                 <div v-else class="workspace-device-empty">{{ t('Nenhuma mídia favorita.') }}</div>
@@ -3412,6 +3620,7 @@ onUnmounted(() => {
           <button class="settings-tab" :class="{ active: settingsTab === 'preferences' }" type="button" role="tab" :aria-selected="settingsTab === 'preferences'" @click="settingsTab = 'preferences'">{{ t('Preferências') }}</button>
           <button class="settings-tab" :class="{ active: settingsTab === 'account' }" type="button" role="tab" :aria-selected="settingsTab === 'account'" @click="settingsTab = 'account'">{{ t('Conta') }}</button>
           <button class="settings-tab" :class="{ active: settingsTab === 'notifications' }" type="button" role="tab" :aria-selected="settingsTab === 'notifications'" @click="settingsTab = 'notifications'">{{ t('Notificações') }}</button>
+          <button class="settings-tab" :class="{ active: settingsTab === 'sounds' }" type="button" role="tab" :aria-selected="settingsTab === 'sounds'" @click="settingsTab = 'sounds'">{{ t('Sons') }}</button>
         </nav>
 
         <div v-if="settingsTab === 'preferences'" class="settings-pane">
@@ -3420,13 +3629,6 @@ onUnmounted(() => {
             <span class="theme-setting-copy"><strong>{{ t('Modo escuro') }}</strong><small>{{ t('Aparencia salva neste navegador') }}</small></span>
             <input class="theme-switch" type="checkbox" :checked="darkMode" @change="toggleDarkMode" />
           </label>
-          <div class="language-setting">
-            <div class="theme-setting-copy"><strong>{{ t('Idioma da dashboard') }}</strong><small>{{ t('Escolha o idioma da interface') }}</small></div>
-            <div class="language-options" role="group" :aria-label="t('Idioma da dashboard')">
-              <button class="language-option" :class="{ active: language === 'pt-BR' }" type="button" :aria-pressed="language === 'pt-BR'" @click="setLanguage('pt-BR')"><img class="language-option-flag" src="/flags/br.svg" alt="" />{{ t('Português') }}</button>
-              <button class="language-option" :class="{ active: language === 'en' }" type="button" :aria-pressed="language === 'en'" @click="setLanguage('en')"><img class="language-option-flag" src="/flags/gb.svg" alt="" />{{ t('English') }}</button>
-            </div>
-          </div>
         </div>
 
         <div v-else-if="settingsTab === 'account'" class="settings-pane">
@@ -3460,7 +3662,7 @@ onUnmounted(() => {
           </form>
         </div>
 
-        <form v-else class="settings-pane account-settings-form" @submit.prevent="updateNotificationPreferences">
+        <form v-else-if="settingsTab === 'notifications'" class="settings-pane account-settings-form" @submit.prevent="updateNotificationPreferences">
           <div class="settings-section-heading"><h3>{{ t('Alertas de alarmes') }}</h3><span>{{ t('Preferências de envio') }}</span></div>
           <label class="theme-setting">
             <span class="theme-setting-icon"><Mail :size="18" /></span>
@@ -3509,6 +3711,43 @@ onUnmounted(() => {
           <div v-if="notificationMessage" class="success-message" role="status">{{ t(notificationMessage) }}</div>
           <button class="primary-button settings-save-button" type="submit" :disabled="accountSaving">{{ accountSaving ? t('Salvando...') : t('Salvar notificações') }}</button>
         </form>
+
+        <div v-else class="settings-pane">
+          <section class="alert-sound-settings" aria-labelledby="alertSoundTitle">
+            <div class="settings-section-heading"><h3 id="alertSoundTitle">{{ t('Sons de alerta') }}</h3></div>
+            <p class="settings-help">{{ t('Escolha um som diferente para cada mudança de estado. Os arquivos enviados ficam disponíveis para todas as contas.') }}</p>
+            <div class="alert-sound-assignment-grid">
+              <label class="alert-sound-assignment">
+                <span>{{ t('Retorno ao normal') }}</span>
+                <select v-model="alertSoundDraftPreferences.online" class="settings-input select-input"><option v-if="!alertSounds.length" value="default">alert.mp3</option><option v-for="audio in alertSounds" :key="audio.id" :value="audio.id">{{ audio.name }}</option></select>
+                <button class="secondary-button" type="button" :aria-label="t(alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som')" :title="t(alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som')" :aria-pressed="alertSoundPreviewStatus === 'online'" @click="toggleAlertSoundPreview('online')"><Square v-if="alertSoundPreviewStatus === 'online'" :size="14" fill="currentColor" /><Play v-else :size="14" />{{ t(alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som') }}</button>
+              </label>
+              <label class="alert-sound-assignment">
+                <span>{{ t('Atenção') }}</span>
+                <select v-model="alertSoundDraftPreferences.warning" class="settings-input select-input"><option v-if="!alertSounds.length" value="default">alert.mp3</option><option v-for="audio in alertSounds" :key="audio.id" :value="audio.id">{{ audio.name }}</option></select>
+                <button class="secondary-button" type="button" :aria-label="t(alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som')" :title="t(alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som')" :aria-pressed="alertSoundPreviewStatus === 'warning'" @click="toggleAlertSoundPreview('warning')"><Square v-if="alertSoundPreviewStatus === 'warning'" :size="14" fill="currentColor" /><Play v-else :size="14" />{{ t(alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som') }}</button>
+              </label>
+              <label class="alert-sound-assignment">
+                <span>{{ t('Offline') }}</span>
+                <select v-model="alertSoundDraftPreferences.offline" class="settings-input select-input"><option v-if="!alertSounds.length" value="default">alert.mp3</option><option v-for="audio in alertSounds" :key="audio.id" :value="audio.id">{{ audio.name }}</option></select>
+                <button class="secondary-button" type="button" :aria-label="t(alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som')" :title="t(alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som')" :aria-pressed="alertSoundPreviewStatus === 'offline'" @click="toggleAlertSoundPreview('offline')"><Square v-if="alertSoundPreviewStatus === 'offline'" :size="14" fill="currentColor" /><Play v-else :size="14" />{{ t(alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som') }}</button>
+              </label>
+            </div>
+            <button class="primary-button" type="button" :disabled="alertSoundSaving" @click="saveAlertSoundPreferences">{{ alertSoundSaving ? t('Salvando...') : t('Salvar sons por alerta') }}</button>
+            <section v-if="alertAudioUploadEnabled" class="alert-sound-upload" aria-labelledby="alertSoundLibraryTitle">
+              <div class="settings-section-heading"><h3 id="alertSoundLibraryTitle">{{ t('Biblioteca compartilhada') }}</h3><span>{{ alertSounds.length }}</span></div>
+              <p class="settings-help">{{ t('Adicione um áudio para disponibilizá-lo a todas as contas.') }}</p>
+              <label class="whatsapp-config-field" for="alertSoundName"><span>{{ t('Nome do áudio') }}</span><input id="alertSoundName" v-model="alertAudioUploadName" class="settings-input" type="text" maxlength="80" /></label>
+              <div class="alert-sound-actions">
+                <label class="secondary-button avatar-upload-button" for="alertSoundFile">{{ alertAudioUploadName || t('Escolher áudio') }}</label>
+                <input id="alertSoundFile" class="visually-hidden" type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg,audio/webm" @change="selectAlertSoundFile" />
+                <button class="primary-button" type="button" :disabled="alertAudioUploading || !alertAudioUploadDataUrl || !alertAudioUploadName.trim()" @click="uploadAlertSound">{{ alertAudioUploading ? t('Salvando...') : t('Adicionar à biblioteca') }}</button>
+              </div>
+            </section>
+            <p v-if="alertSoundError" class="error-message" role="alert">{{ t(alertSoundError) }}</p>
+            <p v-if="alertSoundMessage" class="success-message" role="status">{{ t(alertSoundMessage) }}</p>
+          </section>
+        </div>
       </section>
     </div>
   </div>

@@ -46,7 +46,7 @@ void monitorar() {
   Config config = storageCarregarConfig();
   LeituraSensores leitura = lerSensores();
   Alertas alertas = verificarAlertas(leitura.temperatura, leitura.umidade, leitura.gas_adc, config);
-  registrarTransicoesAlertas(alertas);
+  const bool alertaMudou = registrarTransicoesAlertas(alertas);
   bool existe = existeAlerta(alertas);
 
   if (buttonFoiPressionado()) {
@@ -82,7 +82,7 @@ void monitorar() {
   dados.timestamp = time(nullptr);
 
   webserverAtualizarDados(dados);
-  dashboardLinkEnviar(dados, config.nome_aparelho);
+  dashboardLinkEnviar(dados, config.nome_aparelho, alertaMudou);
 
   int intervalo = config.intervalo_leitura;
   if (intervalo < 1) {

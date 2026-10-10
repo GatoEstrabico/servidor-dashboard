@@ -394,6 +394,9 @@ button:disabled { cursor: wait; opacity: .7; }
 .whatsapp-sticker-favorite img { width: 72px; height: 72px; object-fit: contain; }
 .whatsapp-sticker-favorite strong { max-width: 100%; overflow: hidden; color: #405047; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .whatsapp-sticker-favorite small { color: #7d8981; font-size: 8px; }
+.whatsapp-media-delete { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border: 1px solid #edc9c5; border-radius: 4px; color: #a84338; background: transparent; cursor: pointer; }
+.whatsapp-media-delete:hover:not(:disabled) { color: #fff; background: #a84338; }
+.whatsapp-media-delete:disabled { cursor: wait; opacity: .55; }
 .whatsapp-notification-preview, .email-notification-preview { display: grid; min-width: 0; align-content: start; gap: 8px; }
 .whatsapp-notification-preview h3, .email-notification-preview h3 { margin: 0; color: #46534b; font-size: 10px; font-weight: 700; }
 .whatsapp-chat-preview { display: grid; min-height: 150px; align-content: end; justify-items: end; gap: 4px; padding: 12px 9px 8px; border: 1px solid #dfe7e0; border-radius: 4px; background: #edf2ed; }
@@ -481,6 +484,20 @@ button:disabled { cursor: wait; opacity: .7; }
 .theme-setting-icon { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 4px; color: #4d765e; background: #eaf2eb; }
 .theme-setting-copy { display: grid; flex: 1; gap: 3px; color: #334139; font-size: 12px; }
 .theme-setting-copy small { color: #88938c; font-size: 10px; }
+.alert-sound-settings { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid #e6ebe5; }
+.alert-sound-settings .settings-section-heading { margin-bottom: 2px; }
+.alert-sound-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.alert-sound-actions > button, .alert-sound-actions > label { min-height: 34px; gap: 6px; padding: 0 10px; font-size: 10px; }
+.alert-sound-assignment-grid { display: grid; gap: 7px; }
+.alert-sound-assignment { display: grid; grid-template-columns: minmax(90px, .6fr) minmax(0, 1.4fr) auto; align-items: center; gap: 8px; color: #46534b; font-size: 11px; font-weight: 600; }
+.alert-sound-assignment > button { min-height: 34px; gap: 5px; padding: 0 9px; font-size: 10px; }
+.alert-sound-upload { display: grid; gap: 8px; padding-top: 11px; border-top: 1px solid #e6ebe5; }
+:root.dark-mode .alert-sound-upload { border-color: #354139; }
+:root.dark-mode .alert-sound-assignment { color: #d6e1d9; }
+@media (max-width: 560px) {
+  .alert-sound-assignment { grid-template-columns: minmax(0, 1fr) auto; }
+  .alert-sound-assignment > span { grid-column: 1 / -1; }
+}
 .theme-switch { position: relative; width: 39px; height: 22px; flex: 0 0 39px; appearance: none; border: 0; border-radius: 12px; background: #c4cdc6; cursor: pointer; transition: background .18s ease; }
 .theme-switch::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .18); content: ''; transition: transform .18s ease; }
 .theme-switch:checked { background: #39845f; }
@@ -838,6 +855,7 @@ button:disabled { cursor: wait; opacity: .7; }
 :root.dark-mode .theme-setting { border-color: #354139; background: #222d27; }
 :root.dark-mode .theme-setting-icon { color: #a6d0b2; background: #2a3a30; }
 :root.dark-mode .theme-setting-copy { color: #e3eae5; }
+:root.dark-mode .alert-sound-settings { border-color: #354139; }
 :root.dark-mode .theme-setting-copy small,
 :root.dark-mode .settings-section-heading > span { color: #a0aea5; }
 :root.dark-mode .settings-section-heading h3,

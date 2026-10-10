@@ -9,6 +9,6 @@ bool verificarUmidade(float umidade, const Config& config);
 bool verificarGas(int gas_adc, const Config& config);
 Alertas verificarAlertas(float temperatura, float umidade, int gas_adc, const Config& config);
 bool existeAlerta(const Alertas& alertas);
-void registrarTransicoesAlertas(const Alertas& alertas);
+bool registrarTransicoesAlertas(const Alertas& alertas);
 
 #endif

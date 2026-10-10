@@ -208,11 +208,11 @@ bool dashboardLinkRemover(String& message) {
   return true;
 }
 
-void dashboardLinkEnviar(const DadosSistema& dados, const String& configuredName) {
+void dashboardLinkEnviar(const DadosSistema& dados, const String& configuredName, bool alertaMudou) {
   VinculoDashboard vinculo = storageCarregarVinculoDashboard();
   if (vinculo.deviceToken.isEmpty() || WiFi.status() != WL_CONNECTED) return;
   const unsigned long now = millis();
-  if (gLastUploadAt != 0 && now - gLastUploadAt < kUploadIntervalMs) return;
+  if (gLastUploadAt != 0 && now - gLastUploadAt < kUploadIntervalMs && !alertaMudou) return;
   gLastUploadAt = now;
 
   DynamicJsonDocument bodyDoc(768);

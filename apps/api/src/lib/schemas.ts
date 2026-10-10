@@ -96,6 +96,7 @@ export const whatsappProfileUpdateSchema = z.object({
   name: trimmed(80),
   photoDataUrl: z.string().max(450_000).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+=*$/).nullable()
 }).strict();
+export const whatsappProfileBaselineSchema = z.object({ name: trimmed(80) }).strict();
 export const whatsappProfileRestoreSchema = z.object({ snapshotId: trimmed(64) }).strict();
 const whatsappPrivacyValue = z.enum(['all', 'contacts', 'contact_blacklist', 'none']);
 export const whatsappPrivacySettingsSchema = z.object({

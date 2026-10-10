@@ -32,6 +32,7 @@ import {
   deviceLinkWorkspacesSchema,
   emailNotificationSettingsSchema,
   whatsappCloudSettingsSchema,
+  whatsappProfileBaselineSchema,
   whatsappPrivacySettingsSchema,
   whatsappFavoriteMediaSchema,
   whatsappProfileRestoreSchema,
@@ -59,6 +60,7 @@ import {
   getWhatsAppNotificationSettings,
   getWhatsAppWebLogs,
   getWhatsAppWebProfile,
+  initializeWhatsAppWebProfileHistory,
   getWhatsAppPrivacySettings,
   getWhatsAppWebStatus,
   restoreWhatsAppWebProfile,
@@ -750,6 +752,19 @@ app.get('/api/admin/whatsapp/profile', async (request, reply) => {
     return { profile: await getWhatsAppWebProfile() };
   } catch (error) {
     return reply.code(503).send({ error: error instanceof Error ? error.message : 'Não foi possível carregar o perfil da conta WhatsApp.' });
+  }
+});
+
+app.post('/api/admin/whatsapp/profile/initialize', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  const parsed = whatsappProfileBaselineSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Informe o nome atual do perfil WhatsApp.' });
+  try {
+    return { profile: await initializeWhatsAppWebProfileHistory(parsed.data.name) };
+  } catch (error) {
+    return reply.code(503).send({ error: error instanceof Error ? error.message : 'Não foi possível salvar o perfil original.' });
   }
 });
 

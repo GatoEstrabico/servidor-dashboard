@@ -227,6 +227,28 @@ async function ensureWhatsAppProfileHistory(activeSocket: WASocket): Promise<Sto
   return history;
 }
 
+export async function initializeWhatsAppWebProfileHistory(originalName: string): Promise<WhatsAppWebProfile> {
+  if (!socket || state !== 'connected') throw new Error('Conecte a conta WhatsApp via QR para gerenciar o perfil.');
+  const accountId = socket.user?.id;
+  if (!accountId) throw new Error('A conta WhatsApp ainda não está conectada.');
+  const existingHistory = await readProfileHistory(accountId);
+  if (existingHistory) return toPublicWhatsAppProfile(existingHistory);
+  const name = originalName.trim();
+  if (!name) throw new Error('Informe o nome atual do perfil WhatsApp.');
+
+  const original: WhatsAppProfileSnapshot = {
+    id: randomUUID(),
+    name,
+    photoDataUrl: await captureWhatsAppProfilePhoto(socket, accountId),
+    createdAt: new Date().toISOString(),
+    isOriginal: true
+  };
+  const history: StoredWhatsAppProfileHistory = { accountId, original, snapshots: [original] };
+  await saveProfileHistory(history);
+  addLog('success', 'Perfil original salvo', 'Nome confirmado pelo administrador após recuperar a sessão WhatsApp.');
+  return toPublicWhatsAppProfile(history);
+}
+
 function getCurrentProfileSnapshot(history: StoredWhatsAppProfileHistory): WhatsAppProfileSnapshot {
   return history.snapshots.at(-1) ?? history.original;
 }

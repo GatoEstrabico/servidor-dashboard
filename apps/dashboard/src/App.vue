@@ -196,9 +196,11 @@ const whatsappCloudConnectivityError = ref('');
 const whatsappCloudConnectivityTesting = ref(false);
 const whatsappProfile = ref<WhatsAppProfile | null>(null);
 const whatsappProfileDraftName = ref('');
+const whatsappProfileBaselineName = ref('');
 const whatsappProfileDraftPhoto = ref<string | null>(null);
 const whatsappProfilePhotoError = ref('');
 const whatsappProfileSaving = ref(false);
+const whatsappProfileBaselineSaving = ref(false);
 const whatsappProfileRestoringId = ref<string | null>(null);
 const whatsappProfileMessage = ref('');
 const whatsappProfileError = ref('');
@@ -683,6 +685,11 @@ const englishText: Record<string, string> = {
   'Perfil original restaurado. Ele também será restaurado automaticamente ao desconectar.': 'Original profile restored. It will also be restored automatically when disconnecting.',
   'Versão do perfil restaurada.': 'Profile version restored.',
   'Não foi possível carregar o perfil da conta WhatsApp.': 'Could not load the WhatsApp account profile.',
+  'Recuperar ponto de restauração': 'Recover restore point',
+  'O WhatsApp não forneceu o nome do perfil. Confira no aplicativo do celular e informe abaixo o nome que está usando agora. O servidor salvará esse nome e a foto atual como referência antes de liberar as edições.': 'WhatsApp did not provide the profile name. Check the WhatsApp mobile app and enter the current name below. The server will save that name and the current photo as a restore point before enabling edits.',
+  'Nome atual exibido no WhatsApp': 'Current name shown in WhatsApp',
+  'Salvar referência e abrir editor': 'Save restore point and open editor',
+  'Perfil original salvo. Agora você pode editar a conta.': 'Original profile saved. You can now edit the account.',
   'Não foi possível atualizar o perfil WhatsApp.': 'Could not update the WhatsApp profile.',
   'Não foi possível restaurar essa versão do perfil.': 'Could not restore this profile version.',
   'Privacidade da conta': 'Account privacy',
@@ -1477,6 +1484,30 @@ async function loadWhatsAppProfile() {
     await loadWhatsAppPrivacySettings();
   } catch (error) {
     whatsappProfileError.value = error instanceof Error ? error.message : 'Não foi possível carregar o perfil da conta WhatsApp.';
+  }
+}
+
+async function initializeWhatsAppProfileBaseline(): Promise<void> {
+  if (!whatsappProfileBaselineName.value.trim() || whatsappProfileBaselineSaving.value) return;
+  whatsappProfileBaselineSaving.value = true;
+  whatsappProfileError.value = '';
+  whatsappProfileMessage.value = '';
+  try {
+    const result = await api<{ profile: WhatsAppProfile }>('/api/admin/whatsapp/profile/initialize', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ name: whatsappProfileBaselineName.value })
+    });
+    whatsappProfile.value = result.profile;
+    whatsappProfileDraftName.value = result.profile.name;
+    whatsappProfileDraftPhoto.value = result.profile.photoDataUrl;
+    whatsappProfileBaselineName.value = '';
+    whatsappProfileMessage.value = 'Perfil original salvo. Agora você pode editar a conta.';
+    await loadWhatsAppPrivacySettings();
+  } catch (error) {
+    whatsappProfileError.value = error instanceof Error ? error.message : 'Não foi possível salvar o perfil original.';
+  } finally {
+    whatsappProfileBaselineSaving.value = false;
   }
 }
 
@@ -3262,6 +3293,14 @@ onUnmounted(() => {
                 </article>
               </div>
             </template>
+            <form v-else-if="whatsappStatus.state === 'connected' && whatsappProfileError.includes('Não foi possível ler o nome original do perfil WhatsApp.')" class="whatsapp-config-form whatsapp-profile-recovery" @submit.prevent="initializeWhatsAppProfileBaseline">
+              <div class="settings-section-heading"><h3>{{ t('Recuperar ponto de restauração') }}</h3></div>
+              <p v-if="whatsappProfileError" class="error-message" role="alert">{{ t(whatsappProfileError) }}</p>
+              <p class="settings-help">{{ t('O WhatsApp não forneceu o nome do perfil. Confira no aplicativo do celular e informe abaixo o nome que está usando agora. O servidor salvará esse nome e a foto atual como referência antes de liberar as edições.') }}</p>
+              <label class="whatsapp-config-field" for="whatsappProfileBaselineName"><span>{{ t('Nome atual exibido no WhatsApp') }}</span><input id="whatsappProfileBaselineName" v-model="whatsappProfileBaselineName" class="settings-input" type="text" maxlength="80" autocomplete="off" required /></label>
+              <p v-if="whatsappProfileMessage" class="success-message" role="status">{{ t(whatsappProfileMessage) }}</p>
+              <button class="primary-button settings-save-button" type="submit" :disabled="whatsappProfileBaselineSaving || !whatsappProfileBaselineName.trim()"><LoaderCircle v-if="whatsappProfileBaselineSaving" class="spin" :size="16" />{{ whatsappProfileBaselineSaving ? t('Salvando...') : t('Salvar referência e abrir editor') }}</button>
+            </form>
             <div v-else class="whatsapp-log-empty"><MessageCircle :size="22" /><strong>{{ t('Conecte a conta via QR para editar o perfil.') }}</strong><span>{{ t('Conecte a conta WhatsApp via QR para gerenciar o perfil.') }}</span></div>
           </section>
           <section v-else id="whatsappConnectionPanel" class="whatsapp-manager-section" role="tabpanel" aria-labelledby="whatsappConnectionTab">

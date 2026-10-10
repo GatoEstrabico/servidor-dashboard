@@ -27,6 +27,7 @@ import {
   whatsappFavoriteMediaSchema,
   whatsappCloudSettingsSchema,
   whatsappProfileUpdateSchema,
+  whatsappProfileBaselineSchema,
   whatsappProfileRestoreSchema,
   whatsappPrivacySettingsSchema,
   emailNotificationSettingsSchema
@@ -184,6 +185,8 @@ test('valida edicao e restauracao do perfil WhatsApp', () => {
   assert.equal(whatsappProfileUpdateSchema.safeParse({ name: 'Conta Laboratorio', photoDataUrl: 'data:image/webp;base64,aGVsbG8=' }).success, true);
   assert.equal(whatsappProfileUpdateSchema.safeParse({ name: '', photoDataUrl: null }).success, false);
   assert.equal(whatsappProfileUpdateSchema.safeParse({ name: 'Conta', photoDataUrl: 'https://example.com/foto.png' }).success, false);
+  assert.equal(whatsappProfileBaselineSchema.safeParse({ name: 'Nome atual da conta' }).success, true);
+  assert.equal(whatsappProfileBaselineSchema.safeParse({ name: ' ' }).success, false);
   assert.equal(whatsappProfileRestoreSchema.safeParse({ snapshotId: 'snapshot_1' }).success, true);
   assert.equal(whatsappProfileRestoreSchema.safeParse({ snapshotId: '' }).success, false);
 });

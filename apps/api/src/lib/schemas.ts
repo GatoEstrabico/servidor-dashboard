@@ -62,7 +62,49 @@ export const whatsappNotificationSettingsSchema = z.object({
   senderName: trimmed(80),
   onlineMessage: whatsappMessageTemplate,
   warningMessage: whatsappMessageTemplate,
-  offlineMessage: whatsappMessageTemplate
+  offlineMessage: whatsappMessageTemplate,
+  onlineMediaType: z.enum(['none', 'sticker', 'image']).default('sticker'),
+  warningMediaType: z.enum(['none', 'sticker', 'image']).default('sticker'),
+  offlineMediaType: z.enum(['none', 'sticker', 'image']).default('sticker'),
+  onlineMediaId: z.string().max(64).regex(/^[A-Za-z0-9_-]+$/).nullable().default('default-success'),
+  warningMediaId: z.string().max(64).regex(/^[A-Za-z0-9_-]+$/).nullable().default('default-alert'),
+  offlineMediaId: z.string().max(64).regex(/^[A-Za-z0-9_-]+$/).nullable().default('default-alert')
+}).strict().refine((settings) => {
+  const validSelection = (type: 'none' | 'sticker' | 'image', mediaId: string | null) => type === 'none' ? mediaId === null : Boolean(mediaId);
+  return validSelection(settings.onlineMediaType, settings.onlineMediaId)
+    && validSelection(settings.warningMediaType, settings.warningMediaId)
+    && validSelection(settings.offlineMediaType, settings.offlineMediaId);
+}, 'Selecione uma mídia favorita para cada alerta ou escolha somente texto.');
+export const whatsappFavoriteMediaSchema = z.object({
+  name: z.string().trim().min(1).max(48),
+  mediaDataUrl: z.string().max(1_400_000).regex(/^data:image\/(webp|gif|png|jpeg);base64,[A-Za-z0-9+/]+=*$/)
+}).strict();
+
+export const whatsappCloudSettingsSchema = z.object({
+  connectionMode: z.enum(['qr', 'cloud']),
+  accessToken: z.string().trim().max(4096),
+  clearAccessToken: z.boolean(),
+  phoneNumberId: z.string().trim().max(64).regex(/^\d*$/),
+  apiVersion: z.string().regex(/^v\d+\.\d+$/),
+  templateName: z.string().trim().min(1).max(128).regex(/^[a-z0-9_]+$/),
+  templateLanguage: z.string().regex(/^[a-z]{2}_[A-Z]{2}$/)
+}).strict().refine((settings) => !(settings.clearAccessToken && settings.accessToken), {
+  path: ['clearAccessToken'],
+  message: 'Não envie um token ao mesmo tempo que solicita sua remoção.'
+});
+export const whatsappProfileUpdateSchema = z.object({
+  name: trimmed(80),
+  photoDataUrl: z.string().max(450_000).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+=*$/).nullable()
+}).strict();
+export const whatsappProfileRestoreSchema = z.object({ snapshotId: trimmed(64) }).strict();
+const whatsappPrivacyValue = z.enum(['all', 'contacts', 'contact_blacklist', 'none']);
+export const whatsappPrivacySettingsSchema = z.object({
+  lastSeen: whatsappPrivacyValue,
+  online: z.enum(['all', 'match_last_seen']),
+  profilePhoto: whatsappPrivacyValue,
+  status: whatsappPrivacyValue,
+  readReceipts: z.enum(['all', 'none']),
+  groupsAdd: z.enum(['all', 'contacts', 'contact_blacklist'])
 }).strict();
 export const emailNotificationSettingsSchema = z.object({
   smtpHost: trimmed(255),

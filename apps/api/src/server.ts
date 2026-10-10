@@ -29,6 +29,11 @@ import {
   tokenSchema,
   deviceLinkWorkspacesSchema,
   emailNotificationSettingsSchema,
+  whatsappCloudSettingsSchema,
+  whatsappPrivacySettingsSchema,
+  whatsappFavoriteMediaSchema,
+  whatsappProfileRestoreSchema,
+  whatsappProfileUpdateSchema,
   whatsappNotificationSettingsSchema,
   updateProfileSchema,
   updateWorkspaceSchema,
@@ -37,6 +42,11 @@ import {
   workspaceNotificationPreferencesSchema
 } from './lib/schemas.js';
 import {
+  addFavoriteWhatsAppMedia,
+  getFavoriteWhatsAppMedia,
+  getFavoriteWhatsAppMediaPreview
+} from './lib/whatsapp-media-library.js';
+import {
   clearWhatsAppWebLogs,
   closeWhatsAppWebSocket,
   connectWhatsAppWeb,
@@ -44,8 +54,13 @@ import {
   formatWhatsAppNotificationMessage,
   getWhatsAppNotificationSettings,
   getWhatsAppWebLogs,
+  getWhatsAppWebProfile,
+  getWhatsAppPrivacySettings,
   getWhatsAppWebStatus,
+  restoreWhatsAppWebProfile,
   resumeWhatsAppWebSession,
+  saveWhatsAppWebProfile,
+  saveWhatsAppPrivacySettings,
   saveWhatsAppNotificationSettings,
   sendWhatsAppWebMessage
 } from './lib/whatsapp-web.js';
@@ -59,6 +74,12 @@ import {
   sendEmailMessage,
   verifyEmailConnection
 } from './lib/email-service.js';
+import {
+  getWhatsAppCloudRuntimeSettings,
+  getWhatsAppCloudSettings,
+  initializeWhatsAppCloudSettings,
+  saveWhatsAppCloudSettings
+} from './lib/whatsapp-cloud-service.js';
 
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env') });
 
@@ -113,6 +134,14 @@ await initializeEmailService({
   senderEmail: parsedSmtpFrom?.[2] ?? env.SMTP_FROM?.trim() ?? '',
   ...defaultEmailNotificationMessages
 }, env.SESSION_SECRET);
+await initializeWhatsAppCloudSettings({
+  connectionMode: env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID ? 'cloud' : 'qr',
+  accessToken: env.WHATSAPP_ACCESS_TOKEN ?? '',
+  phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID ?? '',
+  apiVersion: env.WHATSAPP_API_VERSION,
+  templateName: env.WHATSAPP_TEMPLATE_NAME,
+  templateLanguage: env.WHATSAPP_TEMPLATE_LANGUAGE
+}, env.SESSION_SECRET);
 const bootstrapAdminEmail = env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
 const app = Fastify({ loggerInstance: getAppLogger('api-servidor'), bodyLimit: 512 * 1024 });
 const cookieName = env.COOKIE_SECURE === 'true' ? '__Host-monitor_session' : 'monitor_session';
@@ -120,8 +149,6 @@ const sessionDurationMs = 12 * 60 * 60 * 1000;
 const secureCookie = env.COOKIE_SECURE === 'true';
 const simulatedDeviceExternalId = 'e2e-windows-sensor-01';
 const dummyPasswordHash = await argon2.hash(randomBytes(32).toString('hex'), { type: argon2.argon2id });
-const whatsappConfigured = Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID);
-
 function hash(value: string): string {
   return createHmac('sha256', env.SESSION_SECRET).update(value).digest('hex');
 }
@@ -224,23 +251,27 @@ async function sendAlarmNotifications(device: { id: string; name: string; extern
     app.log.warn({ deviceId: device.externalId }, 'Notificacoes por e-mail indisponiveis: configure as variaveis SMTP.');
   }
 
-  if (whatsappRecipients.length && getWhatsAppWebStatus().state === 'connected') {
+  const cloudSettings = getWhatsAppCloudRuntimeSettings();
+  if (whatsappRecipients.length && cloudSettings.connectionMode === 'qr' && getWhatsAppWebStatus().state === 'connected') {
     for (const recipient of whatsappRecipients) {
       const phone = recipient.whatsappNumber;
       if (!phone) continue;
-      deliveries.push(sendWhatsAppWebMessage(phone, whatsappMessage, status === 'online' ? 'success' : 'alert').catch((error: unknown) => {
+      const mediaType = status === 'online' ? whatsappSettings?.onlineMediaType : status === 'warning' ? whatsappSettings?.warningMediaType : whatsappSettings?.offlineMediaType;
+      const mediaId = status === 'online' ? whatsappSettings?.onlineMediaId : status === 'warning' ? whatsappSettings?.warningMediaId : whatsappSettings?.offlineMediaId;
+      const media = (mediaType === 'sticker' || mediaType === 'image') && mediaId ? { type: mediaType, id: mediaId } : null;
+      deliveries.push(sendWhatsAppWebMessage(phone, whatsappMessage, media).catch((error: unknown) => {
         app.log.error({ err: error, deviceId: device.externalId, channel: 'whatsapp_web' }, 'Falha ao enviar notificacao por WhatsApp Web');
       }));
     }
-  } else if (whatsappRecipients.length && whatsappConfigured && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
-    const endpoint = `https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  } else if (whatsappRecipients.length && cloudSettings.connectionMode === 'cloud' && cloudSettings.accessToken && cloudSettings.phoneNumberId) {
+    const endpoint = `https://graph.facebook.com/${cloudSettings.apiVersion}/${cloudSettings.phoneNumberId}/messages`;
     for (const recipient of whatsappRecipients) {
       const phone = recipient.whatsappNumber;
       if (!phone) continue;
       deliveries.push(fetch(endpoint, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
+          Authorization: `Bearer ${cloudSettings.accessToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -248,9 +279,9 @@ async function sendAlarmNotifications(device: { id: string; name: string; extern
           to: phone.slice(1),
           type: 'template',
           template: {
-            name: env.WHATSAPP_TEMPLATE_NAME,
-            language: { code: env.WHATSAPP_TEMPLATE_LANGUAGE },
-            ...(env.WHATSAPP_TEMPLATE_NAME === 'hello_world' ? {} : {
+            name: cloudSettings.templateName,
+            language: { code: cloudSettings.templateLanguage },
+            ...(cloudSettings.templateName === 'hello_world' ? {} : {
               components: [{
                 type: 'body',
                 parameters: [
@@ -270,7 +301,7 @@ async function sendAlarmNotifications(device: { id: string; name: string; extern
       }));
     }
   } else if (whatsappRecipients.length) {
-    app.log.warn({ deviceId: device.externalId }, 'Notificacoes por WhatsApp indisponiveis: configure as credenciais da Meta Cloud API.');
+    app.log.warn({ deviceId: device.externalId, connectionMode: cloudSettings.connectionMode }, 'Canal de notificacao por WhatsApp selecionado indisponivel; configure apenas o canal ativo.');
   }
 
   await Promise.all(deliveries);
@@ -495,7 +526,113 @@ app.post('/api/admin/whatsapp/settings', async (request, reply) => {
   if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
   const parsed = whatsappNotificationSettingsSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'Confira o nome e os modelos de mensagem do WhatsApp.' });
+  const favoriteMediaIds = new Set((await getFavoriteWhatsAppMedia()).map((media) => media.id));
+  const selectedMediaIds = [parsed.data.onlineMediaId, parsed.data.warningMediaId, parsed.data.offlineMediaId]
+    .filter((id): id is string => id !== null);
+  if (selectedMediaIds.some((id) => !favoriteMediaIds.has(id))) {
+    return reply.code(400).send({ error: 'Uma das mídias selecionadas não está na biblioteca unificada.' });
+  }
   return { settings: await saveWhatsAppNotificationSettings(parsed.data) };
+});
+
+app.get('/api/admin/whatsapp/media', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  reply.header('Cache-Control', 'no-store');
+  try {
+    return { media: await getFavoriteWhatsAppMedia() };
+  } catch (error) {
+    return reply.code(500).send({ error: error instanceof Error ? error.message : 'Não foi possível carregar a biblioteca de mídia.' });
+  }
+});
+
+app.post('/api/admin/whatsapp/media', { bodyLimit: 1_600 * 1024 }, async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  const parsed = whatsappFavoriteMediaSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Informe um nome e uma mídia compatível.' });
+  try {
+    return { media: await addFavoriteWhatsAppMedia(parsed.data.name, parsed.data.mediaDataUrl) };
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : 'Não foi possível salvar a mídia favorita.' });
+  }
+});
+
+app.get<{ Params: { mediaId: string } }>('/api/admin/whatsapp/media/:mediaId/preview', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  try {
+    const preview = await getFavoriteWhatsAppMediaPreview(request.params.mediaId);
+    if (!preview) return reply.code(404).send({ error: 'Mídia não encontrada.' });
+    return reply.header('Cache-Control', 'private, no-store').type('image/webp').send(preview);
+  } catch (error) {
+    return reply.code(500).send({ error: error instanceof Error ? error.message : 'Não foi possível carregar a prévia da mídia.' });
+  }
+});
+
+app.get('/api/admin/whatsapp/cloud-settings', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  reply.header('Cache-Control', 'no-store');
+  return { settings: getWhatsAppCloudSettings() };
+});
+
+app.post('/api/admin/whatsapp/cloud-settings', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  const parsed = whatsappCloudSettingsSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Confira o token, o ID do número, a versão da API e os dados do modelo.' });
+  try {
+    return { settings: await saveWhatsAppCloudSettings(parsed.data) };
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : 'Não foi possível salvar a configuração da Cloud API.' });
+  }
+});
+
+app.post('/api/admin/whatsapp/test-connection', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+
+  const settings = getWhatsAppCloudRuntimeSettings();
+  if (settings.connectionMode === 'qr') {
+    const status = getWhatsAppWebStatus();
+    if (status.state !== 'connected') {
+      return reply.code(503).send({ error: 'O canal WhatsApp Web via QR não está conectado.' });
+    }
+    return { ok: true, connectionMode: 'qr', verifiedName: null, displayPhoneNumber: status.phoneNumber };
+  }
+  if (!settings.accessToken || !settings.phoneNumberId) {
+    return reply.code(400).send({ error: 'Configure o token e o ID do número antes de testar a conexão.' });
+  }
+
+  const endpoint = new URL(`https://graph.facebook.com/${settings.apiVersion}/${settings.phoneNumberId}`);
+  endpoint.searchParams.set('fields', 'verified_name,display_phone_number');
+  try {
+    const response = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${settings.accessToken}` },
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!response.ok) {
+      return reply.code(503).send({
+        error: `A Meta Graph API respondeu HTTP ${response.status}. Confira o token, as permissões e o ID do número.`
+      });
+    }
+    const result = await response.json() as { verified_name?: unknown; display_phone_number?: unknown };
+    return {
+      ok: true,
+      connectionMode: 'cloud',
+      verifiedName: typeof result.verified_name === 'string' ? result.verified_name : null,
+      displayPhoneNumber: typeof result.display_phone_number === 'string' ? result.display_phone_number : null
+    };
+  } catch {
+    return reply.code(503).send({ error: 'Não foi possível alcançar a Meta Graph API. Verifique a rede do servidor e tente novamente.' });
+  }
 });
 
 app.get('/api/admin/whatsapp/logs', async (request, reply) => {
@@ -518,6 +655,9 @@ app.post('/api/admin/whatsapp/connect', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
   if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  if (getWhatsAppCloudRuntimeSettings().connectionMode !== 'qr') {
+    return reply.code(409).send({ error: 'Selecione e salve WhatsApp Web via QR como canal ativo antes de conectar.' });
+  }
   try {
     return await connectWhatsAppWeb();
   } catch (error) {
@@ -530,7 +670,74 @@ app.post('/api/admin/whatsapp/disconnect', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
   if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
-  return disconnectWhatsAppWeb();
+  try {
+    return await disconnectWhatsAppWeb();
+  } catch (error) {
+    return reply.code(503).send({ error: error instanceof Error ? error.message : 'Não foi possível restaurar o perfil e desconectar a conta.' });
+  }
+});
+
+app.get('/api/admin/whatsapp/profile', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  reply.header('Cache-Control', 'no-store');
+  try {
+    return { profile: await getWhatsAppWebProfile() };
+  } catch (error) {
+    return reply.code(503).send({ error: error instanceof Error ? error.message : 'Não foi possível carregar o perfil da conta WhatsApp.' });
+  }
+});
+
+app.post('/api/admin/whatsapp/profile', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  const parsed = whatsappProfileUpdateSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Informe um nome válido e uma foto WebP compatível.' });
+  try {
+    return { profile: await saveWhatsAppWebProfile(parsed.data.name, parsed.data.photoDataUrl) };
+  } catch (error) {
+    return reply.code(503).send({ error: error instanceof Error ? error.message : 'Não foi possível atualizar o perfil WhatsApp.' });
+  }
+});
+
+app.post('/api/admin/whatsapp/profile/restore', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  const parsed = whatsappProfileRestoreSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Selecione uma versão válida do perfil.' });
+  try {
+    return { profile: await restoreWhatsAppWebProfile(parsed.data.snapshotId) };
+  } catch (error) {
+    return reply.code(503).send({ error: error instanceof Error ? error.message : 'Não foi possível restaurar essa versão do perfil.' });
+  }
+});
+
+app.get('/api/admin/whatsapp/profile/privacy', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  reply.header('Cache-Control', 'no-store');
+  try {
+    return { settings: await getWhatsAppPrivacySettings() };
+  } catch (error) {
+    return reply.code(503).send({ error: error instanceof Error ? error.message : 'Não foi possível carregar a privacidade do WhatsApp.' });
+  }
+});
+
+app.post('/api/admin/whatsapp/profile/privacy', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  if (!canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Acesso restrito ao administrador de WhatsApp.' });
+  const parsed = whatsappPrivacySettingsSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Confira as opções de privacidade do WhatsApp.' });
+  try {
+    return { settings: await saveWhatsAppPrivacySettings(parsed.data) };
+  } catch (error) {
+    return reply.code(503).send({ error: error instanceof Error ? error.message : 'Não foi possível salvar a privacidade do WhatsApp.' });
+  }
 });
 
 app.get<{ Params: { token: string } }>('/api/auth/invitations/:token', { logLevel: 'silent' }, async (request, reply) => {

@@ -22,6 +22,11 @@ import {
   updateWorkspaceSchema,
   updateProfileSchema,
   whatsappNotificationSettingsSchema,
+  whatsappFavoriteMediaSchema,
+  whatsappCloudSettingsSchema,
+  whatsappProfileUpdateSchema,
+  whatsappProfileRestoreSchema,
+  whatsappPrivacySettingsSchema,
   emailNotificationSettingsSchema
 } from './schemas.js';
 
@@ -101,11 +106,89 @@ test('valida nome e modelos de mensagem do WhatsApp', () => {
     senderName: 'Laboratório Central',
     onlineMessage: '{{laboratorio}}: {{aparelho}} está {{status}}.',
     warningMessage: 'Atenção em {{aparelho}}. Local: {{localizacao}}.',
-    offlineMessage: '{{aparelho}} offline. ID: {{identificador}}.'
+    offlineMessage: '{{aparelho}} offline. ID: {{identificador}}.',
+    onlineMediaType: 'none',
+    onlineMediaId: null,
+    warningMediaType: 'sticker',
+    warningMediaId: 'default-alert',
+    offlineMediaType: 'sticker',
+    offlineMediaId: 'favorite_1'
   };
   assert.equal(whatsappNotificationSettingsSchema.safeParse(settings).success, true);
+  const legacySettings = {
+    senderName: settings.senderName,
+    onlineMessage: settings.onlineMessage,
+    warningMessage: settings.warningMessage,
+    offlineMessage: settings.offlineMessage
+  };
+  const parsedLegacySettings = whatsappNotificationSettingsSchema.safeParse(legacySettings);
+  assert.equal(parsedLegacySettings.success, true);
+  if (parsedLegacySettings.success) assert.equal(parsedLegacySettings.data.onlineMediaId, 'default-success');
+  if (parsedLegacySettings.success) assert.equal(parsedLegacySettings.data.onlineMediaType, 'sticker');
   assert.equal(whatsappNotificationSettingsSchema.safeParse({ ...settings, offlineMessage: '{{contato}} indisponível' }).success, false);
   assert.equal(whatsappNotificationSettingsSchema.safeParse({ ...settings, warningMessage: ' ' }).success, false);
+  assert.equal(whatsappNotificationSettingsSchema.safeParse({ ...settings, warningMediaId: '../media' }).success, false);
+  assert.equal(whatsappNotificationSettingsSchema.safeParse({
+    ...legacySettings,
+    onlineMediaType: 'image',
+    onlineMediaId: 'image_1'
+  }).success, true);
+  assert.equal(whatsappNotificationSettingsSchema.safeParse({
+    ...legacySettings,
+    onlineMediaType: 'image',
+    onlineMediaId: null
+  }).success, false);
+});
+
+test('valida importação de mídia GIF/WebP/imagem para favoritos', () => {
+  for (const format of ['gif', 'webp', 'png', 'jpeg']) {
+    assert.equal(whatsappFavoriteMediaSchema.safeParse({ name: 'Alerta', mediaDataUrl: `data:image/${format};base64,UklGRg==` }).success, true);
+  }
+  assert.equal(whatsappFavoriteMediaSchema.safeParse({ name: '', mediaDataUrl: 'data:image/gif;base64,R0lGODlh' }).success, false);
+  assert.equal(whatsappFavoriteMediaSchema.safeParse({ name: 'PDF', mediaDataUrl: 'data:application/pdf;base64,UklGRg==' }).success, false);
+});
+
+test('valida opções editáveis da WhatsApp Cloud API', () => {
+  const settings = {
+    connectionMode: 'cloud' as const,
+    accessToken: '',
+    clearAccessToken: false,
+    phoneNumberId: '123456789012345',
+    apiVersion: 'v23.0',
+    templateName: 'lab_monitor_alarm',
+    templateLanguage: 'pt_BR'
+  };
+  assert.equal(whatsappCloudSettingsSchema.safeParse(settings).success, true);
+  assert.equal(whatsappCloudSettingsSchema.safeParse({ ...settings, connectionMode: 'qr' }).success, true);
+  assert.equal(whatsappCloudSettingsSchema.safeParse({ ...settings, connectionMode: 'both' }).success, false);
+  assert.equal(whatsappCloudSettingsSchema.safeParse({ ...settings, phoneNumberId: '' }).success, true);
+  assert.equal(whatsappCloudSettingsSchema.safeParse({ ...settings, apiVersion: '23.0' }).success, false);
+  assert.equal(whatsappCloudSettingsSchema.safeParse({ ...settings, phoneNumberId: 'not-an-id' }).success, false);
+  assert.equal(whatsappCloudSettingsSchema.safeParse({ ...settings, accessToken: 'secret', clearAccessToken: true }).success, false);
+});
+
+test('valida edicao e restauracao do perfil WhatsApp', () => {
+  assert.equal(whatsappProfileUpdateSchema.safeParse({ name: 'Conta Laboratorio', photoDataUrl: null }).success, true);
+  assert.equal(whatsappProfileUpdateSchema.safeParse({ name: 'Conta Laboratorio', photoDataUrl: 'data:image/webp;base64,aGVsbG8=' }).success, true);
+  assert.equal(whatsappProfileUpdateSchema.safeParse({ name: '', photoDataUrl: null }).success, false);
+  assert.equal(whatsappProfileUpdateSchema.safeParse({ name: 'Conta', photoDataUrl: 'https://example.com/foto.png' }).success, false);
+  assert.equal(whatsappProfileRestoreSchema.safeParse({ snapshotId: 'snapshot_1' }).success, true);
+  assert.equal(whatsappProfileRestoreSchema.safeParse({ snapshotId: '' }).success, false);
+});
+
+test('valida opcoes de privacidade do perfil WhatsApp', () => {
+  const settings = {
+    lastSeen: 'contacts',
+    online: 'match_last_seen',
+    profilePhoto: 'contacts',
+    status: 'contacts',
+    readReceipts: 'all',
+    groupsAdd: 'contacts'
+  };
+  assert.equal(whatsappPrivacySettingsSchema.safeParse(settings).success, true);
+  assert.equal(whatsappPrivacySettingsSchema.safeParse({ ...settings, online: 'contacts' }).success, false);
+  assert.equal(whatsappPrivacySettingsSchema.safeParse({ ...settings, readReceipts: 'contacts' }).success, false);
+  assert.equal(whatsappPrivacySettingsSchema.safeParse({ ...settings, groupsAdd: 'none' }).success, false);
 });
 
 test('valida valores simulados do sensor ficticio', () => {

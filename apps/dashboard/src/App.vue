@@ -40,11 +40,23 @@ type AdminUser = { id: string; email: string; displayName: string; isPlatformAdm
 type WorkspaceInvitation = { id: string; email: string; role: string; expiresAt: string; createdAt: string };
 type WhatsAppWebStatus = { state: 'disconnected' | 'connecting' | 'qr' | 'connected'; qrDataUrl: string | null; phoneNumber: string | null };
 type WhatsAppWebLogEntry = { id: number; createdAt: string; level: 'info' | 'success' | 'error'; event: string; details: string };
-type WhatsAppNotificationSettings = { senderName: string; onlineMessage: string; warningMessage: string; offlineMessage: string };
+type WhatsAppNotificationSettings = {
+  senderName: string; onlineMessage: string; warningMessage: string; offlineMessage: string;
+  onlineMediaType: 'none' | 'sticker' | 'image'; warningMediaType: 'none' | 'sticker' | 'image'; offlineMediaType: 'none' | 'sticker' | 'image';
+  onlineMediaId: string | null; warningMediaId: string | null; offlineMediaId: string | null;
+};
+type FavoriteWhatsAppMedia = { id: string; name: string; createdAt: string; animated: boolean; previewDataUrl: string; previewUrl: string };
+type WhatsAppCloudSettings = { connectionMode: 'qr' | 'cloud'; phoneNumberId: string; apiVersion: string; templateName: string; templateLanguage: string; accessTokenConfigured: boolean };
+type WhatsAppCloudConnectivity = { connectionMode: 'qr' | 'cloud'; verifiedName: string | null; displayPhoneNumber: string | null };
+type WhatsAppProfileSnapshot = { id: string; name: string; photoDataUrl: string | null; createdAt: string; isOriginal: boolean; restoredFromSnapshotId?: string };
+type WhatsAppProfile = { accountId: string; name: string; photoDataUrl: string | null; originalSnapshotId: string; history: WhatsAppProfileSnapshot[] };
+type WhatsAppPrivacySettings = { lastSeen: 'all' | 'contacts' | 'contact_blacklist' | 'none'; online: 'all' | 'match_last_seen'; profilePhoto: 'all' | 'contacts' | 'contact_blacklist' | 'none'; status: 'all' | 'contacts' | 'contact_blacklist' | 'none'; readReceipts: 'all' | 'none'; groupsAdd: 'all' | 'contacts' | 'contact_blacklist' };
 type EmailNotificationSettings = {
   smtpHost: string; smtpPort: number; smtpSecure: boolean; smtpUser: string; senderName: string; senderEmail: string;
   onlineMessage: string; warningMessage: string; offlineMessage: string; passwordConfigured: boolean;
 };
+type EmailNotificationDraft = Pick<EmailNotificationSettings, 'onlineMessage' | 'warningMessage' | 'offlineMessage'>;
+type EmailSmtpDraft = Pick<EmailNotificationSettings, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'senderName' | 'senderEmail'> & { passwordConfigured: boolean };
 type EmailLogEntry = { id: number; createdAt: string; level: 'info' | 'success' | 'error'; event: string; details: string };
 type Reading = { id: string; type: string; value: number; unit: string; alert: boolean; recordedAt: string };
 type Device = {
@@ -149,30 +161,69 @@ const isWhatsAppDashboardAdmin = computed(() => Boolean(user.value?.isBootstrapA
 const canManageUserAccounts = computed(() => Boolean(user.value?.isPlatformAdmin));
 const managementTab = ref<'overview' | 'users' | 'whatsapp' | 'email'>('overview');
 const userManagementTab = ref<'members' | 'accounts' | 'registration'>('members');
-const whatsappTab = ref<'log' | 'configuration' | 'connection'>('log');
-const emailTab = ref<'log' | 'configuration' | 'connection'>('log');
+const whatsappTab = ref<'log' | 'configuration' | 'notifications' | 'profile' | 'connection'>('log');
+const emailTab = ref<'log' | 'configuration' | 'notifications' | 'connection'>('log');
 const whatsappStatus = ref<WhatsAppWebStatus>({ state: 'disconnected', qrDataUrl: null, phoneNumber: null });
 const whatsappLogs = ref<WhatsAppWebLogEntry[]>([]);
 const whatsappSettings = ref<WhatsAppNotificationSettings>({
   senderName: 'LAB/MONITOR',
   onlineMessage: '{{laboratorio}}: {{aparelho}} voltou ao normal. Localização: {{localizacao}}.',
   warningMessage: '{{laboratorio}}: {{aparelho}} está em atenção. Localização: {{localizacao}}.',
-  offlineMessage: '{{laboratorio}}: {{aparelho}} está offline. Localização: {{localizacao}}.'
+  offlineMessage: '{{laboratorio}}: {{aparelho}} está offline. Localização: {{localizacao}}.',
+  onlineMediaType: 'sticker', warningMediaType: 'sticker', offlineMediaType: 'sticker',
+  onlineMediaId: 'default-success', warningMediaId: 'default-alert', offlineMediaId: 'default-alert'
 });
 const whatsappSettingsSaving = ref(false);
 const whatsappSettingsMessage = ref('');
-const whatsappPreviewMessage = computed(() => whatsappSettings.value.warningMessage.replace(/\{\{([^{}]+)\}\}/g, (_placeholder, key: string) => ({
-  laboratorio: whatsappSettings.value.senderName,
-  aparelho: 'Sensor de demonstração',
-  status: 'em atenção',
-  localizacao: 'Laboratório Central',
-  identificador: 'sensor-01'
-}[key] ?? '')));
+const favoriteWhatsAppMedia = ref<FavoriteWhatsAppMedia[]>([]);
+const favoriteWhatsAppMediaLoading = ref(false);
+const favoriteWhatsAppMediaError = ref('');
+const favoriteMediaName = ref('');
+const favoriteMediaDataUrl = ref('');
+const favoriteMediaSaving = ref(false);
+const whatsappCloudSettings = ref<WhatsAppCloudSettings>({ connectionMode: 'cloud', phoneNumberId: '', apiVersion: 'v23.0', templateName: 'lab_monitor_alarm', templateLanguage: 'pt_BR', accessTokenConfigured: false });
+const whatsappSavedConnectionMode = ref<'qr' | 'cloud'>('cloud');
+const whatsappCloudAccessToken = ref('');
+const whatsappCloudClearAccessToken = ref(false);
+const whatsappCloudSaving = ref(false);
+const whatsappCloudMessage = ref('');
+const whatsappCloudConnectivity = ref<WhatsAppCloudConnectivity | null>(null);
+const whatsappCloudConnectivityError = ref('');
+const whatsappCloudConnectivityTesting = ref(false);
+const whatsappProfile = ref<WhatsAppProfile | null>(null);
+const whatsappProfileDraftName = ref('');
+const whatsappProfileDraftPhoto = ref<string | null>(null);
+const whatsappProfilePhotoError = ref('');
+const whatsappProfileSaving = ref(false);
+const whatsappProfileRestoringId = ref<string | null>(null);
+const whatsappProfileMessage = ref('');
+const whatsappProfileError = ref('');
+const whatsappPrivacySettings = ref<WhatsAppPrivacySettings>({ lastSeen: 'contacts', online: 'match_last_seen', profilePhoto: 'contacts', status: 'contacts', readReceipts: 'all', groupsAdd: 'contacts' });
+const whatsappPrivacySaving = ref(false);
+const whatsappPrivacyMessage = ref('');
+const whatsappPrivacyError = ref('');
+const whatsappNotificationPreviews = computed(() => [
+  { id: 'online', label: t('Mensagem ao normalizar'), template: whatsappSettings.value.onlineMessage, status: 'normalizado', mediaType: whatsappSettings.value.onlineMediaType, mediaId: whatsappSettings.value.onlineMediaId },
+  { id: 'warning', label: t('Mensagem em atenção'), template: whatsappSettings.value.warningMessage, status: 'em atenção', mediaType: whatsappSettings.value.warningMediaType, mediaId: whatsappSettings.value.warningMediaId },
+  { id: 'offline', label: t('Mensagem offline'), template: whatsappSettings.value.offlineMessage, status: 'offline', mediaType: whatsappSettings.value.offlineMediaType, mediaId: whatsappSettings.value.offlineMediaId }
+].map((preview) => ({
+  ...preview,
+  media: favoriteWhatsAppMedia.value.find((media) => media.id === preview.mediaId) ?? null,
+  html: formatMessagePreview(interpolateNotificationTemplate(preview.template, whatsappSettings.value.senderName, preview.status))
+})));
 const emailSettings = ref<EmailNotificationSettings>({
   smtpHost: '', smtpPort: 587, smtpSecure: false, smtpUser: '', senderName: 'LAB/MONITOR', senderEmail: '',
   onlineMessage: '{{laboratorio}}: {{aparelho}} voltou ao normal. Localização: {{localizacao}}.',
   warningMessage: '{{laboratorio}}: {{aparelho}} está em atenção. Localização: {{localizacao}}.',
   offlineMessage: '{{laboratorio}}: {{aparelho}} está offline. Localização: {{localizacao}}.', passwordConfigured: false
+});
+const emailNotificationDraft = ref<EmailNotificationDraft>({
+  onlineMessage: emailSettings.value.onlineMessage,
+  warningMessage: emailSettings.value.warningMessage,
+  offlineMessage: emailSettings.value.offlineMessage
+});
+const emailSmtpDraft = ref<EmailSmtpDraft>({
+  smtpHost: '', smtpPort: 587, smtpSecure: false, smtpUser: '', senderName: 'LAB/MONITOR', senderEmail: '', passwordConfigured: false
 });
 const emailPassword = ref('');
 const emailClearPassword = ref(false);
@@ -183,13 +234,11 @@ const emailConnectionState = ref<'idle' | 'connected' | 'error'>('idle');
 const emailMessage = ref('');
 const emailError = ref('');
 let emailRefreshTimer: ReturnType<typeof setInterval> | undefined;
-const emailPreviewMessage = computed(() => emailSettings.value.warningMessage.replace(/\{\{([^{}]+)\}\}/g, (_placeholder, key: string) => ({
-  laboratorio: emailSettings.value.senderName,
-  aparelho: 'Sensor de demonstração',
-  status: 'em atenção',
-  localizacao: 'Laboratório Central',
-  identificador: 'sensor-01'
-}[key] ?? '')));
+const emailNotificationPreviews = computed(() => [
+  { id: 'online', label: t('Mensagem de e-mail ao normalizar'), template: emailNotificationDraft.value.onlineMessage, status: 'normalizado' },
+  { id: 'warning', label: t('Mensagem de e-mail em atenção'), template: emailNotificationDraft.value.warningMessage, status: 'em atenção' },
+  { id: 'offline', label: t('Mensagem de e-mail offline'), template: emailNotificationDraft.value.offlineMessage, status: 'offline' }
+].map((preview) => ({ ...preview, html: formatMessagePreview(interpolateNotificationTemplate(preview.template, emailSmtpDraft.value.senderName, preview.status)) })));
 const whatsappWorking = ref(false);
 const whatsappError = ref('');
 let whatsappRefreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -511,6 +560,22 @@ const englishText: Record<string, string> = {
   'Excluindo...': 'Deleting...',
   'WhatsApp API': 'WhatsApp API',
   'E-mail API': 'Email API',
+  'Configuração da Cloud API': 'Cloud API settings',
+  'Cloud API configurada': 'Cloud API configured',
+  'Cloud API não configurada': 'Cloud API not configured',
+  'Token de acesso da Meta': 'Meta access token',
+  'ID do número WhatsApp': 'WhatsApp phone number ID',
+  'Versão da API Graph': 'Graph API version',
+  'Nome do modelo aprovado': 'Approved template name',
+  'Idioma do modelo': 'Template language',
+  'Remover token salvo': 'Remove saved token',
+  'Desativa o envio pela Cloud API; a conexão QR continua independente.': 'Disables Cloud API sending; the QR connection remains independent.',
+  'Use o nome e idioma de um modelo aprovado no WhatsApp Manager. Para modelos diferentes de hello_world, o servidor envia três parâmetros: aparelho, estado e localização.': 'Use an approved template name and language from WhatsApp Manager. For templates other than hello_world, the server sends three parameters: device, status, and location.',
+  'Deixe em branco para manter o token salvo.': 'Leave blank to keep the saved token.',
+  'Configuração da Cloud API salva.': 'Cloud API settings saved.',
+  'Confira o token, o ID do número, a versão da API e os dados do modelo.': 'Check the token, phone number ID, API version, and template details.',
+  'Configure o ID do número antes de salvar o token de acesso.': 'Set the phone number ID before saving the access token.',
+  'Não foi possível salvar a configuração da Cloud API.': 'Could not save Cloud API settings.',
   'Servidor SMTP': 'SMTP server',
   'Porta SMTP': 'SMTP port',
   'Conexão segura (TLS)': 'Secure connection (TLS)',
@@ -524,6 +589,9 @@ const englishText: Record<string, string> = {
   'Mensagem de e-mail em atenção': 'Email warning message',
   'Mensagem de e-mail offline': 'Email offline message',
   'Prévia do e-mail em atenção': 'Email warning preview',
+  'Assunto': 'Subject',
+  'agora': 'now',
+  'Notificação automática do sistema de monitoramento.': 'Automated monitoring system notification.',
   'Salvar configuração de e-mail': 'Save email settings',
   'Configuração de e-mail salva.': 'Email settings saved.',
   'As mensagens são enviadas em HTML e texto simples. A senha SMTP é cifrada no servidor.': 'Messages are sent as HTML and plain text. The SMTP password is encrypted on the server.',
@@ -548,16 +616,159 @@ const englishText: Record<string, string> = {
   'Prévia da mensagem em atenção': 'Warning message preview',
   'Salvar configuração': 'Save settings',
   'Configuração salva.': 'Settings saved.',
+  'Modelos de notificação salvos.': 'Notification templates saved.',
   'Use {{laboratorio}}, {{aparelho}}, {{status}}, {{localizacao}} e {{identificador}} como campos dinâmicos.': 'Use {{laboratorio}}, {{aparelho}}, {{status}}, {{localizacao}} and {{identificador}} as dynamic fields.',
   'Estas mensagens são usadas pela conexão via QR. O nome não altera o perfil da conta WhatsApp.': 'These messages are used by the QR connection. The name does not change the WhatsApp account profile.',
   'Apagar log': 'Clear log',
   'Tem certeza que deseja apagar todo o log do WhatsApp?': 'Are you sure you want to clear the entire WhatsApp log?',
   'Log': 'Log',
   'Conexão': 'Connection',
+  'Perfil da conta WhatsApp': 'WhatsApp account profile',
+  'Nome do perfil WhatsApp': 'WhatsApp profile name',
+  'Foto do perfil WhatsApp': 'WhatsApp profile photo',
+  'Escolher foto': 'Choose photo',
+  'Remover foto atual': 'Remove current photo',
+  'Histórico de perfis': 'Profile history',
+  'Perfil original': 'Original profile',
+  'Versão salva': 'Saved version',
+  'Restaurar esta versão': 'Restore this version',
+  'O perfil original será restaurado automaticamente ao desconectar a conta.': 'The original profile will be restored automatically when disconnecting the account.',
+  'As fotos e nomes salvos continuam disponíveis para restauração.': 'Saved photos and names remain available for restoration.',
+  'Conecte a conta via QR para editar o perfil.': 'Connect the account via QR to edit its profile.',
+  'Perfil WhatsApp atualizado e guardado no histórico.': 'WhatsApp profile updated and saved to history.',
+  'Perfil original restaurado. Ele também será restaurado automaticamente ao desconectar.': 'Original profile restored. It will also be restored automatically when disconnecting.',
+  'Versão do perfil restaurada.': 'Profile version restored.',
+  'Não foi possível carregar o perfil da conta WhatsApp.': 'Could not load the WhatsApp account profile.',
+  'Não foi possível atualizar o perfil WhatsApp.': 'Could not update the WhatsApp profile.',
+  'Não foi possível restaurar essa versão do perfil.': 'Could not restore this profile version.',
+  'Privacidade da conta': 'Account privacy',
+  'Quem pode ver meu visto por último': 'Who can see my last seen',
+  'Quem pode ver quando estou online': 'Who can see when I am online',
+  'Quem pode ver minha foto': 'Who can see my profile photo',
+  'Quem pode ver minhas atualizações de Status': 'Who can see my Status updates',
+  'Confirmações de leitura': 'Read receipts',
+  'Quem pode me adicionar em grupos': 'Who can add me to groups',
+  'Todos': 'Everyone',
+  'Meus contatos': 'My contacts',
+  'Meus contatos, exceto...': 'My contacts except...',
+  'Ninguém': 'Nobody',
+  'Igual ao visto por último': 'Same as last seen',
+  'Salvar privacidade': 'Save privacy settings',
+  'Ativadas': 'On',
+  'Desativadas': 'Off',
+  'Figurinha por alerta': 'Sticker per alert',
+  'Figurinhas são enviadas pelo WhatsApp Web via QR; a Cloud API deste projeto usa modelos aprovados.': 'Stickers are sent through WhatsApp Web via QR; this project’s Cloud API uses approved templates.',
+  'Mídia de cada alerta': 'Media for each alert',
+  'Mídia': 'Media',
+  'Mídia favorita': 'Favorite media',
+  'Selecione uma mídia': 'Select media',
+  'Biblioteca de mídia': 'Media library',
+  'Adicione GIF, WebP, PNG ou JPEG. GIFs e WebPs animados são detectados automaticamente e aparecem em movimento na prévia.': 'Add GIF, WebP, PNG, or JPEG. Animated GIFs and WebPs are detected automatically and play in the preview.',
+  'Nome da mídia': 'Media name',
+  'Ex.: Alerta do sensor': 'E.g. Sensor alert',
+  'Mídia selecionada': 'Media selected',
+  'Escolher mídia': 'Choose media',
+  'Carregando mídias...': 'Loading media...',
+  'Nenhuma mídia favorita.': 'No favorite media.',
+  'Imagem': 'Image',
+  'Figurinha': 'Sticker',
+  'Imagem e figurinha são enviadas pelo WhatsApp Web via QR; a Cloud API deste projeto usa modelos aprovados.': 'Images and stickers are sent through WhatsApp Web via QR; this project’s Cloud API uses approved templates.',
+  'Somente texto': 'Text only',
+  'Imagem com mensagem': 'Image with message',
+  'Selecione uma figurinha': 'Select a sticker',
+  'Selecione uma imagem': 'Select an image',
+  'Imagens favoritas': 'Favorite images',
+  'Ao escolher imagem, o texto do alerta vai como legenda na mesma mensagem.': 'When an image is selected, the alert text is sent as its caption in the same message.',
+  'Nome da imagem': 'Image name',
+  'Ex.: Foto do sensor': 'E.g. Sensor photo',
+  'Imagem selecionada': 'Image selected',
+  'Nenhuma imagem favorita.': 'No favorite images.',
+  'Canvas indisponível.': 'Canvas is unavailable.',
+  'A imagem não pôde ser reduzida para o limite permitido.': 'The image could not be reduced to the allowed size.',
+  'Não foi possível carregar as imagens favoritas.': 'Could not load favorite images.',
+  'Não foi possível salvar a imagem favorita.': 'Could not save the favorite image.',
+  'Informe um nome e uma imagem compatível.': 'Enter a name and a compatible image.',
+  'Envie uma imagem compatível.': 'Upload a compatible image.',
+  'A imagem importada excede o limite de 600 KB.': 'The imported image exceeds the 600 KB limit.',
+  'Não foi possível ler a imagem enviada.': 'Could not read the uploaded image.',
+  'A imagem excede 1 MB após a otimização.': 'The image exceeds 1 MB after optimization.',
+  'Uma das imagens selecionadas não está na biblioteca.': 'One of the selected images is not in the library.',
+  'A imagem selecionada não está na biblioteca.': 'The selected image is not in the library.',
+  'Uma das figurinhas selecionadas não está na biblioteca de favoritos.': 'One of the selected stickers is not in the favorites library.',
+  'A figurinha selecionada não está na biblioteca.': 'The selected sticker is not in the library.',
+  'Imagem adicionada aos favoritos.': 'Image added to favorites.',
+  'Sem figurinha': 'No sticker',
+  'Figurinhas favoritas': 'Favorite stickers',
+  'Os stickers ficam salvos no servidor para reutilização. Importe WebP estáticos ou animados; o servidor normaliza para 512 × 512, com até 100 KB estáticos ou 500 KB e 10 segundos animados.': 'Stickers are stored on the server for reuse. Import static or animated WebP; the server normalizes them to 512 × 512, up to 100 KB static or 500 KB and 10 seconds animated.',
+  'A imagem será enviada junto com o texto como uma única mensagem.': 'The image and text will be sent together as one message.',
+  'A figurinha é enviada antes da mensagem de texto.': 'The sticker is sent before the text message.',
+  'Nome da figurinha': 'Sticker name',
+  'Ex.: Alerta vermelho': 'E.g. Red alert',
+  'WebP selecionado': 'WebP selected',
+  'Escolher figurinha WebP': 'Choose WebP sticker',
+  'Adicionar aos favoritos': 'Add to favorites',
+  'Figurinha adicionada aos favoritos.': 'Sticker added to favorites.',
+  'Animada': 'Animated',
+  'Estática': 'Static',
+  'Carregando figurinhas...': 'Loading stickers...',
+  'Nenhuma figurinha favorita.': 'No favorite stickers.',
+  'Escolha uma figurinha WebP de até 500 KB.': 'Choose a WebP sticker up to 500 KB.',
+  'O arquivo WebP deve ter até 500 KB.': 'The WebP file must be at most 500 KB.',
+  'O arquivo enviado não é uma figurinha WebP válida.': 'The uploaded file is not a valid WebP sticker.',
+  'A figurinha excede as dimensões ou o número de quadros permitidos.': 'The sticker exceeds the allowed dimensions or frame count.',
+  'A animação deve durar no máximo 10 segundos.': 'The animation must be at most 10 seconds long.',
+  'A figurinha animada excede 500 KB após a conversão.': 'The animated sticker exceeds 500 KB after conversion.',
+  'A figurinha estática excede 100 KB após a conversão.': 'The static sticker exceeds 100 KB after conversion.',
+  'Não foi possível normalizar todos os quadros da figurinha.': 'Could not normalize all sticker frames.',
+  'Normalização': 'Recovery',
+  'Atenção': 'Warning',
+  'As alterações de privacidade são aplicadas diretamente à conta WhatsApp e permanecem mesmo depois de desconectar o Baileys.': 'Privacy changes are applied directly to the WhatsApp account and remain after disconnecting Baileys.',
+  'A regra de exceções pode ser selecionada aqui, mas a lista de pessoas excluídas é gerenciada no próprio WhatsApp.': 'The exception rule can be selected here, but the list of excluded people is managed in WhatsApp itself.',
+  'Privacidade do WhatsApp atualizada.': 'WhatsApp privacy settings updated.',
+  'Não foi possível carregar as opções de privacidade.': 'Could not load privacy settings.',
+  'Não foi possível salvar as opções de privacidade.': 'Could not save privacy settings.',
+  'As opções de privacidade informadas são inválidas.': 'The supplied privacy settings are invalid.',
+  'Conecte a conta WhatsApp via QR para gerenciar a privacidade.': 'Connect the WhatsApp account via QR to manage privacy.',
+  'Conecte a conta WhatsApp via QR para alterar a privacidade.': 'Connect the WhatsApp account via QR to change privacy.',
+  'Desconexão cancelada: ': 'Disconnect cancelled: ',
+  'Falha ao salvar perfil original': 'Failed to save original profile',
+  'Falha ao restaurar perfil original': 'Failed to restore original profile',
+  'Não foi possível ler o nome original do perfil WhatsApp. A edição foi bloqueada para preservar a restauração.': 'Could not read the original WhatsApp profile name. Editing was blocked to preserve restoration.',
+  'Não foi possível baixar a foto atual da conta WhatsApp.': 'Could not download the current WhatsApp account photo.',
+  'O histórico do perfil do WhatsApp está inválido.': 'The WhatsApp profile history is invalid.',
+  'A versão selecionada do perfil não foi encontrada.': 'The selected profile version was not found.',
+  'A conta WhatsApp ainda não está conectada.': 'The WhatsApp account is not connected yet.',
+  'Conecte a conta WhatsApp via QR para gerenciar o perfil.': 'Connect the WhatsApp account via QR to manage its profile.',
+  'Conecte a conta WhatsApp via QR para restaurar o perfil.': 'Connect the WhatsApp account via QR to restore its profile.',
   'Últimos 100 eventos em memória; o histórico é limpo quando a API reinicia.': 'Latest 100 in-memory events; history clears when the API restarts.',
   'Nenhum evento registrado.': 'No events recorded.',
   'O log não armazena o conteúdo das mensagens nem números completos.': 'The log does not store message content or full phone numbers.',
   'Conexão WhatsApp Web': 'WhatsApp Web connection',
+  'Teste de conectividade do canal ativo': 'Active channel connectivity test',
+  'Cloud API operacional': 'Cloud API operational',
+  'WhatsApp Web conectado': 'WhatsApp Web connected',
+  'Falha no teste de conexão': 'Connection test failed',
+  'Cloud API não testada': 'Cloud API not tested',
+  'Sessão QR não testada': 'QR session not tested',
+  'Conexão não testada': 'Connection not tested',
+  'O teste consulta os dados do número na Meta Graph API sem enviar mensagens.': 'The test checks the number details through Meta Graph API without sending messages.',
+  'Configure e salve o token e o ID do número antes de testar.': 'Configure and save the token and phone number ID before testing.',
+  'Salve o canal selecionado na aba Configuração antes de testar.': 'Save the selected channel in Settings before testing.',
+  'Conecte o WhatsApp via QR code na aba Configuração antes de testar.': 'Connect WhatsApp via QR code in Settings before testing.',
+  'O teste verifica se a sessão vinculada via QR está conectada.': 'The test checks whether the linked QR session is connected.',
+  'Seleção pendente. Salve a configuração para ativar este canal.': 'Selection pending. Save settings to activate this channel.',
+  'Somente o canal selecionado e salvo será usado para enviar notificações. O outro canal não fará fallback.': 'Only the selected and saved channel will send notifications. There is no fallback to the other channel.',
+  'Canal ativo para notificações': 'Active notification channel',
+  'WhatsApp Web via QR (API particular)': 'WhatsApp Web via QR (private API)',
+  'Usa a sessão vinculada por QR para enviar os alertas.': 'Uses the QR-linked session to send alerts.',
+  'WhatsApp Cloud API': 'WhatsApp Cloud API',
+  'Usa o token e o número configurados na Meta.': 'Uses the token and number configured in Meta.',
+  'Conexão via QR code': 'QR code connection',
+  'Salve a seleção para ativar este canal.': 'Save the selection to activate this channel.',
+  'Salvar seleção do canal': 'Save channel selection',
+  'Testar conexão': 'Test connection',
+  'Selecione e salve WhatsApp Web via QR como canal ativo antes de conectar.': 'Select and save WhatsApp Web via QR as the active channel before connecting.',
+  'Testando conexão...': 'Testing connection...',
   'Desconectado': 'Disconnected',
   'Conectando': 'Connecting',
   'Aguardando leitura do QR code': 'Waiting for QR code scan',
@@ -594,6 +805,40 @@ const englishText: Record<string, string> = {
 
 function t(text: string) {
   return language.value === 'en' ? englishText[text] ?? text : text;
+}
+
+function interpolateNotificationTemplate(template: string, senderName: string, status: string) {
+  const values: Record<string, string> = {
+    laboratorio: senderName || 'LAB/MONITOR',
+    aparelho: 'Sensor de demonstração',
+    status,
+    localizacao: 'Laboratório Central',
+    identificador: 'sensor-01'
+  };
+  return template.replace(/\{\{([^{}]+)\}\}/g, (_placeholder, key: string) => values[key] ?? '');
+}
+
+function formatMessagePreview(message: string) {
+  const replacements: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const codeSegments: string[] = [];
+  let formatted = message.replace(/[&<>"']/g, (character) => replacements[character] ?? character);
+  formatted = formatted.replace(/```([\s\S]*?)```|`([^`\n]+)`/g, (_match, block: string | undefined, inline: string | undefined) => {
+    const codeHtml = block !== undefined
+      ? `<pre class="message-preview-code"><code>${block}</code></pre>`
+      : `<code class="message-preview-inline-code">${inline}</code>`;
+    const token = `MESSAGEPREVIEWCODE${codeSegments.length}TOKEN`;
+    codeSegments.push(codeHtml);
+    return token;
+  });
+  formatted = formatted
+    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
+    .replace(/_([^_\n]+)_/g, '<em>$1</em>')
+    .replace(/~([^~\n]+)~/g, '<del>$1</del>')
+    .replace(/^&gt; ?([^\n]+)/gm, '<blockquote class="message-preview-quote">$1</blockquote>')
+    .replace(/^- ([^\n]+)/gm, '&bull; $1')
+    .replace(/^(\d+)\. ([^\n]+)/gm, '$1. $2')
+    .replace(/\r?\n/g, '<br>');
+  return formatted.replace(/MESSAGEPREVIEWCODE(\d+)TOKEN/g, (_token, index: string) => codeSegments[Number(index)] ?? '');
 }
 
 function workspaceRoleLabel(role: string) {
@@ -1033,6 +1278,214 @@ async function loadWhatsAppSettings() {
   }
 }
 
+async function loadFavoriteWhatsAppMedia() {
+  if (!isWhatsAppDashboardAdmin.value) return;
+  favoriteWhatsAppMediaLoading.value = true;
+  favoriteWhatsAppMediaError.value = '';
+  try {
+    const result = await api<{ media: FavoriteWhatsAppMedia[] }>('/api/admin/whatsapp/media');
+    favoriteWhatsAppMedia.value = result.media;
+  } catch (error) {
+    favoriteWhatsAppMediaError.value = error instanceof Error ? error.message : 'Não foi possível carregar a biblioteca de mídia.';
+  } finally {
+    favoriteWhatsAppMediaLoading.value = false;
+  }
+}
+
+async function refreshWhatsAppNotifications() {
+  await Promise.all([loadWhatsAppSettings(), loadFavoriteWhatsAppMedia(), loadWhatsAppCloudSettings()]);
+}
+
+async function selectFavoriteWhatsAppMedia(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  favoriteWhatsAppMediaError.value = '';
+  if (!file) return;
+  if (!['image/gif', 'image/webp', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 1024 * 1024) {
+    favoriteWhatsAppMediaError.value = 'Escolha GIF, WebP, PNG ou JPEG de até 1 MB.';
+    input.value = '';
+    return;
+  }
+  try {
+    favoriteMediaDataUrl.value = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Não foi possível ler o arquivo de mídia.'));
+      reader.onerror = () => reject(new Error('Não foi possível ler o arquivo de mídia.'));
+      reader.readAsDataURL(file);
+    });
+    if (favoriteMediaDataUrl.value.length > 1_400_000) throw new Error('A mídia excede o limite de upload.');
+    favoriteMediaName.value = file.name.replace(/\.[^.]+$/, '').slice(0, 48);
+  } catch (error) {
+    favoriteWhatsAppMediaError.value = error instanceof Error ? error.message : 'Não foi possível ler o arquivo de mídia.';
+  } finally {
+    input.value = '';
+  }
+}
+
+async function addFavoriteWhatsAppMedia() {
+  if (!favoriteMediaName.value.trim() || !favoriteMediaDataUrl.value) return;
+  favoriteMediaSaving.value = true;
+  favoriteWhatsAppMediaError.value = '';
+  try {
+    const result = await api<{ media: FavoriteWhatsAppMedia[] }>('/api/admin/whatsapp/media', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ name: favoriteMediaName.value, mediaDataUrl: favoriteMediaDataUrl.value })
+    });
+    favoriteWhatsAppMedia.value = result.media;
+    favoriteMediaName.value = '';
+    favoriteMediaDataUrl.value = '';
+    whatsappSettingsMessage.value = 'Mídia adicionada aos favoritos.';
+  } catch (error) {
+    favoriteWhatsAppMediaError.value = error instanceof Error ? error.message : 'Não foi possível salvar a mídia favorita.';
+  } finally {
+    favoriteMediaSaving.value = false;
+  }
+}
+
+function setWhatsAppAlertMediaType(alert: 'online' | 'warning' | 'offline', event: Event) {
+  const mediaType = (event.target as HTMLSelectElement).value as 'none' | 'sticker' | 'image';
+  const firstMediaId = favoriteWhatsAppMedia.value[0]?.id ?? null;
+  const settings = whatsappSettings.value;
+  if (alert === 'online') {
+    settings.onlineMediaType = mediaType;
+    settings.onlineMediaId = mediaType === 'none' ? null : settings.onlineMediaId ?? firstMediaId;
+  } else if (alert === 'warning') {
+    settings.warningMediaType = mediaType;
+    settings.warningMediaId = mediaType === 'none' ? null : settings.warningMediaId ?? firstMediaId;
+  } else {
+    settings.offlineMediaType = mediaType;
+    settings.offlineMediaId = mediaType === 'none' ? null : settings.offlineMediaId ?? firstMediaId;
+  }
+}
+
+function canSaveWhatsAppNotificationSettings() {
+  return (['online', 'warning', 'offline'] as const).every((alert) =>
+    whatsappSettings.value[`${alert}MediaType`] === 'none' || Boolean(whatsappSettings.value[`${alert}MediaId`])
+  );
+}
+
+async function loadWhatsAppProfile() {
+  if (!isWhatsAppDashboardAdmin.value) return;
+  whatsappProfileError.value = '';
+  try {
+    const result = await api<{ profile: WhatsAppProfile }>('/api/admin/whatsapp/profile');
+    whatsappProfile.value = result.profile;
+    whatsappProfileDraftName.value = result.profile.name;
+    whatsappProfileDraftPhoto.value = result.profile.photoDataUrl;
+    whatsappProfilePhotoError.value = '';
+    whatsappProfileMessage.value = '';
+    await loadWhatsAppPrivacySettings();
+  } catch (error) {
+    whatsappProfileError.value = error instanceof Error ? error.message : 'Não foi possível carregar o perfil da conta WhatsApp.';
+  }
+}
+
+async function loadWhatsAppPrivacySettings() {
+  try {
+    const result = await api<{ settings: WhatsAppPrivacySettings }>('/api/admin/whatsapp/profile/privacy');
+    whatsappPrivacySettings.value = result.settings;
+    whatsappPrivacyError.value = '';
+    whatsappPrivacyMessage.value = '';
+  } catch (error) {
+    whatsappPrivacyError.value = error instanceof Error ? error.message : 'Não foi possível carregar as opções de privacidade.';
+  }
+}
+
+async function saveWhatsAppPrivacySettings() {
+  whatsappPrivacySaving.value = true;
+  whatsappPrivacyError.value = '';
+  whatsappPrivacyMessage.value = '';
+  try {
+    const result = await api<{ settings: WhatsAppPrivacySettings }>('/api/admin/whatsapp/profile/privacy', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify(whatsappPrivacySettings.value)
+    });
+    whatsappPrivacySettings.value = result.settings;
+    whatsappPrivacyMessage.value = 'Privacidade do WhatsApp atualizada.';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Não foi possível salvar as opções de privacidade.';
+    await loadWhatsAppPrivacySettings();
+    whatsappPrivacyError.value = message;
+  } finally {
+    whatsappPrivacySaving.value = false;
+  }
+}
+
+async function saveWhatsAppProfile() {
+  whatsappProfileSaving.value = true;
+  whatsappProfileError.value = '';
+  whatsappProfileMessage.value = '';
+  try {
+    const result = await api<{ profile: WhatsAppProfile }>('/api/admin/whatsapp/profile', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ name: whatsappProfileDraftName.value, photoDataUrl: whatsappProfileDraftPhoto.value })
+    });
+    whatsappProfile.value = result.profile;
+    whatsappProfileDraftName.value = result.profile.name;
+    whatsappProfileDraftPhoto.value = result.profile.photoDataUrl;
+    whatsappProfileMessage.value = 'Perfil WhatsApp atualizado e guardado no histórico.';
+  } catch (error) {
+    whatsappProfileError.value = error instanceof Error ? error.message : 'Não foi possível atualizar o perfil WhatsApp.';
+  } finally {
+    whatsappProfileSaving.value = false;
+  }
+}
+
+async function restoreWhatsAppProfileSnapshot(snapshot: WhatsAppProfileSnapshot) {
+  if (whatsappProfileRestoringId.value) return;
+  whatsappProfileRestoringId.value = snapshot.id;
+  whatsappProfileError.value = '';
+  whatsappProfileMessage.value = '';
+  try {
+    const result = await api<{ profile: WhatsAppProfile }>('/api/admin/whatsapp/profile/restore', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ snapshotId: snapshot.id })
+    });
+    whatsappProfile.value = result.profile;
+    whatsappProfileDraftName.value = result.profile.name;
+    whatsappProfileDraftPhoto.value = result.profile.photoDataUrl;
+    whatsappProfileMessage.value = snapshot.isOriginal
+      ? 'Perfil original restaurado. Ele também será restaurado automaticamente ao desconectar.'
+      : 'Versão do perfil restaurada.';
+  } catch (error) {
+    whatsappProfileError.value = error instanceof Error ? error.message : 'Não foi possível restaurar essa versão do perfil.';
+  } finally {
+    whatsappProfileRestoringId.value = null;
+  }
+}
+
+async function selectWhatsAppProfilePhoto(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  whatsappProfilePhotoError.value = '';
+  if (!file) return;
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024) {
+    whatsappProfilePhotoError.value = 'Escolha uma imagem JPG, PNG ou WebP de até 8 MB.';
+    input.value = '';
+    return;
+  }
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas indisponível.');
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    whatsappProfileDraftPhoto.value = canvas.toDataURL('image/webp', 0.72);
+  } catch {
+    whatsappProfilePhotoError.value = 'Não foi possível processar essa imagem.';
+  } finally {
+    input.value = '';
+  }
+}
+
 async function saveWhatsAppSettings() {
   whatsappSettingsSaving.value = true;
   whatsappSettingsMessage.value = '';
@@ -1044,11 +1497,82 @@ async function saveWhatsAppSettings() {
       body: JSON.stringify(whatsappSettings.value)
     });
     whatsappSettings.value = result.settings;
-    whatsappSettingsMessage.value = 'Configuração salva.';
+    whatsappSettingsMessage.value = 'Modelos de notificação salvos.';
   } catch (error) {
     whatsappError.value = error instanceof Error ? error.message : 'Não foi possível salvar as configurações do WhatsApp.';
   } finally {
     whatsappSettingsSaving.value = false;
+  }
+}
+
+async function loadWhatsAppCloudSettings() {
+  if (!isWhatsAppDashboardAdmin.value) return;
+  try {
+    const result = await api<{ settings: WhatsAppCloudSettings }>('/api/admin/whatsapp/cloud-settings');
+    whatsappCloudSettings.value = result.settings;
+    whatsappSavedConnectionMode.value = result.settings.connectionMode;
+    whatsappCloudAccessToken.value = '';
+    whatsappCloudClearAccessToken.value = false;
+    whatsappCloudMessage.value = '';
+    whatsappCloudConnectivity.value = null;
+    whatsappCloudConnectivityError.value = '';
+    whatsappError.value = '';
+  } catch (error) {
+    whatsappError.value = error instanceof Error ? error.message : 'Falha ao carregar a configuração da Cloud API.';
+  }
+}
+
+async function saveWhatsAppCloudSettings() {
+  whatsappCloudSaving.value = true;
+  whatsappCloudMessage.value = '';
+  whatsappError.value = '';
+  try {
+    const { accessTokenConfigured: _accessTokenConfigured, ...settings } = whatsappCloudSettings.value;
+    const result = await api<{ settings: WhatsAppCloudSettings }>('/api/admin/whatsapp/cloud-settings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({
+        ...settings,
+        accessToken: whatsappCloudAccessToken.value,
+        clearAccessToken: whatsappCloudClearAccessToken.value
+      })
+    });
+    whatsappCloudSettings.value = result.settings;
+    whatsappSavedConnectionMode.value = result.settings.connectionMode;
+    whatsappCloudAccessToken.value = '';
+    whatsappCloudClearAccessToken.value = false;
+    whatsappCloudMessage.value = 'Configuração da Cloud API salva.';
+    whatsappCloudConnectivity.value = null;
+    whatsappCloudConnectivityError.value = '';
+  } catch (error) {
+    whatsappError.value = error instanceof Error ? error.message : 'Não foi possível salvar a configuração da Cloud API.';
+  } finally {
+    whatsappCloudSaving.value = false;
+  }
+}
+
+async function loadWhatsAppConfiguration() {
+  await Promise.all([loadWhatsAppCloudSettings(), loadWhatsAppStatus()]);
+}
+
+function clearWhatsAppConnectivityTest() {
+  whatsappCloudConnectivity.value = null;
+  whatsappCloudConnectivityError.value = '';
+}
+
+async function testWhatsAppCloudConnection() {
+  whatsappCloudConnectivityTesting.value = true;
+  whatsappCloudConnectivity.value = null;
+  whatsappCloudConnectivityError.value = '';
+  try {
+    whatsappCloudConnectivity.value = await api<WhatsAppCloudConnectivity>('/api/admin/whatsapp/test-connection', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value }
+    });
+  } catch (error) {
+    whatsappCloudConnectivityError.value = error instanceof Error ? error.message : 'Não foi possível testar a conexão com a Cloud API.';
+  } finally {
+    whatsappCloudConnectivityTesting.value = false;
   }
 }
 
@@ -1128,6 +1652,20 @@ async function loadEmailSettings() {
   try {
     const result = await api<{ settings: EmailNotificationSettings }>('/api/admin/email/settings');
     emailSettings.value = result.settings;
+    emailNotificationDraft.value = {
+      onlineMessage: result.settings.onlineMessage,
+      warningMessage: result.settings.warningMessage,
+      offlineMessage: result.settings.offlineMessage
+    };
+    emailSmtpDraft.value = {
+      smtpHost: result.settings.smtpHost,
+      smtpPort: result.settings.smtpPort,
+      smtpSecure: result.settings.smtpSecure,
+      smtpUser: result.settings.smtpUser,
+      senderName: result.settings.senderName,
+      senderEmail: result.settings.senderEmail,
+      passwordConfigured: result.settings.passwordConfigured
+    };
     emailPassword.value = '';
     emailClearPassword.value = false;
     emailError.value = '';
@@ -1141,18 +1679,53 @@ async function saveEmailSettings() {
   emailMessage.value = '';
   emailError.value = '';
   try {
-    const { passwordConfigured: _passwordConfigured, ...settings } = emailSettings.value;
+    const { passwordConfigured: _passwordConfigured, ...savedSettings } = emailSettings.value;
+    const { passwordConfigured: _smtpPasswordConfigured, ...smtpSettings } = emailSmtpDraft.value;
     const result = await api<{ settings: EmailNotificationSettings }>('/api/admin/email/settings', {
       method: 'POST',
       headers: { 'X-CSRF-Token': csrfToken.value },
-      body: JSON.stringify({ ...settings, smtpPassword: emailPassword.value, clearSmtpPassword: emailClearPassword.value })
+      body: JSON.stringify({ ...savedSettings, ...smtpSettings, smtpPassword: emailPassword.value, clearSmtpPassword: emailClearPassword.value })
     });
     emailSettings.value = result.settings;
+    emailSmtpDraft.value = {
+      smtpHost: result.settings.smtpHost,
+      smtpPort: result.settings.smtpPort,
+      smtpSecure: result.settings.smtpSecure,
+      smtpUser: result.settings.smtpUser,
+      senderName: result.settings.senderName,
+      senderEmail: result.settings.senderEmail,
+      passwordConfigured: result.settings.passwordConfigured
+    };
     emailPassword.value = '';
     emailClearPassword.value = false;
     emailMessage.value = 'Configuração de e-mail salva.';
   } catch (error) {
     emailError.value = error instanceof Error ? error.message : 'Não foi possível salvar a configuração de e-mail.';
+  } finally {
+    emailSettingsSaving.value = false;
+  }
+}
+
+async function saveEmailNotificationDraft() {
+  emailSettingsSaving.value = true;
+  emailMessage.value = '';
+  emailError.value = '';
+  try {
+    const { passwordConfigured: _passwordConfigured, ...savedSettings } = emailSettings.value;
+    const result = await api<{ settings: EmailNotificationSettings }>('/api/admin/email/settings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken.value },
+      body: JSON.stringify({ ...savedSettings, ...emailNotificationDraft.value, smtpPassword: '', clearSmtpPassword: false })
+    });
+    emailSettings.value = result.settings;
+    emailNotificationDraft.value = {
+      onlineMessage: result.settings.onlineMessage,
+      warningMessage: result.settings.warningMessage,
+      offlineMessage: result.settings.offlineMessage
+    };
+    emailMessage.value = 'Modelos de notificação salvos.';
+  } catch (error) {
+    emailError.value = error instanceof Error ? error.message : 'Não foi possível salvar os modelos de notificação.';
   } finally {
     emailSettingsSaving.value = false;
   }
@@ -1892,13 +2465,26 @@ watch([managementTab, whatsappTab], ([tab, subtab]) => {
   if (whatsappRefreshTimer) clearInterval(whatsappRefreshTimer);
   whatsappRefreshTimer = undefined;
   if (tab === 'whatsapp' && isWhatsAppDashboardAdmin.value) {
-    void loadWhatsAppStatus();
-    void loadWhatsAppLogs();
-    if (subtab === 'configuration') void loadWhatsAppSettings();
-    else whatsappRefreshTimer = setInterval(() => {
-      if (subtab === 'connection') void loadWhatsAppStatus();
-      else void loadWhatsAppLogs();
-    }, 2000);
+    if (subtab === 'configuration') {
+      void loadWhatsAppConfiguration();
+      whatsappRefreshTimer = setInterval(() => void loadWhatsAppStatus(), 2000);
+    } else if (subtab === 'notifications') {
+      void refreshWhatsAppNotifications();
+    } else if (subtab === 'connection') {
+      void Promise.all([loadWhatsAppCloudSettings(), loadWhatsAppStatus()]);
+    } else if (subtab === 'profile') {
+      void (async () => {
+        await loadWhatsAppStatus();
+        if (whatsappStatus.value.state === 'connected') await loadWhatsAppProfile();
+        else {
+          whatsappProfile.value = null;
+          whatsappProfileError.value = '';
+        }
+      })();
+    } else if (subtab === 'log') {
+      void loadWhatsAppLogs();
+      whatsappRefreshTimer = setInterval(() => void loadWhatsAppLogs(), 2000);
+    }
   }
 });
 
@@ -2243,12 +2829,14 @@ onUnmounted(() => {
         </div>
         <div v-else-if="managementTab === 'whatsapp' && isWhatsAppDashboardAdmin" class="whatsapp-management-panel">
           <div class="page-heading">
-            <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h1>{{ t('WhatsApp API') }}</h1><p class="heading-sub">{{ t(whatsappTab === 'log' ? 'Log de eventos' : whatsappTab === 'configuration' ? 'Configuração' : 'Conexão WhatsApp Web') }}</p></div>
-            <button class="secondary-button" type="button" :disabled="whatsappWorking" :aria-label="t('Atualizar')" :title="t('Atualizar')" @click="whatsappTab === 'log' ? loadWhatsAppLogs() : loadWhatsAppStatus()"><RefreshCw :size="16" /></button>
+            <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h1>{{ t('WhatsApp API') }}</h1><p class="heading-sub">{{ t(whatsappTab === 'log' ? 'Log de eventos' : whatsappTab === 'configuration' ? 'Configuração da Cloud API' : whatsappTab === 'notifications' ? 'Notificações' : whatsappTab === 'profile' ? 'Perfil da conta WhatsApp' : 'Teste de conectividade do canal ativo') }}</p></div>
+            <button class="secondary-button" type="button" :disabled="whatsappWorking || whatsappCloudSaving || whatsappCloudConnectivityTesting || whatsappProfileSaving || favoriteMediaSaving" :aria-label="t('Atualizar')" :title="t('Atualizar')" @click="whatsappTab === 'log' ? loadWhatsAppLogs() : whatsappTab === 'configuration' ? loadWhatsAppConfiguration() : whatsappTab === 'notifications' ? refreshWhatsAppNotifications() : whatsappTab === 'profile' ? loadWhatsAppProfile() : testWhatsAppCloudConnection()"><RefreshCw :size="16" /></button>
           </div>
           <nav class="settings-tabs whatsapp-tabs" role="tablist" :aria-label="t('WhatsApp API')">
             <button id="whatsappLogTab" class="settings-tab" :class="{ active: whatsappTab === 'log' }" type="button" role="tab" :aria-selected="whatsappTab === 'log'" aria-controls="whatsappLogPanel" @click="whatsappTab = 'log'"><List :size="15" />{{ t('Log') }}</button>
             <button id="whatsappConfigurationTab" class="settings-tab" :class="{ active: whatsappTab === 'configuration' }" type="button" role="tab" :aria-selected="whatsappTab === 'configuration'" aria-controls="whatsappConfigurationPanel" @click="whatsappTab = 'configuration'"><Settings :size="15" />{{ t('Configuração') }}</button>
+            <button id="whatsappNotificationsTab" class="settings-tab" :class="{ active: whatsappTab === 'notifications' }" type="button" role="tab" :aria-selected="whatsappTab === 'notifications'" aria-controls="whatsappNotificationsPanel" @click="whatsappTab = 'notifications'"><Bell :size="15" />{{ t('Notificações') }}</button>
+            <button id="whatsappProfileTab" class="settings-tab" :class="{ active: whatsappTab === 'profile' }" type="button" role="tab" :aria-selected="whatsappTab === 'profile'" aria-controls="whatsappProfilePanel" @click="whatsappTab = 'profile'"><Pencil :size="15" />{{ t('Perfil') }}</button>
             <button id="whatsappConnectionTab" class="settings-tab" :class="{ active: whatsappTab === 'connection' }" type="button" role="tab" :aria-selected="whatsappTab === 'connection'" aria-controls="whatsappConnectionPanel" @click="whatsappTab = 'connection'"><MessageCircle :size="15" />{{ t('Conexão') }}</button>
           </nav>
           <div v-if="whatsappError" class="notice-error" role="alert"><AlertTriangle :size="17" />{{ t(whatsappError) }}</div>
@@ -2270,20 +2858,40 @@ onUnmounted(() => {
             <div v-else class="whatsapp-log-empty"><List :size="20" /><strong>{{ t('Nenhum evento registrado.') }}</strong><span>{{ t('O log não armazena o conteúdo das mensagens nem números completos.') }}</span></div>
           </section>
           <section v-else-if="whatsappTab === 'configuration'" id="whatsappConfigurationPanel" class="whatsapp-config-section" role="tabpanel" aria-labelledby="whatsappConfigurationTab">
-            <div class="whatsapp-config-form">
-              <label class="whatsapp-config-field" for="whatsappSenderName"><span>{{ t('Nome exibido nas mensagens') }}</span><input id="whatsappSenderName" v-model="whatsappSettings.senderName" class="settings-input" type="text" maxlength="80" /></label>
-              <MessageTemplateEditor id="whatsappOnlineMessage" v-model="whatsappSettings.onlineMessage" :label="t('Mensagem ao normalizar')" :maxlength="500" />
-              <MessageTemplateEditor id="whatsappWarningMessage" v-model="whatsappSettings.warningMessage" :label="t('Mensagem em atenção')" :maxlength="500" />
-              <MessageTemplateEditor id="whatsappOfflineMessage" v-model="whatsappSettings.offlineMessage" :label="t('Mensagem offline')" :maxlength="500" />
-              <p class="settings-help">{{ t('Use &#123;&#123;laboratorio&#125;&#125;, &#123;&#123;aparelho&#125;&#125;, &#123;&#123;status&#125;&#125;, &#123;&#123;localizacao&#125;&#125; e &#123;&#123;identificador&#125;&#125; como campos dinâmicos.') }}</p>
-              <aside class="whatsapp-message-preview"><strong>{{ t('Prévia da mensagem em atenção') }}</strong><p>{{ whatsappPreviewMessage }}</p></aside>
-              <p class="settings-help">{{ t('Estas mensagens são usadas pela conexão via QR. O nome não altera o perfil da conta WhatsApp.') }}</p>
-              <p v-if="whatsappSettingsMessage" class="success-message" role="status">{{ t(whatsappSettingsMessage) }}</p>
-              <button class="primary-button settings-save-button" type="button" :disabled="whatsappSettingsSaving" @click="saveWhatsAppSettings"><LoaderCircle v-if="whatsappSettingsSaving" class="spin" :size="16" />{{ whatsappSettingsSaving ? t('Salvando...') : t('Salvar configuração') }}</button>
+            <fieldset class="whatsapp-channel-choice">
+              <legend>{{ t('Canal ativo para notificações') }}</legend>
+              <div class="whatsapp-channel-options" role="radiogroup" :aria-label="t('Canal ativo para notificações')">
+                <label class="whatsapp-channel-option" :class="{ selected: whatsappCloudSettings.connectionMode === 'qr' }">
+                  <input v-model="whatsappCloudSettings.connectionMode" type="radio" name="whatsappConnectionMode" value="qr" @change="clearWhatsAppConnectivityTest" />
+                  <span><strong>{{ t('WhatsApp Web via QR (API particular)') }}</strong><small>{{ t('Usa a sessão vinculada por QR para enviar os alertas.') }}</small></span>
+                </label>
+                <label class="whatsapp-channel-option" :class="{ selected: whatsappCloudSettings.connectionMode === 'cloud' }">
+                  <input v-model="whatsappCloudSettings.connectionMode" type="radio" name="whatsappConnectionMode" value="cloud" @change="clearWhatsAppConnectivityTest" />
+                  <span><strong>{{ t('WhatsApp Cloud API') }}</strong><small>{{ t('Usa o token e o número configurados na Meta.') }}</small></span>
+                </label>
+              </div>
+              <p class="settings-help">{{ t('Somente o canal selecionado e salvo será usado para enviar notificações. O outro canal não fará fallback.') }}</p>
+              <p v-if="whatsappCloudSettings.connectionMode !== whatsappSavedConnectionMode" class="whatsapp-manager-warning" role="status">{{ t('Seleção pendente. Salve a configuração para ativar este canal.') }}</p>
+            </fieldset>
+            <div v-if="whatsappCloudSettings.connectionMode === 'cloud'" class="whatsapp-config-form">
+              <div class="whatsapp-status-line">
+                <span class="whatsapp-status-dot" :class="whatsappCloudSettings.accessTokenConfigured ? 'whatsapp-status-connected' : 'whatsapp-status-disconnected'"></span>
+                <strong>{{ t(whatsappCloudSettings.accessTokenConfigured ? 'Cloud API configurada' : 'Cloud API não configurada') }}</strong>
+              </div>
+              <label class="whatsapp-config-field" for="whatsappCloudAccessToken"><span>{{ t('Token de acesso da Meta') }}</span><input id="whatsappCloudAccessToken" v-model="whatsappCloudAccessToken" class="settings-input" type="password" autocomplete="new-password" :disabled="whatsappCloudClearAccessToken" :placeholder="whatsappCloudSettings.accessTokenConfigured ? t('Deixe em branco para manter o token salvo.') : ''" @input="whatsappCloudClearAccessToken = false" /></label>
+              <label v-if="whatsappCloudSettings.accessTokenConfigured" class="theme-setting email-secure-toggle" for="whatsappCloudClearToken"><span class="theme-setting-icon"><LockKeyhole :size="17" /></span><span class="theme-setting-copy"><strong>{{ t('Remover token salvo') }}</strong><small>{{ t('Desativa o envio pela Cloud API; a conexão QR continua independente.') }}</small></span><input id="whatsappCloudClearToken" v-model="whatsappCloudClearAccessToken" class="theme-switch" type="checkbox" @change="whatsappCloudAccessToken = ''" /></label>
+              <label class="whatsapp-config-field" for="whatsappPhoneNumberId"><span>{{ t('ID do número WhatsApp') }}</span><input id="whatsappPhoneNumberId" v-model="whatsappCloudSettings.phoneNumberId" class="settings-input" type="text" inputmode="numeric" autocomplete="off" placeholder="123456789012345" /></label>
+              <div class="email-config-grid whatsapp-cloud-config-grid">
+                <label class="whatsapp-config-field" for="whatsappGraphApiVersion"><span>{{ t('Versão da API Graph') }}</span><input id="whatsappGraphApiVersion" v-model="whatsappCloudSettings.apiVersion" class="settings-input" type="text" placeholder="v23.0" /></label>
+                <label class="whatsapp-config-field" for="whatsappTemplateLanguage"><span>{{ t('Idioma do modelo') }}</span><input id="whatsappTemplateLanguage" v-model="whatsappCloudSettings.templateLanguage" class="settings-input" type="text" placeholder="pt_BR" /></label>
+              </div>
+              <label class="whatsapp-config-field" for="whatsappTemplateName"><span>{{ t('Nome do modelo aprovado') }}</span><input id="whatsappTemplateName" v-model="whatsappCloudSettings.templateName" class="settings-input" type="text" autocomplete="off" placeholder="lab_monitor_alarm" /></label>
+              <p class="settings-help">{{ t('Use o nome e idioma de um modelo aprovado no WhatsApp Manager. Para modelos diferentes de hello_world, o servidor envia três parâmetros: aparelho, estado e localização.') }}</p>
+              <p v-if="whatsappCloudMessage" class="success-message" role="status">{{ t(whatsappCloudMessage) }}</p>
+              <button class="primary-button settings-save-button" type="button" :disabled="whatsappCloudSaving" @click="saveWhatsAppCloudSettings"><LoaderCircle v-if="whatsappCloudSaving" class="spin" :size="16" />{{ whatsappCloudSaving ? t('Salvando...') : t('Salvar configuração') }}</button>
             </div>
-          </section>
-          <section v-else id="whatsappConnectionPanel" class="whatsapp-manager-section" role="tabpanel" aria-labelledby="whatsappConnectionTab">
-            <div class="whatsapp-manager-copy">
+            <div v-else class="whatsapp-config-form whatsapp-qr-configuration">
+              <div class="settings-section-heading"><h3>{{ t('Conexão via QR code') }}</h3></div>
               <div class="whatsapp-status-line">
                 <span class="whatsapp-status-dot" :class="`whatsapp-status-${whatsappStatus.state}`"></span>
                 <strong>{{ t(whatsappStatus.state === 'connected' ? 'Conectado' : whatsappStatus.state === 'qr' ? 'Aguardando leitura do QR code' : whatsappStatus.state === 'connecting' ? 'Conectando' : 'Desconectado') }}</strong>
@@ -2292,28 +2900,151 @@ onUnmounted(() => {
               <p v-if="whatsappStatus.state === 'qr'" class="whatsapp-manager-help">{{ t('Escaneie o QR code com o WhatsApp da conta que enviará os alertas.') }}</p>
               <p class="whatsapp-manager-help">{{ t('Os alertas serão enviados somente a usuários que ativaram WhatsApp no perfil.') }}</p>
               <p class="whatsapp-manager-warning">{{ t('Este conector não é oficial. O WhatsApp pode desconectar ou bloquear contas que automatizam mensagens.') }}</p>
-              <button v-if="whatsappStatus.state === 'disconnected'" class="primary-button whatsapp-action" type="button" :disabled="whatsappWorking" @click="connectWhatsApp">
+              <button v-if="whatsappStatus.state === 'disconnected'" class="primary-button whatsapp-action" type="button" :disabled="whatsappWorking || whatsappCloudSettings.connectionMode !== whatsappSavedConnectionMode" @click="connectWhatsApp">
                 <LoaderCircle v-if="whatsappWorking" class="spin" :size="16" /><MessageCircle v-else :size="16" />{{ t('Iniciar conexão') }}
               </button>
               <button v-else class="secondary-button whatsapp-action" type="button" :disabled="whatsappWorking" @click="disconnectWhatsApp">
                 <LoaderCircle v-if="whatsappWorking" class="spin" :size="16" /><X v-else :size="16" />{{ t('Desconectar conta') }}
               </button>
+              <div v-if="whatsappStatus.state === 'qr'" class="whatsapp-qr-panel">
+                <img v-if="whatsappStatus.qrDataUrl" class="whatsapp-qr-image" :src="whatsappStatus.qrDataUrl" :alt="t('Escaneie o QR code com o WhatsApp da conta que enviará os alertas.')" />
+                <div v-else class="whatsapp-qr-placeholder"><LoaderCircle class="spin" :size="24" /></div>
+              </div>
+              <div v-else-if="whatsappStatus.state === 'connecting'" class="whatsapp-qr-placeholder"><LoaderCircle class="spin" :size="24" /></div>
+              <p v-if="whatsappCloudSettings.connectionMode !== whatsappSavedConnectionMode" class="success-message" role="status">{{ t('Salve a seleção para ativar este canal.') }}</p>
+              <button v-if="whatsappCloudSettings.connectionMode !== whatsappSavedConnectionMode" class="primary-button settings-save-button" type="button" :disabled="whatsappCloudSaving" @click="saveWhatsAppCloudSettings"><LoaderCircle v-if="whatsappCloudSaving" class="spin" :size="16" />{{ whatsappCloudSaving ? t('Salvando...') : t('Salvar seleção do canal') }}</button>
             </div>
-            <div v-if="whatsappStatus.state === 'qr'" class="whatsapp-qr-panel">
-              <img v-if="whatsappStatus.qrDataUrl" class="whatsapp-qr-image" :src="whatsappStatus.qrDataUrl" :alt="t('Escaneie o QR code com o WhatsApp da conta que enviará os alertas.')" />
-              <div v-else class="whatsapp-qr-placeholder"><LoaderCircle class="spin" :size="24" /></div>
+          </section>
+          <section v-else-if="whatsappTab === 'notifications'" id="whatsappNotificationsPanel" class="whatsapp-config-section" role="tabpanel" aria-labelledby="whatsappNotificationsTab">
+            <div class="whatsapp-config-form">
+              <label class="whatsapp-config-field" for="whatsappSenderName"><span>{{ t('Nome exibido nas mensagens') }}</span><input id="whatsappSenderName" v-model="whatsappSettings.senderName" class="settings-input" type="text" maxlength="80" /></label>
+              <MessageTemplateEditor id="whatsappOnlineMessage" v-model="whatsappSettings.onlineMessage" :label="t('Mensagem ao normalizar')" :maxlength="500" />
+              <MessageTemplateEditor id="whatsappWarningMessage" v-model="whatsappSettings.warningMessage" :label="t('Mensagem em atenção')" :maxlength="500" />
+              <MessageTemplateEditor id="whatsappOfflineMessage" v-model="whatsappSettings.offlineMessage" :label="t('Mensagem offline')" :maxlength="500" />
+              <fieldset class="whatsapp-sticker-assignments" :disabled="whatsappSavedConnectionMode !== 'qr'">
+                <legend>{{ t('Mídia de cada alerta') }}</legend>
+                <p v-if="whatsappSavedConnectionMode !== 'qr'" class="whatsapp-manager-warning">{{ t('Imagem e figurinha são enviadas pelo WhatsApp Web via QR; a Cloud API deste projeto usa modelos aprovados.') }}</p>
+                <div class="whatsapp-alert-media-grid">
+                  <div class="whatsapp-alert-media-setting">
+                    <label class="whatsapp-config-field" for="onlineAlertMediaType"><span>{{ t('Mídia') }}</span><select id="onlineAlertMediaType" v-model="whatsappSettings.onlineMediaType" class="settings-input select-input" @change="setWhatsAppAlertMediaType('online', $event)"><option value="none">{{ t('Somente texto') }}</option><option value="image">{{ t('Imagem com mensagem') }}</option><option value="sticker">{{ t('Figurinha') }}</option></select></label>
+                    <label v-if="whatsappSettings.onlineMediaType !== 'none'" class="whatsapp-config-field"><span>{{ t('Mídia favorita') }}</span><select v-model="whatsappSettings.onlineMediaId" class="settings-input select-input"><option :value="null">{{ t('Selecione uma mídia') }}</option><option v-for="media in favoriteWhatsAppMedia" :key="media.id" :value="media.id">{{ media.name }}{{ media.animated ? ` (${t('Animada')})` : '' }}</option></select></label>
+                  </div>
+                  <div class="whatsapp-alert-media-setting">
+                    <label class="whatsapp-config-field" for="warningAlertMediaType"><span>{{ t('Mídia') }}</span><select id="warningAlertMediaType" v-model="whatsappSettings.warningMediaType" class="settings-input select-input" @change="setWhatsAppAlertMediaType('warning', $event)"><option value="none">{{ t('Somente texto') }}</option><option value="image">{{ t('Imagem com mensagem') }}</option><option value="sticker">{{ t('Figurinha') }}</option></select></label>
+                    <label v-if="whatsappSettings.warningMediaType !== 'none'" class="whatsapp-config-field"><span>{{ t('Mídia favorita') }}</span><select v-model="whatsappSettings.warningMediaId" class="settings-input select-input"><option :value="null">{{ t('Selecione uma mídia') }}</option><option v-for="media in favoriteWhatsAppMedia" :key="media.id" :value="media.id">{{ media.name }}{{ media.animated ? ` (${t('Animada')})` : '' }}</option></select></label>
+                  </div>
+                  <div class="whatsapp-alert-media-setting">
+                    <label class="whatsapp-config-field" for="offlineAlertMediaType"><span>{{ t('Mídia') }}</span><select id="offlineAlertMediaType" v-model="whatsappSettings.offlineMediaType" class="settings-input select-input" @change="setWhatsAppAlertMediaType('offline', $event)"><option value="none">{{ t('Somente texto') }}</option><option value="image">{{ t('Imagem com mensagem') }}</option><option value="sticker">{{ t('Figurinha') }}</option></select></label>
+                    <label v-if="whatsappSettings.offlineMediaType !== 'none'" class="whatsapp-config-field"><span>{{ t('Mídia favorita') }}</span><select v-model="whatsappSettings.offlineMediaId" class="settings-input select-input"><option :value="null">{{ t('Selecione uma mídia') }}</option><option v-for="media in favoriteWhatsAppMedia" :key="media.id" :value="media.id">{{ media.name }}{{ media.animated ? ` (${t('Animada')})` : '' }}</option></select></label>
+                  </div>
+                </div>
+              </fieldset>
+              <section class="whatsapp-sticker-library" aria-labelledby="whatsappMediaLibraryTitle">
+                <div class="settings-section-heading"><h3 id="whatsappMediaLibraryTitle">{{ t('Biblioteca de mídia') }}</h3><span>{{ favoriteWhatsAppMedia.length }}</span></div>
+                <p class="settings-help">{{ t('Adicione GIF, WebP, PNG ou JPEG. GIFs e WebPs animados são detectados automaticamente e aparecem em movimento na prévia.') }}</p>
+                <div class="whatsapp-sticker-import">
+                  <label class="whatsapp-config-field" for="favoriteMediaName"><span>{{ t('Nome da mídia') }}</span><input id="favoriteMediaName" v-model="favoriteMediaName" class="settings-input" type="text" maxlength="48" :placeholder="t('Ex.: Alerta do sensor')" /></label>
+                  <label class="secondary-button whatsapp-sticker-file" for="favoriteMediaFile"><ImagePlus :size="15" />{{ favoriteMediaDataUrl ? t('Mídia selecionada') : t('Escolher mídia') }}</label>
+                  <input id="favoriteMediaFile" class="visually-hidden" type="file" accept="image/gif,image/webp,image/png,image/jpeg" @change="selectFavoriteWhatsAppMedia" />
+                  <button class="primary-button" type="button" :disabled="favoriteMediaSaving || !favoriteMediaName.trim() || !favoriteMediaDataUrl" @click="addFavoriteWhatsAppMedia"><LoaderCircle v-if="favoriteMediaSaving" class="spin" :size="15" /><Plus v-else :size="15" />{{ favoriteMediaSaving ? t('Salvando...') : t('Adicionar aos favoritos') }}</button>
+                </div>
+                <img v-if="favoriteMediaDataUrl" class="whatsapp-selected-media-preview" :src="favoriteMediaDataUrl" :alt="favoriteMediaName" />
+                <p v-if="favoriteWhatsAppMediaError" class="error-message" role="alert">{{ t(favoriteWhatsAppMediaError) }}</p>
+                <div v-if="favoriteWhatsAppMediaLoading" class="workspace-device-empty">{{ t('Carregando mídias...') }}</div>
+                <div v-else-if="favoriteWhatsAppMedia.length" class="whatsapp-sticker-library-grid">
+                  <article v-for="media in favoriteWhatsAppMedia" :key="media.id" class="whatsapp-sticker-favorite">
+                    <img :src="media.previewUrl" :alt="media.name" />
+                    <strong>{{ media.name }}</strong>
+                    <small>{{ media.animated ? t('Animada') : t('Estática') }}</small>
+                  </article>
+                </div>
+                <div v-else class="workspace-device-empty">{{ t('Nenhuma mídia favorita.') }}</div>
+              </section>
+              <p class="settings-help">{{ t('Use &#123;&#123;laboratorio&#125;&#125;, &#123;&#123;aparelho&#125;&#125;, &#123;&#123;status&#125;&#125;, &#123;&#123;localizacao&#125;&#125; e &#123;&#123;identificador&#125;&#125; como campos dinâmicos.') }}</p>
+              <div class="notification-preview-list whatsapp-notification-previews">
+                <article v-for="preview in whatsappNotificationPreviews" :key="preview.id" class="whatsapp-notification-preview">
+                  <h3>{{ t(preview.label) }}</h3>
+                  <div class="whatsapp-chat-preview"><img v-if="preview.media && preview.mediaType === 'sticker'" class="whatsapp-message-sticker-preview" :src="preview.media.previewUrl" :alt="preview.media.name" /><div class="whatsapp-preview-bubble"><img v-if="preview.media && preview.mediaType === 'image'" class="whatsapp-message-image-preview" :src="preview.media.previewUrl" :alt="preview.media.name" /><div v-html="preview.html"></div></div><small>{{ t('agora') }}</small></div>
+                </article>
+              </div>
+              <p class="settings-help">{{ t('Estas mensagens são usadas pela conexão via QR. O nome não altera o perfil da conta WhatsApp.') }}</p>
+              <p v-if="whatsappSettingsMessage" class="success-message" role="status">{{ t(whatsappSettingsMessage) }}</p>
+              <button class="primary-button settings-save-button" type="button" :disabled="whatsappSettingsSaving || !canSaveWhatsAppNotificationSettings()" @click="saveWhatsAppSettings"><LoaderCircle v-if="whatsappSettingsSaving" class="spin" :size="16" />{{ whatsappSettingsSaving ? t('Salvando...') : t('Salvar notificações') }}</button>
             </div>
-            <div v-else-if="whatsappStatus.state === 'connecting'" class="whatsapp-qr-placeholder"><LoaderCircle class="spin" :size="24" /></div>
+          </section>
+          <section v-else-if="whatsappTab === 'profile'" id="whatsappProfilePanel" class="whatsapp-config-section whatsapp-profile-panel" role="tabpanel" aria-labelledby="whatsappProfileTab">
+            <template v-if="whatsappStatus.state === 'connected' && whatsappProfile">
+              <div class="whatsapp-config-form">
+                <p class="settings-help">{{ t('O perfil original será restaurado automaticamente ao desconectar a conta.') }} {{ t('As fotos e nomes salvos continuam disponíveis para restauração.') }}</p>
+                <label class="whatsapp-config-field" for="whatsappProfileName"><span>{{ t('Nome do perfil WhatsApp') }}</span><input id="whatsappProfileName" v-model="whatsappProfileDraftName" class="settings-input" type="text" maxlength="80" autocomplete="off" /></label>
+                <div class="whatsapp-profile-photo-editor">
+                  <span class="whatsapp-profile-photo-preview"><img v-if="whatsappProfileDraftPhoto" :src="whatsappProfileDraftPhoto" :alt="t('Foto do perfil WhatsApp')" /><span v-else>{{ whatsappProfileDraftName.slice(0, 1).toUpperCase() || '?' }}</span></span>
+                  <div class="whatsapp-profile-photo-actions">
+                    <strong>{{ t('Foto do perfil WhatsApp') }}</strong>
+                    <div class="whatsapp-profile-photo-buttons">
+                      <label class="secondary-button" for="whatsappProfilePhotoFile"><ImagePlus :size="15" />{{ t('Escolher foto') }}</label>
+                      <input id="whatsappProfilePhotoFile" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" @change="selectWhatsAppProfilePhoto" />
+                      <button v-if="whatsappProfileDraftPhoto" class="text-button" type="button" @click="whatsappProfileDraftPhoto = null">{{ t('Remover foto atual') }}</button>
+                    </div>
+                  </div>
+                </div>
+                <p v-if="whatsappProfilePhotoError" class="error-message" role="alert">{{ t(whatsappProfilePhotoError) }}</p>
+                <p v-if="whatsappProfileError" class="error-message" role="alert">{{ t(whatsappProfileError) }}</p>
+                <p v-if="whatsappProfileMessage" class="success-message" role="status">{{ t(whatsappProfileMessage) }}</p>
+                <button class="primary-button settings-save-button" type="button" :disabled="whatsappProfileSaving || !whatsappProfileDraftName.trim()" @click="saveWhatsAppProfile"><LoaderCircle v-if="whatsappProfileSaving" class="spin" :size="16" />{{ whatsappProfileSaving ? t('Salvando...') : t('Salvar perfil') }}</button>
+              </div>
+              <div class="whatsapp-privacy-settings">
+                <div class="settings-section-heading"><h3>{{ t('Privacidade da conta') }}</h3></div>
+                <p class="settings-help">{{ t('As alterações de privacidade são aplicadas diretamente à conta WhatsApp e permanecem mesmo depois de desconectar o Baileys.') }}</p>
+                <p class="settings-help">{{ t('A regra de exceções pode ser selecionada aqui, mas a lista de pessoas excluídas é gerenciada no próprio WhatsApp.') }}</p>
+                <label class="whatsapp-config-field" for="whatsappPrivacyLastSeen"><span>{{ t('Quem pode ver meu visto por último') }}</span><select id="whatsappPrivacyLastSeen" v-model="whatsappPrivacySettings.lastSeen" class="settings-input select-input"><option value="all">{{ t('Todos') }}</option><option value="contacts">{{ t('Meus contatos') }}</option><option value="contact_blacklist">{{ t('Meus contatos, exceto...') }}</option><option value="none">{{ t('Ninguém') }}</option></select></label>
+                <label class="whatsapp-config-field" for="whatsappPrivacyOnline"><span>{{ t('Quem pode ver quando estou online') }}</span><select id="whatsappPrivacyOnline" v-model="whatsappPrivacySettings.online" class="settings-input select-input"><option value="all">{{ t('Todos') }}</option><option value="match_last_seen">{{ t('Igual ao visto por último') }}</option></select></label>
+                <label class="whatsapp-config-field" for="whatsappPrivacyPhoto"><span>{{ t('Quem pode ver minha foto') }}</span><select id="whatsappPrivacyPhoto" v-model="whatsappPrivacySettings.profilePhoto" class="settings-input select-input"><option value="all">{{ t('Todos') }}</option><option value="contacts">{{ t('Meus contatos') }}</option><option value="contact_blacklist">{{ t('Meus contatos, exceto...') }}</option><option value="none">{{ t('Ninguém') }}</option></select></label>
+                <label class="whatsapp-config-field" for="whatsappPrivacyStatus"><span>{{ t('Quem pode ver minhas atualizações de Status') }}</span><select id="whatsappPrivacyStatus" v-model="whatsappPrivacySettings.status" class="settings-input select-input"><option value="all">{{ t('Todos') }}</option><option value="contacts">{{ t('Meus contatos') }}</option><option value="contact_blacklist">{{ t('Meus contatos, exceto...') }}</option><option value="none">{{ t('Ninguém') }}</option></select></label>
+                <label class="whatsapp-config-field" for="whatsappPrivacyReadReceipts"><span>{{ t('Confirmações de leitura') }}</span><select id="whatsappPrivacyReadReceipts" v-model="whatsappPrivacySettings.readReceipts" class="settings-input select-input"><option value="all">{{ t('Ativadas') }}</option><option value="none">{{ t('Desativadas') }}</option></select></label>
+                <label class="whatsapp-config-field" for="whatsappPrivacyGroups"><span>{{ t('Quem pode me adicionar em grupos') }}</span><select id="whatsappPrivacyGroups" v-model="whatsappPrivacySettings.groupsAdd" class="settings-input select-input"><option value="all">{{ t('Todos') }}</option><option value="contacts">{{ t('Meus contatos') }}</option><option value="contact_blacklist">{{ t('Meus contatos, exceto...') }}</option></select></label>
+                <p v-if="whatsappPrivacyError" class="error-message" role="alert">{{ t(whatsappPrivacyError) }}</p>
+                <p v-if="whatsappPrivacyMessage" class="success-message" role="status">{{ t(whatsappPrivacyMessage) }}</p>
+                <button class="primary-button settings-save-button" type="button" :disabled="whatsappPrivacySaving" @click="saveWhatsAppPrivacySettings"><LoaderCircle v-if="whatsappPrivacySaving" class="spin" :size="16" />{{ whatsappPrivacySaving ? t('Salvando...') : t('Salvar privacidade') }}</button>
+              </div>
+              <div class="whatsapp-profile-history">
+                <div class="settings-section-heading"><h3>{{ t('Histórico de perfis') }}</h3><span>{{ whatsappProfile.history.length }}</span></div>
+                <article v-for="snapshot in whatsappProfile.history" :key="snapshot.id" class="whatsapp-profile-snapshot">
+                  <img v-if="snapshot.photoDataUrl" class="whatsapp-profile-snapshot-photo" :src="snapshot.photoDataUrl" :alt="''" />
+                  <span v-else class="whatsapp-profile-snapshot-photo whatsapp-profile-snapshot-fallback">{{ snapshot.name.slice(0, 1).toUpperCase() }}</span>
+                  <div class="whatsapp-profile-snapshot-copy"><strong>{{ snapshot.name }}</strong><small>{{ snapshot.isOriginal ? t('Perfil original') : t('Versão salva') }} · {{ new Date(snapshot.createdAt).toLocaleString(dateLocale) }}</small></div>
+                  <button class="secondary-button whatsapp-profile-restore" type="button" :disabled="whatsappProfileRestoringId !== null || snapshot.id === whatsappProfile.history[0]?.id" @click="restoreWhatsAppProfileSnapshot(snapshot)"><LoaderCircle v-if="whatsappProfileRestoringId === snapshot.id" class="spin" :size="14" /><RefreshCw v-else :size="14" />{{ t('Restaurar esta versão') }}</button>
+                </article>
+              </div>
+            </template>
+            <div v-else class="whatsapp-log-empty"><MessageCircle :size="22" /><strong>{{ t('Conecte a conta via QR para editar o perfil.') }}</strong><span>{{ t('Conecte a conta WhatsApp via QR para gerenciar o perfil.') }}</span></div>
+          </section>
+          <section v-else id="whatsappConnectionPanel" class="whatsapp-manager-section" role="tabpanel" aria-labelledby="whatsappConnectionTab">
+            <div class="whatsapp-manager-copy">
+              <div class="whatsapp-status-line"><span class="whatsapp-status-dot" :class="whatsappCloudConnectivity ? 'whatsapp-status-connected' : whatsappCloudConnectivityError ? 'whatsapp-status-qr' : 'whatsapp-status-disconnected'"></span><strong>{{ t(whatsappCloudConnectivity ? whatsappCloudConnectivity.connectionMode === 'qr' ? 'WhatsApp Web conectado' : 'Cloud API operacional' : whatsappCloudConnectivityError ? 'Falha no teste de conexão' : whatsappCloudSettings.connectionMode === 'qr' ? 'Sessão QR não testada' : 'Cloud API não testada') }}</strong></div>
+              <p class="whatsapp-manager-help">{{ t(whatsappCloudSettings.connectionMode === 'qr' ? 'O teste verifica se a sessão vinculada via QR está conectada.' : 'O teste consulta os dados do número na Meta Graph API sem enviar mensagens.') }}</p>
+              <p v-if="whatsappCloudConnectivity?.verifiedName" class="whatsapp-phone">{{ whatsappCloudConnectivity.verifiedName }}</p>
+              <p v-if="whatsappCloudConnectivity?.displayPhoneNumber" class="whatsapp-manager-help">{{ whatsappCloudConnectivity.displayPhoneNumber }}</p>
+              <p v-if="whatsappCloudConnectivityError" class="error-message" role="alert">{{ t(whatsappCloudConnectivityError) }}</p>
+              <p v-if="whatsappCloudSettings.connectionMode !== whatsappSavedConnectionMode" class="whatsapp-manager-warning">{{ t('Salve o canal selecionado na aba Configuração antes de testar.') }}</p>
+              <p v-else-if="whatsappCloudSettings.connectionMode === 'cloud' && (!whatsappCloudSettings.accessTokenConfigured || !whatsappCloudSettings.phoneNumberId)" class="whatsapp-manager-warning">{{ t('Configure e salve o token e o ID do número antes de testar.') }}</p>
+              <p v-else-if="whatsappCloudSettings.connectionMode === 'qr' && whatsappStatus.state !== 'connected'" class="whatsapp-manager-warning">{{ t('Conecte o WhatsApp via QR code na aba Configuração antes de testar.') }}</p>
+              <button class="primary-button whatsapp-action" type="button" :disabled="whatsappCloudConnectivityTesting || whatsappCloudSettings.connectionMode !== whatsappSavedConnectionMode || (whatsappCloudSettings.connectionMode === 'cloud' && (!whatsappCloudSettings.accessTokenConfigured || !whatsappCloudSettings.phoneNumberId)) || (whatsappCloudSettings.connectionMode === 'qr' && whatsappStatus.state !== 'connected')" @click="testWhatsAppCloudConnection">
+                <LoaderCircle v-if="whatsappCloudConnectivityTesting" class="spin" :size="16" /><RefreshCw v-else :size="16" />{{ whatsappCloudConnectivityTesting ? t('Testando conexão...') : t('Testar conexão') }}
+              </button>
+            </div>
+            <div class="email-connection-mark"><MessageCircle :size="36" /></div>
           </section>
         </div>
         <div v-else-if="managementTab === 'email' && isWhatsAppDashboardAdmin" class="whatsapp-management-panel email-management-panel">
           <div class="page-heading">
-            <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h1>{{ t('E-mail API') }}</h1><p class="heading-sub">{{ t(emailTab === 'log' ? 'Log de eventos' : emailTab === 'configuration' ? 'Configuração de e-mail' : 'Conexão SMTP') }}</p></div>
+            <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h1>{{ t('E-mail API') }}</h1><p class="heading-sub">{{ t(emailTab === 'log' ? 'Log de eventos' : emailTab === 'configuration' ? 'Configuração de e-mail' : emailTab === 'notifications' ? 'Notificações' : 'Conexão SMTP') }}</p></div>
             <button class="secondary-button" type="button" :disabled="emailWorking || emailSettingsSaving" :aria-label="t('Atualizar')" :title="t('Atualizar')" @click="emailTab === 'log' ? loadEmailLogs() : loadEmailSettings()"><RefreshCw :size="16" /></button>
           </div>
           <nav class="settings-tabs whatsapp-tabs" role="tablist" :aria-label="t('E-mail API')">
             <button id="emailLogTab" class="settings-tab" :class="{ active: emailTab === 'log' }" type="button" role="tab" :aria-selected="emailTab === 'log'" aria-controls="emailLogPanel" @click="emailTab = 'log'"><List :size="15" />{{ t('Log') }}</button>
             <button id="emailConfigurationTab" class="settings-tab" :class="{ active: emailTab === 'configuration' }" type="button" role="tab" :aria-selected="emailTab === 'configuration'" aria-controls="emailConfigurationPanel" @click="emailTab = 'configuration'"><Settings :size="15" />{{ t('Configuração') }}</button>
+            <button id="emailNotificationsTab" class="settings-tab" :class="{ active: emailTab === 'notifications' }" type="button" role="tab" :aria-selected="emailTab === 'notifications'" aria-controls="emailNotificationsPanel" @click="emailTab = 'notifications'"><Bell :size="15" />{{ t('Notificações') }}</button>
             <button id="emailConnectionTab" class="settings-tab" :class="{ active: emailTab === 'connection' }" type="button" role="tab" :aria-selected="emailTab === 'connection'" aria-controls="emailConnectionPanel" @click="emailTab = 'connection'"><Mail :size="15" />{{ t('Conexão') }}</button>
           </nav>
           <div v-if="emailError" class="notice-error" role="alert"><AlertTriangle :size="17" />{{ t(emailError) }}</div>
@@ -2338,22 +3069,39 @@ onUnmounted(() => {
           <section v-else-if="emailTab === 'configuration'" id="emailConfigurationPanel" class="whatsapp-config-section" role="tabpanel" aria-labelledby="emailConfigurationTab">
             <div class="whatsapp-config-form">
               <div class="email-config-grid">
-                <label class="whatsapp-config-field" for="emailSmtpHost"><span>{{ t('Servidor SMTP') }}</span><input id="emailSmtpHost" v-model="emailSettings.smtpHost" class="settings-input" type="text" autocomplete="off" placeholder="smtp.example.com" /></label>
-                <label class="whatsapp-config-field" for="emailSmtpPort"><span>{{ t('Porta SMTP') }}</span><input id="emailSmtpPort" v-model.number="emailSettings.smtpPort" class="settings-input" type="number" min="1" max="65535" /></label>
-                <label class="whatsapp-config-field" for="emailSmtpUser"><span>{{ t('Usuário SMTP') }}</span><input id="emailSmtpUser" v-model="emailSettings.smtpUser" class="settings-input" type="text" autocomplete="username" /></label>
-                <label class="whatsapp-config-field" for="emailSenderAddress"><span>{{ t('E-mail do remetente') }}</span><input id="emailSenderAddress" v-model="emailSettings.senderEmail" class="settings-input" type="email" autocomplete="email" /></label>
-                <label class="whatsapp-config-field" for="emailSenderName"><span>{{ t('Nome do remetente') }}</span><input id="emailSenderName" v-model="emailSettings.senderName" class="settings-input" type="text" maxlength="80" /></label>
+                <label class="whatsapp-config-field" for="emailSmtpHost"><span>{{ t('Servidor SMTP') }}</span><input id="emailSmtpHost" v-model="emailSmtpDraft.smtpHost" class="settings-input" type="text" autocomplete="off" placeholder="smtp.example.com" /></label>
+                <label class="whatsapp-config-field" for="emailSmtpPort"><span>{{ t('Porta SMTP') }}</span><input id="emailSmtpPort" v-model.number="emailSmtpDraft.smtpPort" class="settings-input" type="number" min="1" max="65535" /></label>
+                <label class="whatsapp-config-field" for="emailSmtpUser"><span>{{ t('Usuário SMTP') }}</span><input id="emailSmtpUser" v-model="emailSmtpDraft.smtpUser" class="settings-input" type="text" autocomplete="username" /></label>
+                <label class="whatsapp-config-field" for="emailSenderAddress"><span>{{ t('E-mail do remetente') }}</span><input id="emailSenderAddress" v-model="emailSmtpDraft.senderEmail" class="settings-input" type="email" autocomplete="email" /></label>
+                <label class="whatsapp-config-field" for="emailSenderName"><span>{{ t('Nome do remetente') }}</span><input id="emailSenderName" v-model="emailSmtpDraft.senderName" class="settings-input" type="text" maxlength="80" /></label>
                 <label class="whatsapp-config-field" for="emailSmtpPassword"><span>{{ t('Senha SMTP') }}</span><input id="emailSmtpPassword" v-model="emailPassword" class="settings-input" type="password" autocomplete="new-password" :placeholder="emailSettings.passwordConfigured ? t('Deixe em branco para manter a senha salva.') : ''" /></label>
               </div>
-              <label class="theme-setting email-secure-toggle" for="emailSmtpSecure"><span class="theme-setting-icon"><ShieldCheck :size="17" /></span><span class="theme-setting-copy"><strong>{{ t('Conexão segura (TLS)') }}</strong><small>{{ t('Ative para SMTP com TLS implícito, geralmente na porta 465.') }}</small></span><input id="emailSmtpSecure" v-model="emailSettings.smtpSecure" class="theme-switch" type="checkbox" /></label>
+              <label class="theme-setting email-secure-toggle" for="emailSmtpSecure"><span class="theme-setting-icon"><ShieldCheck :size="17" /></span><span class="theme-setting-copy"><strong>{{ t('Conexão segura (TLS)') }}</strong><small>{{ t('Ative para SMTP com TLS implícito, geralmente na porta 465.') }}</small></span><input id="emailSmtpSecure" v-model="emailSmtpDraft.smtpSecure" class="theme-switch" type="checkbox" /></label>
               <label v-if="emailSettings.passwordConfigured" class="theme-setting email-secure-toggle" for="emailClearPassword"><span class="theme-setting-icon"><LockKeyhole :size="17" /></span><span class="theme-setting-copy"><strong>{{ t('Apagar senha salva') }}</strong><small>{{ t('Remova a senha cifrada do servidor.') }}</small></span><input id="emailClearPassword" v-model="emailClearPassword" class="theme-switch" type="checkbox" /></label>
-              <MessageTemplateEditor id="emailOnlineMessage" v-model="emailSettings.onlineMessage" :label="t('Mensagem de e-mail ao normalizar')" :maxlength="1000" />
-              <MessageTemplateEditor id="emailWarningMessage" v-model="emailSettings.warningMessage" :label="t('Mensagem de e-mail em atenção')" :maxlength="1000" />
-              <MessageTemplateEditor id="emailOfflineMessage" v-model="emailSettings.offlineMessage" :label="t('Mensagem de e-mail offline')" :maxlength="1000" />
-              <p class="settings-help">{{ t('Use &#123;&#123;laboratorio&#125;&#125;, &#123;&#123;aparelho&#125;&#125;, &#123;&#123;status&#125;&#125;, &#123;&#123;localizacao&#125;&#125; e &#123;&#123;identificador&#125;&#125; como campos dinâmicos.') }}</p>
-              <aside class="whatsapp-message-preview"><strong>{{ t('Prévia do e-mail em atenção') }}</strong><p>{{ emailPreviewMessage }}</p></aside>
-              <p class="settings-help">{{ t('As mensagens são enviadas em HTML e texto simples. A senha SMTP é cifrada no servidor.') }}</p>
+              <p class="settings-help">{{ t('A senha SMTP é cifrada no servidor.') }}</p>
               <button class="primary-button settings-save-button" type="button" :disabled="emailSettingsSaving" @click="saveEmailSettings"><LoaderCircle v-if="emailSettingsSaving" class="spin" :size="16" />{{ emailSettingsSaving ? t('Salvando...') : t('Salvar configuração de e-mail') }}</button>
+            </div>
+          </section>
+          <section v-else-if="emailTab === 'notifications'" id="emailNotificationsPanel" class="whatsapp-config-section" role="tabpanel" aria-labelledby="emailNotificationsTab">
+            <div class="whatsapp-config-form">
+              <MessageTemplateEditor id="emailOnlineMessage" v-model="emailNotificationDraft.onlineMessage" :label="t('Mensagem de e-mail ao normalizar')" :maxlength="1000" />
+              <MessageTemplateEditor id="emailWarningMessage" v-model="emailNotificationDraft.warningMessage" :label="t('Mensagem de e-mail em atenção')" :maxlength="1000" />
+              <MessageTemplateEditor id="emailOfflineMessage" v-model="emailNotificationDraft.offlineMessage" :label="t('Mensagem de e-mail offline')" :maxlength="1000" />
+              <p class="settings-help">{{ t('Use &#123;&#123;laboratorio&#125;&#125;, &#123;&#123;aparelho&#125;&#125;, &#123;&#123;status&#125;&#125;, &#123;&#123;localizacao&#125;&#125; e &#123;&#123;identificador&#125;&#125; como campos dinâmicos.') }}</p>
+              <div class="notification-preview-list email-notification-previews">
+                <article v-for="preview in emailNotificationPreviews" :key="preview.id" class="email-notification-preview">
+                  <h3>{{ t(preview.label) }}</h3>
+                  <div class="email-preview-document">
+                    <header><strong>{{ emailSmtpDraft.senderName || 'LAB/MONITOR' }}</strong><small>MONITORAMENTO AMBIENTAL</small></header>
+                    <div class="email-preview-subject"><span>{{ t('Assunto') }}</span><strong>Alerta de monitoramento: Sensor de demonstração</strong></div>
+                    <div class="email-preview-body" v-html="preview.html"></div>
+                    <footer>{{ t('Notificação automática do sistema de monitoramento.') }}</footer>
+                  </div>
+                </article>
+              </div>
+              <p class="settings-help">{{ t('As mensagens são enviadas em HTML e texto simples.') }}</p>
+              <p v-if="emailMessage" class="success-message" role="status">{{ t(emailMessage) }}</p>
+              <button class="primary-button settings-save-button" type="button" :disabled="emailSettingsSaving" @click="saveEmailNotificationDraft"><LoaderCircle v-if="emailSettingsSaving" class="spin" :size="16" />{{ emailSettingsSaving ? t('Salvando...') : t('Salvar notificações') }}</button>
             </div>
           </section>
           <section v-else id="emailConnectionPanel" class="whatsapp-manager-section" role="tabpanel" aria-labelledby="emailConnectionTab">

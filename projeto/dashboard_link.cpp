@@ -10,6 +10,7 @@
 namespace {
   constexpr unsigned long kUploadIntervalMs = 15000UL;
   unsigned long gLastUploadAt = 0;
+  bool gWasWifiConnected = false;
   bool gHasSent = false;
   bool gLastSendOk = false;
   String gLastMessage = "Aguardando envio.";
@@ -208,11 +209,19 @@ bool dashboardLinkRemover(String& message) {
   return true;
 }
 
-void dashboardLinkEnviar(const DadosSistema& dados, const String& configuredName, bool alertaMudou) {
+bool dashboardLinkMonitorarConexao() {
+  const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+  const bool wifiJustConnected = wifiConnected && !gWasWifiConnected;
+  gWasWifiConnected = wifiConnected;
+  return wifiJustConnected;
+}
+
+void dashboardLinkEnviar(const DadosSistema& dados, const String& configuredName,
+                         bool alertaMudou, bool forcarEnvio) {
   VinculoDashboard vinculo = storageCarregarVinculoDashboard();
   if (vinculo.deviceToken.isEmpty() || WiFi.status() != WL_CONNECTED) return;
   const unsigned long now = millis();
-  if (gLastUploadAt != 0 && now - gLastUploadAt < kUploadIntervalMs && !alertaMudou) return;
+  if (gLastUploadAt != 0 && now - gLastUploadAt < kUploadIntervalMs && !alertaMudou && !forcarEnvio) return;
   gLastUploadAt = now;
 
   DynamicJsonDocument bodyDoc(768);
@@ -248,3 +257,4 @@ void dashboardLinkEnviar(const DadosSistema& dados, const String& configuredName
     statusCode > 0 ? "Falha de envio (HTTP " + String(statusCode) + ")." : responseBody);
   Serial.println(gLastMessage);
 }
+

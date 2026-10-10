@@ -29,6 +29,7 @@ model User {
   sessions       Session[]
   deviceLinks    DeviceLink[]
   resetTokens    PasswordResetToken[]
+  notifications  DeviceNotification[]
   memberships    WorkspaceMember[]
   ownedDevices   Device[] @relation("DeviceOwner")
   sentInvitations WorkspaceInvitation[] @relation("InvitationCreator")
@@ -77,6 +78,7 @@ model Device {
   readings   Reading[]
   deviceLink DeviceLink?
   notificationPreferences DeviceNotificationPreference[]
+  notifications DeviceNotification[]
 
   @@index([workspaceId, status, lastSeenAt])
   @@index([ownerUserId])
@@ -117,6 +119,7 @@ model Workspace {
   memberships WorkspaceMember[]
   invitations WorkspaceInvitation[]
   devices     Device[]
+  notifications DeviceNotification[]
   activeUsers User[] @relation("CurrentWorkspace")
 }
 
@@ -145,6 +148,25 @@ model DeviceNotificationPreference {
 
   @@id([workspaceId, userId, deviceId])
   @@index([deviceId])
+}
+
+model DeviceNotification {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  deviceId    String?
+  deviceName  String
+  status      String
+  title       String
+  message     String
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  device      Device?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, workspaceId, createdAt(sort: Desc)])
+  @@index([userId, workspaceId, readAt])
 }
 
 model WorkspaceInvitation {

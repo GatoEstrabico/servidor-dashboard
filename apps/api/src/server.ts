@@ -153,10 +153,20 @@ const app = Fastify({ loggerInstance: getAppLogger('api-servidor'), bodyLimit: 5
 const cookieName = env.COOKIE_SECURE === 'true' ? '__Host-monitor_session' : 'monitor_session';
 const sessionDurationMs = 12 * 60 * 60 * 1000;
 const secureCookie = env.COOKIE_SECURE === 'true';
+const deviceEventClients = new Map<string, Set<FastifyReply['raw']>>();
 const simulatedDeviceExternalId = 'e2e-windows-sensor-01';
 const dummyPasswordHash = await argon2.hash(randomBytes(32).toString('hex'), { type: argon2.argon2id });
 function hash(value: string): string {
   return createHmac('sha256', env.SESSION_SECRET).update(value).digest('hex');
+}
+
+function publishDeviceUpdate(workspaceId: string | null): void {
+  if (!workspaceId) return;
+  const clients = deviceEventClients.get(workspaceId);
+  if (!clients) return;
+  for (const response of clients) {
+    if (!response.destroyed && !response.writableEnded) response.write('event: devices-updated\ndata: {}\n\n');
+  }
 }
 
 function generateWorkspaceAccessCode(): string {
@@ -223,6 +233,32 @@ async function sendAlarmNotifications(device: { id: string; name: string; extern
       }
     }
   });
+  const title = status === 'online'
+    ? 'Alarme normalizado'
+    : status === 'warning'
+      ? 'Aparelho em atenção'
+      : 'Aparelho offline';
+  const notificationMessage = status === 'online'
+    ? `O aparelho ${device.name} voltou a ficar online.`
+    : `O aparelho ${device.name} está ${alarmStatusLabel(status)}.`;
+  if (memberships.length) {
+    try {
+      await prisma.deviceNotification.createMany({
+        data: memberships.map(({ userId }) => ({
+          userId,
+          workspaceId: device.workspaceId!,
+          deviceId: device.id,
+          deviceName: device.name,
+          status,
+          title,
+          message: notificationMessage
+        }))
+      });
+      publishDeviceUpdate(device.workspaceId);
+    } catch (error) {
+      app.log.error({ err: error, deviceId: device.externalId }, 'Falha ao persistir notificacoes do aparelho');
+    }
+  }
   const recipients = memberships.map(({ user, notifyAllDevices, deviceNotificationPreferences }) => {
     const preference = deviceNotificationPreferences[0];
     return {
@@ -1720,6 +1756,7 @@ app.post('/api/device-links/login', { config: { rateLimit: { max: 5, timeWindow:
   if (existingDevice && existingDevice.status !== device.status) {
     await notifyAlarmStatusChange(device, device.status);
   }
+  publishDeviceUpdate(device.workspaceId);
   const deviceToken = randomBytes(32).toString('base64url');
   await prisma.deviceLink.upsert({
     where: { deviceId: device.id },
@@ -1739,6 +1776,7 @@ app.post('/api/device-links/logout', async (request, reply) => {
     prisma.deviceLink.delete({ where: { id: link.id } }),
     prisma.device.update({ where: { id: link.deviceId }, data: { status: 'offline' } })
   ]);
+  publishDeviceUpdate(link.device.workspaceId);
   if (link.device.status !== 'offline') {
     await notifyAlarmStatusChange(link.device, 'offline');
   }
@@ -1765,6 +1803,87 @@ app.get('/api/devices', async (request, reply) => {
       canEditAlias: ownerUserId === auth.user.id || deviceLink?.userId === auth.user.id || canManageWorkspace(activeWorkspaceRole)
     }))
   };
+});
+
+app.get('/api/notifications', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  const workspaceId = auth.user.activeWorkspaceId;
+  if (!workspaceId || !getWorkspaceRole(auth.user, workspaceId)) return { notifications: [] };
+  const notifications = await prisma.deviceNotification.findMany({
+    where: { userId: auth.user.id, workspaceId },
+    orderBy: { createdAt: 'desc' },
+    take: 100
+  });
+  return { notifications: notifications.map((notification) => ({ ...notification, read: notification.readAt !== null })) };
+});
+
+app.post('/api/notifications/read-all', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  const workspaceId = auth.user.activeWorkspaceId;
+  if (!workspaceId || !getWorkspaceRole(auth.user, workspaceId)) return { count: 0 };
+  const result = await prisma.deviceNotification.updateMany({
+    where: { userId: auth.user.id, workspaceId, readAt: null },
+    data: { readAt: new Date() }
+  });
+  return { count: result.count };
+});
+
+app.patch<{ Params: { notificationId: string } }>('/api/notifications/:notificationId/read', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  const workspaceId = auth.user.activeWorkspaceId;
+  if (!workspaceId) return reply.code(409).send({ error: 'Selecione um ambiente.' });
+  const result = await prisma.deviceNotification.updateMany({
+    where: { id: request.params.notificationId, userId: auth.user.id, workspaceId, readAt: null },
+    data: { readAt: new Date() }
+  });
+  if (!result.count) return reply.code(404).send({ error: 'Notificação não encontrada.' });
+  return { ok: true };
+});
+
+app.delete('/api/notifications', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  const workspaceId = auth.user.activeWorkspaceId;
+  if (!workspaceId) return reply.code(409).send({ error: 'Selecione um ambiente.' });
+  const result = await prisma.deviceNotification.deleteMany({ where: { userId: auth.user.id, workspaceId } });
+  return { deleted: result.count };
+});
+
+app.get('/api/events/devices', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  const workspaceId = auth.user.activeWorkspaceId;
+  if (!workspaceId || !getWorkspaceRole(auth.user, workspaceId)) return reply.code(409).send({ error: 'Selecione um ambiente.' });
+
+  const response = reply.raw;
+  reply.hijack();
+  response.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  response.write('retry: 5000\nevent: connected\ndata: {}\n\n');
+  let clients = deviceEventClients.get(workspaceId);
+  if (!clients) {
+    clients = new Set();
+    deviceEventClients.set(workspaceId, clients);
+  }
+  clients.add(response);
+
+  const removeClient = () => {
+    clearInterval(heartbeat);
+    clients?.delete(response);
+    if (!clients?.size) deviceEventClients.delete(workspaceId);
+  };
+  const heartbeat = setInterval(() => {
+    if (!response.destroyed && !response.writableEnded) response.write(': keepalive\n\n');
+  }, 20_000);
+  heartbeat.unref();
+  response.on('close', removeClient);
 });
 
 app.patch<{ Params: { id: string } }>('/api/devices/:id/alias', async (request, reply) => {
@@ -1903,6 +2022,7 @@ app.post<{ Params: { id: string } }>('/api/devices/:id/simulation', async (reque
     });
     return { ...updated, readings };
   });
+  publishDeviceUpdate(updatedDevice.workspaceId);
   if (device.status !== updatedDevice.status) await notifyAlarmStatusChange(updatedDevice, updatedDevice.status);
   return { device: { ...updatedDevice, canSimulate: true } };
 });
@@ -1955,6 +2075,7 @@ app.post('/api/ingest/devices', async (request, reply) => {
         recordedAt: reading.recordedAt ? new Date(reading.recordedAt) : new Date()
       }))
     });
+    publishDeviceUpdate(device.workspaceId);
   }
   if ((previousDevice && previousDevice.status !== device.status) || (!previousDevice && device.status !== 'online')) {
     await notifyAlarmStatusChange(device, device.status);

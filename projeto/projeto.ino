@@ -32,12 +32,12 @@ void monitorarReset() {
   factoryResetVerificar();
 }
 
-void monitorar() {
+void monitorar(bool forcarLeitura) {
   static unsigned long ultimoTempo = 0;
   static int ultimoIntervalo = 1;
 
   unsigned long agora = millis();
-  if ((agora - ultimoTempo) < (unsigned long)ultimoIntervalo * 1000UL) {
+  if (!forcarLeitura && (agora - ultimoTempo) < (unsigned long)ultimoIntervalo * 1000UL) {
     return;
   }
 
@@ -82,7 +82,7 @@ void monitorar() {
   dados.timestamp = time(nullptr);
 
   webserverAtualizarDados(dados);
-  dashboardLinkEnviar(dados, config.nome_aparelho, alertaMudou);
+  dashboardLinkEnviar(dados, config.nome_aparelho, alertaMudou, forcarLeitura);
 
   int intervalo = config.intervalo_leitura;
   if (intervalo < 1) {
@@ -129,7 +129,8 @@ void setup() {
 void loop() {
   controlarLedWifi();
   monitorarReset();
-  monitorar();
+  const bool wifiReconectou = dashboardLinkMonitorarConexao();
+  monitorar(wifiReconectou);
   webserverServidor(servidorHttp);
 
   if (wifiModoConfiguracao) {

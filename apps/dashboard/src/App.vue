@@ -73,7 +73,7 @@ type Device = {
 };
 type DemoSimulationForm = { status: Device['status']; temperature: number; humidity: number; gas: number };
 type DeviceNotification = {
-  id: number;
+  id: string;
   deviceId: string;
   deviceName: string;
   status: Device['status'];
@@ -308,9 +308,9 @@ const refreshedAt = ref(new Date());
 const activeMobileTab = ref('home');
 const expandedDeviceIds = ref<string[]>([]);
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
-let knownDeviceStatuses: Map<string, Device['status']> | undefined;
-let notificationSequence = 0;
+let deviceEvents: EventSource | null = null;
 let deviceRefreshInProgress = false;
+let deviceRefreshRequested = false;
 
 const englishText: Record<string, string> = {
   'Carregando': 'Loading',
@@ -360,7 +360,9 @@ const englishText: Record<string, string> = {
   'Notificações': 'Notifications',
   'não lidas': 'unread',
   'Todas as notificações foram lidas': 'All notifications have been read',
-  'Marcar todas como lidas': 'Mark all as read',
+  'Apagar notificações': 'Delete notifications',
+  'Apagar todas as notificações deste ambiente?': 'Delete all notifications in this workspace?',
+  'Não foi possível apagar as notificações.': 'Could not delete notifications.',
   'Nenhuma notificação': 'No notifications',
   'Alterações nos estados dos aparelhos aparecerão aqui.': 'Device status changes will appear here.',
   'Configurações da conta': 'Account settings',
@@ -931,45 +933,17 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 async function loadDevices() {
-  if (!user.value || !activeWorkspaceId.value || deviceRefreshInProgress) {
+  if (!user.value || !activeWorkspaceId.value) {
     if (!activeWorkspaceId.value) devices.value = [];
+    return;
+  }
+  if (deviceRefreshInProgress) {
+    deviceRefreshRequested = true;
     return;
   }
   deviceRefreshInProgress = true;
   try {
     const result = await api<{ devices: Device[] }>('/api/devices');
-    const newNotifications: DeviceNotification[] = [];
-    if (knownDeviceStatuses) {
-      for (const device of result.devices) {
-        const previousStatus = knownDeviceStatuses.get(device.id);
-        if (previousStatus === device.status || (previousStatus === undefined && device.status === 'online')) continue;
-        const title = device.status === 'online'
-          ? 'Alarme normalizado'
-          : device.status === 'warning'
-            ? 'Aparelho em atenção'
-            : 'Aparelho offline';
-        const message = device.status === 'online'
-          ? `O aparelho ${deviceDisplayName(device)} voltou a ficar online.`
-          : `O aparelho ${deviceDisplayName(device)} está ${deviceStatusLabel(device.status).toLocaleLowerCase('pt-BR')}.`;
-        newNotifications.push({
-          id: ++notificationSequence,
-          deviceId: device.id,
-          deviceName: deviceDisplayName(device),
-          status: device.status,
-          title,
-          message,
-          createdAt: new Date().toISOString(),
-          read: false
-        });
-      }
-    }
-    if (newNotifications.length) {
-      notifications.value = [...newNotifications.reverse(), ...notifications.value].slice(0, 50);
-      for (const status of new Set(newNotifications.map((notification) => notification.status))) {
-        playAlertSound(alertSoundPreferences.value[status]);
-      }
-    }
-    knownDeviceStatuses = new Map(result.devices.map((device) => [device.id, device.status]));
     devices.value = result.devices;
     const nextSimulationValues = { ...simulationValues.value };
     for (const device of result.devices) {
@@ -984,15 +958,71 @@ async function loadDevices() {
     pageError.value = error instanceof Error ? error.message : 'Falha ao atualizar aparelhos.';
   } finally {
     deviceRefreshInProgress = false;
+    if (deviceRefreshRequested) {
+      deviceRefreshRequested = false;
+      queueMicrotask(() => void loadDevices());
+    }
   }
 }
 
-function markAllNotificationsRead() {
+async function loadNotifications(playSoundsForNew = false): Promise<void> {
+  if (!user.value || !activeWorkspaceId.value) {
+    notifications.value = [];
+    return;
+  }
+  const existingIds = new Set(notifications.value.map((notification) => notification.id));
+  try {
+    const result = await api<{ notifications: DeviceNotification[] }>('/api/notifications');
+    notifications.value = result.notifications;
+    if (playSoundsForNew) {
+      for (const status of new Set(result.notifications.filter((notification) => !existingIds.has(notification.id)).map((notification) => notification.status))) {
+        playAlertSound(alertSoundPreferences.value[status]);
+      }
+    }
+  } catch {
+    return;
+  }
+}
+
+function connectDeviceEvents(workspaceId: string | null): void {
+  deviceEvents?.close();
+  deviceEvents = null;
+  if (!user.value || !workspaceId) return;
+  const events = new EventSource('/api/events/devices');
+  events.addEventListener('devices-updated', () => {
+    void loadDevices();
+    void loadNotifications(true);
+  });
+  deviceEvents = events;
+}
+
+function toggleNotificationPanel(): void {
+  notificationOpen.value = !notificationOpen.value;
+  if (notificationOpen.value) void markAllNotificationsRead();
+}
+
+async function markAllNotificationsRead(): Promise<void> {
+  if (!unreadNotificationCount.value) return;
   notifications.value = notifications.value.map((notification) => ({ ...notification, read: true }));
+  try {
+    await api('/api/notifications/read-all', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken.value } });
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Não foi possível marcar as notificações como lidas.';
+    void loadNotifications();
+  }
+}
+
+async function deleteAllNotifications(): Promise<void> {
+  if (!notifications.value.length || !window.confirm(t('Apagar todas as notificações deste ambiente?'))) return;
+  try {
+    await api('/api/notifications', { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken.value } });
+    notifications.value = [];
+  } catch {
+    pageError.value = t('Não foi possível apagar as notificações.');
+  }
 }
 
 function openDeviceNotification(notification: DeviceNotification) {
-  notification.read = true;
   notificationOpen.value = false;
   if (!devices.value.some((device) => device.id === notification.deviceId)) return;
   search.value = '';
@@ -1196,7 +1226,7 @@ async function removeActiveWorkspace() {
       await loadDevices();
     } else {
       devices.value = [];
-      knownDeviceStatuses = undefined;
+      notifications.value = [];
     }
   } catch (error) {
     pageError.value = error instanceof Error ? t(error.message) : t('Nao foi possivel remover o ambiente.');
@@ -2064,6 +2094,7 @@ async function checkSession() {
     await loadWorkspaces();
     await loadAlertSoundPreference();
     await loadDevices();
+    await loadNotifications();
   } catch {
     user.value = null;
     try {
@@ -2091,6 +2122,7 @@ async function login() {
     await loadWorkspaces();
     await loadAlertSoundPreference();
     await loadDevices();
+    await loadNotifications();
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : 'Falha ao entrar.';
   } finally {
@@ -2541,7 +2573,6 @@ async function logout() {
     alertAudioUploadDataUrl.value = '';
     alertAudioUploadName.value = '';
     notificationOpen.value = false;
-    knownDeviceStatuses = undefined;
     csrfToken.value = '';
     pageError.value = '';
   } catch (error) {
@@ -2699,6 +2730,11 @@ watch([activeWorkspaceId, settingsTab], ([, tab]) => {
   if (tab === 'notifications') void loadWorkspaceAlertPreferences();
 });
 
+watch(activeWorkspaceId, (workspaceId) => {
+  connectDeviceEvents(workspaceId);
+  void loadNotifications();
+});
+
 watch([managementTab, emailTab], ([tab, subtab], [previousTab]) => {
   if (emailRefreshTimer) clearInterval(emailRefreshTimer);
   emailRefreshTimer = undefined;
@@ -2738,6 +2774,7 @@ onMounted(() => {
   window.addEventListener('keydown', handleNotificationKeydown);
 });
 onUnmounted(() => {
+  deviceEvents?.close();
   if (refreshTimer) clearInterval(refreshTimer);
   if (whatsappRefreshTimer) clearInterval(whatsappRefreshTimer);
   if (emailRefreshTimer) clearInterval(emailRefreshTimer);
@@ -2894,7 +2931,7 @@ onUnmounted(() => {
               :aria-label="`${t('Notificações')}${unreadNotificationCount ? `, ${unreadNotificationCount} ${t('não lidas')}` : ''}`"
               :aria-expanded="notificationOpen"
               aria-haspopup="dialog"
-              @click="notificationOpen = !notificationOpen"
+              @click="toggleNotificationPanel"
             >
               <Bell :size="18" />
               <span v-if="unreadNotificationCount" class="notification-count">{{ unreadNotificationCount > 99 ? '99+' : unreadNotificationCount }}</span>
@@ -2902,7 +2939,7 @@ onUnmounted(() => {
             <section v-if="notificationOpen" class="notification-panel" role="dialog" :aria-label="t('Notificações')">
               <header class="notification-panel-header">
                 <div><h2>{{ t('Notificações') }}</h2><p>{{ unreadNotificationCount ? `${unreadNotificationCount} ${t('não lidas')}` : t('Todas as notificações foram lidas') }}</p></div>
-                <button v-if="unreadNotificationCount" class="notification-read-all" type="button" @click="markAllNotificationsRead">{{ t('Marcar todas como lidas') }}</button>
+                <button v-if="notifications.length" class="notification-read-all" type="button" @click="deleteAllNotifications">{{ t('Apagar notificações') }}</button>
               </header>
               <div v-if="notifications.length" class="notification-list" role="list">
                 <div v-for="notification in notifications" :key="notification.id" role="listitem">

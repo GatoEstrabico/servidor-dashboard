@@ -77,7 +77,7 @@ extern bool wifiModoConfiguracao;
 
 void controlarLedWifi();
 void monitorarReset();
-void monitorar();
+void monitorar(bool forcarLeitura = false);
 void iniciar();
 
 // Declarações dos módulos que serão implementados nos outros arquivos do projeto

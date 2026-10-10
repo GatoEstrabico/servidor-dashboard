@@ -2,8 +2,8 @@ node_modules/
 dist/
 apps/api/.data/
 .data/logs/
-.env
-.env.*
+!.env
+!.env.*
 !.env.example
 coverage/
 *.log

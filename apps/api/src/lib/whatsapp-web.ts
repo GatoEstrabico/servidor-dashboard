@@ -14,8 +14,11 @@ const authDirectory = resolve(process.cwd(), '.data/whatsapp-auth');
 const profileHistoryDirectory = resolve(process.cwd(), '.data/whatsapp-profile-history');
 const notificationSettingsPath = resolve(process.cwd(), '.data/whatsapp-settings.json');
 const logger = pino({ level: 'silent' });
+const apiServerLogger = getAppLogger('api-servidor');
 const whatsappLogger = getAppLogger('api-whatsapp');
-const libsignalLogger = getAppLogger('api-libsignal');
+function logLibsignalInfo(event: string, message: string, details?: Record<string, unknown>): void {
+  apiServerLogger.info({ source: 'LibSignal', event, ...details }, message);
+}
 const libsignalSessionInfoMessages = new Map([
   ['Closing session:', 'Sessao criptografica encerrada.'],
   ['Opening session:', 'Sessao criptografica aberta.'],
@@ -26,7 +29,7 @@ console.info = (...args: Parameters<typeof console.info>) => {
   if (typeof args[0] === 'string') {
     const message = libsignalSessionInfoMessages.get(args[0]);
     if (message) {
-      libsignalLogger.info({ event: args[0].slice(0, -1) }, message);
+      logLibsignalInfo(args[0].slice(0, -1), message);
       return;
     }
   }
@@ -35,11 +38,45 @@ console.info = (...args: Parameters<typeof console.info>) => {
 const originalConsoleWarn = console.warn.bind(console);
 console.warn = (...args: Parameters<typeof console.warn>) => {
   if (args[0] === 'Session already closed' || args[0] === 'Session already open') {
-    libsignalLogger.warn({ event: 'session_warning' }, 'Aviso de estado de sessao criptografica.');
+    logLibsignalInfo('session_warning', `Aviso de estado da sessão criptográfica: ${args[0]}.`);
     return;
   }
   originalConsoleWarn(...args);
 };
+const originalConsoleError = console.error.bind(console);
+console.error = (...args: Parameters<typeof console.error>) => {
+  const message = args[0];
+  if (message === 'Failed to decrypt message with any known session...') {
+    logLibsignalInfo(
+      'whatsapp_message_decrypt_failed',
+      'O WhatsApp recebeu uma mensagem cifrada, mas não conseguiu descriptografá-la. O Baileys tentará solicitar o reenvio.'
+    );
+    return;
+  }
+  if (typeof message === 'string' && message.startsWith('Session error:')) {
+    if (message.includes('Bad MAC')) {
+      logLibsignalInfo(
+        'whatsapp_session_decrypt_error',
+        'A mensagem não corresponde às chaves criptográficas disponíveis nesta sessão do WhatsApp; a sessão pode estar dessincronizada.',
+        { reason: 'Bad MAC' }
+      );
+    } else if (message.includes('Over 2000 messages into the future')) {
+      logLibsignalInfo(
+        'whatsapp_session_decrypt_error',
+        'O contador da sessão criptográfica está fora de sincronia; o Baileys tentará recuperar a mensagem.',
+        { reason: 'counter_out_of_sync' }
+      );
+    } else {
+      logLibsignalInfo(
+        'whatsapp_session_decrypt_error',
+        'Nenhuma chave da sessão atual conseguiu descriptografar a mensagem recebida.'
+      );
+    }
+    return;
+  }
+  originalConsoleError(...args);
+};
+
 export type WhatsAppNotificationSettings = {
   senderName: string;
   onlineMessage: string;

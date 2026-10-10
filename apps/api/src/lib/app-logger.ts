@@ -87,18 +87,20 @@ const output = new Writable({
       const timestamp = formatBrazilDateTime(typeof entry.time === 'string' ? entry.time : new Date().toISOString());
       const level = typeof entry.level === 'number' ? levelNames[entry.level] ?? String(entry.level) : 'INFO';
       const message = typeof entry.msg === 'string' ? entry.msg : '';
+      const source = typeof entry.source === 'string' ? entry.source : null;
       const details = { ...entry };
       delete details.level;
       delete details.time;
       delete details.service;
       delete details.msg;
+      delete details.source;
       const suffix = Object.keys(details).length ? ` ${JSON.stringify(details)}` : '';
+      const consoleSuffix = source ? '' : suffix;
       const line = `[${service}][${timestamp}][${level}] ${message}${suffix}\n`;
       const coloredTimestamp = colorize(`[${timestamp}]`, timeColor);
       const coloredLevel = colorize(`[${level}]`, levelColors[level] ?? colorReset);
-      const consoleLine = service === 'api-servidor' || service === 'api-whatsapp'
-        ? `${coloredTimestamp}${coloredLevel} ${message}${suffix}\n`
-        : `[${service}]${coloredTimestamp}${coloredLevel} ${message}${suffix}\n`;
+      const sourceLabel = source ?? (service === 'api-libsignal' ? 'LibSignal' : service);
+      const consoleLine = `${colorize(`[${sourceLabel}]`, colorReset)} ${coloredTimestamp}${coloredLevel} ${message}${consoleSuffix}\n`;
       const destination = typeof entry.level === 'number' && entry.level >= 40 ? process.stderr : process.stdout;
       destination.write(consoleLine);
       fileStream?.write(line);

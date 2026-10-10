@@ -3376,7 +3376,7 @@ onUnmounted(() => {
                 <article v-for="preview in emailNotificationPreviews" :key="preview.id" class="email-notification-preview">
                   <h3>{{ t(preview.label) }}</h3>
                   <div class="email-preview-document">
-                    <header><strong>{{ emailSmtpDraft.senderName || 'LAB/MONITOR' }}</strong><small>MONITORAMENTO AMBIENTAL</small></header>
+                    <header><strong>{{ emailSmtpDraft.senderName || 'LAB/MONITOR' }}</strong><small>MONITORAMENTO</small></header>
                     <div class="email-preview-subject"><span>{{ t('Assunto') }}</span><strong>Alerta de monitoramento: Sensor de demonstração</strong></div>
                     <div class="email-preview-body" v-html="preview.html"></div>
                     <footer>{{ t('Notificação automática do sistema de monitoramento.') }}</footer>

@@ -9,7 +9,7 @@ Para executar API, painel e banco:
 - Git
 - Node.js 22 ou superior e npm
 - PostgreSQL 16 instalado no Windows e iniciado como serviço
-- Windows PowerShell ou Prompt de Comando (os comandos abaixo usam PowerShell)
+
 
 Para compilar e carregar o firmware, além dos itens acima:
 
@@ -28,59 +28,95 @@ cd servidor
 
 Se a pasta tiver outro nome, entre nela em vez de usar `cd servidor`.
 
-## 3. Instale as dependências e configure o ambiente
+## 3. Configure as variáveis de ambiente (`.env`)
 
-Na raiz do projeto, crie o arquivo local de configuração a partir do exemplo e instale as dependências travadas no `package-lock.json`:
+Na raiz do projeto, copie o modelo `.env.example` para `.env`:
 
 ```powershell
 Copy-Item .env.example .env
+```
+
+> **Aviso de Segurança:** O arquivo `.env` contém chaves criptográficas e credenciais de acesso. Ele está incluído no `.gitignore` e **nunca** deve ser commitado no repositório Git.
+
+Abra o arquivo `.env` gerado e ajuste suas variáveis conforme as explicações detalhadas abaixo:
+
+---
+
+### Guia Completo das Variáveis do `.env`
+
+#### 💾 Conexão com o Banco de Dados
+- **`DATABASE_URL`**: String de conexão padrão do PostgreSQL usada pelo Prisma.
+  - Formato: `postgresql://<USUARIO>:<SENHA>@<HOST>:<PORTA>/<BANCO>?schema=public`
+  - Exemplo local: `postgresql://monitor:sua_senha@localhost:5432/monitoramento?schema=public`
+
+#### ⚙️ Servidor e Rede
+- **`API_PORT`**: Porta TCP em que o servidor Fastify da API vai rodar (padrão: `3000`).
+- **`DASHBOARD_ORIGIN`**: Origem autorizada no CORS da API (onde a dashboard está hospedada).
+  - Em desenvolvimento local: `http://localhost:5173`
+  - Em produção: URL HTTPS oficial da dashboard (ex.: `https://painel.seudominio.com`).
+- **`DASHBOARD_PUBLIC_URL`**: Endereço público da dashboard utilizado em links enviados externamente (como links de redefinição de senha por e-mail).
+  - Em rede local/testes: `http://localhost:5173` ou `http://<IP-DO-PC>:5173`.
+- **`SHOW_WORKSPACE_SETUP_WHEN_EMPTY`**: Se definido como `true`, orienta a exibição das etapas de configuração inicial da área de trabalho quando não há dados cadastrados.
+
+#### 🔐 Segurança e Autenticação
+- **`SESSION_SECRET`**: Chave secreta de alta entropia (mínimo de 32 caracteres) usada para assinar cookies e sessões de usuários.
+- **`INGESTION_API_KEY`**: Chave de segurança exclusiva (mínimo de 32 caracteres) para autorizar chamadas de ingestão de telemetria.
+  
+  *Para gerar strings seguras e aleatórias para essas duas variáveis, execute no PowerShell:*
+  ```powershell
+  node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
+  ```
+- **`COOKIE_SECURE`**: Define se os cookies de autenticação só trafegam via HTTPS.
+  - `false`: Em ambiente de desenvolvimento local (HTTP).
+  - `true`: **Obrigatório** em ambiente de produção (HTTPS).
+
+#### 👤 Usuário Administrador Inicial (Seed)
+- **`BOOTSTRAP_ADMIN_EMAIL`**: E-mail inicial do administrador do sistema que será criado na execução do comando `db:seed`.
+- **`BOOTSTRAP_ADMIN_PASSWORD`**: Senha inicial desse administrador (mínimo de 12 caracteres recomendados).
+
+#### 🪵 Logs e Diagnóstico
+- **`API_LOG_LEVEL`**: Nível mínimo de captura de logs do Pino (`fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`). Padrão: `info`.
+- **`API_LOG_SERVER`**: Ativa/desativa exibição dos logs do servidor Fastify (`true` ou `false`).
+- **`API_LOG_WHATSAPP`**: Ativa/desativa exibição dos logs do serviço do WhatsApp Web / Baileys (`true` ou `false`).
+- **`API_LOG_LIBSIGNAL`**: Ativa/desativa logs detalhados da biblioteca criptográfica do WhatsApp LibSignal (`true` ou `false`, padrão: `false` para evitar ruído).
+- **`API_LOG_TO_FILE`**: Define se os logs devem ser salvos em disco em arquivo texto (`true` ou `false`).
+- **`API_LOG_FILE_PATH`**: Caminho relativo ou absoluto onde o arquivo de log será salvo (padrão: `.data/logs/api.log`).
+
+#### 🔊 Recursos e Sons
+- **`ALERT_AUDIO_UPLOAD_ENABLED`**: Permite que usuários autenticados enviem arquivos de áudio para a biblioteca compartilhada de alertas sonoros (`true` ou `false`).
+
+#### 📧 Notificações por E-mail (SMTP - Opcional)
+Necessário para recuperação de senhas e envio de alarmes por e-mail:
+- **`SMTP_HOST`**: Host do servidor SMTP (ex: `smtp.gmail.com` ou `smtp.office365.com`).
+- **`SMTP_PORT`**: Porta do serviço SMTP (geralmente `587` para TLS/STARTTLS ou `465` para SSL).
+- **`SMTP_SECURE`**: `false` para porta 587 (STARTTLS), `true` para porta 465 (SSL direto).
+- **`SMTP_USER`**: Usuário ou e-mail de autenticação SMTP.
+- **`SMTP_PASSWORD`**: Senha da conta ou senha de aplicativo gerada para o SMTP.
+- **`SMTP_FROM`**: Remetente exibido nas mensagens (ex: `"LAB/MONITOR <no-reply@exemplo.com>"`).
+
+#### 💬 Notificações por WhatsApp Cloud API da Meta (Opcional)
+Utilizado para envio de mensagens oficiais via WhatsApp Business Cloud API:
+- **`WHATSAPP_ACCESS_TOKEN`**: Token de acesso emitido no painel de desenvolvedores da Meta.
+- **`WHATSAPP_PHONE_NUMBER_ID`**: ID do número de telefone configurado na Cloud API.
+- **`WHATSAPP_API_VERSION`**: Versão da Graph API (padrão: `v23.0`).
+- **`WHATSAPP_TEMPLATE_NAME`**: Nome do template aprovado (padrão: `lab_monitor_alarm` ou `hello_world` para testes).
+- **`WHATSAPP_TEMPLATE_LANGUAGE`**: Código de idioma do template aprovado (padrão: `pt_BR` ou `en_US` para testes).
+
+*(Nota: O projeto também suporta conexão direta de WhatsApp via WhatsApp Web / Baileys autenticado por QR Code no painel).*
+
+---
+
+## 4. Instale as dependências
+
+Na raiz do projeto, instale as dependências gravadas no `package-lock.json`:
+
+```powershell
 npm.cmd ci
 ```
 
-O sufixo `.cmd` evita o bloqueio do `npm.ps1` em algumas configurações do PowerShell. No Prompt de Comando, use `npm` no lugar de `npm.cmd`.
+> O sufixo `.cmd` evita restrições de execução de scripts do PowerShell (`npm.ps1`). No Prompt de Comando padrão (CMD), pode-se utilizar apenas `npm ci`.
 
-Abra `.env` e revise estas variáveis antes de iniciar:
-
-| Variável | Desenvolvimento local |
-| --- | --- |
-| `DATABASE_URL` | URL do PostgreSQL instalado localmente; ajuste usuário, senha e banco conforme a configuração abaixo |
-| `API_PORT` | `3000` |
-| `DASHBOARD_ORIGIN` | `http://localhost:5173` |
-| `SESSION_SECRET` | Segredo aleatório exclusivo, com pelo menos 32 caracteres |
-| `INGESTION_API_KEY` | Outro segredo aleatório exclusivo, com pelo menos 32 caracteres |
-| `COOKIE_SECURE` | `false` somente para desenvolvimento local por HTTP |
-| `BOOTSTRAP_ADMIN_EMAIL` | E-mail da conta que será criada pelo seed |
-| `BOOTSTRAP_ADMIN_PASSWORD` | Senha inicial com pelo menos 12 caracteres |
-
-Gere um valor aleatório para cada segredo, sem reutilizar o mesmo valor:
-
-```powershell
-node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
-```
-
-Substitua os valores de exemplo de `SESSION_SECRET` e `INGESTION_API_KEY` pelo resultado de duas execuções separadas. Nunca publique o `.env`: ele está excluído pelo `.gitignore`.
-
-As variáveis `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` e `SMTP_FROM` são opcionais. Configure-as com credenciais reais para habilitar links de redefinição de senha e notificações de alarmes por e-mail.
-
-Para notificações por WhatsApp, configure estas variáveis opcionais com as credenciais do app da Meta Cloud API (mantenha os tokens somente no `.env` do servidor):
-
-| Variável | Uso |
-| --- | --- |
-| `WHATSAPP_ACCESS_TOKEN` | Token de acesso permanente/servidor da Meta |
-| `WHATSAPP_PHONE_NUMBER_ID` | ID do número de telefone habilitado para Cloud API |
-| `WHATSAPP_API_VERSION` | Versão Graph API; padrão `v23.0` |
-| `WHATSAPP_TEMPLATE_NAME` | Nome do modelo aprovado; padrão `lab_monitor_alarm` |
-| `WHATSAPP_TEMPLATE_LANGUAGE` | Idioma aprovado do modelo; padrão `pt_BR` |
-
-Configure `WHATSAPP_ACCESS_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID` juntos. Se não for habilitar o WhatsApp, deixe as duas variáveis ausentes ou comentadas no `.env`; não as defina como strings vazias. Para testar sem configurar um número de produção, use o número de teste e os destinatários permitidos no painel da Meta, defina `WHATSAPP_TEMPLATE_NAME="hello_world"` e `WHATSAPP_TEMPLATE_LANGUAGE="en_US"`, e use o token e o ID do número de teste. Em produção, no WhatsApp Manager, crie e aprove um modelo da categoria Utility com idioma `pt_BR` e este corpo, que corresponde aos três parâmetros enviados pela API:
-
-```text
-Alerta de monitoramento: {{1}} está {{2}}. Localização: {{3}}.
-```
-
-Cada pessoa informa o telefone internacional (E.164, como `+5521999999999`) e ativa o canal no perfil. Alertas de e-mail usam o endereço da conta e também podem ser desativados pelo perfil. O modo de teste da Meta permite validar a integração com um número de teste e destinatários autorizados, mas não equivale a envio de produção gratuito. A Cloud API oficial não requer um intermediário pago; ainda assim, a Meta cobra modelos Utility entregues fora de uma janela de atendimento aberta. Consulte a [política e tarifas atuais](https://developers.facebook.com/docs/whatsapp/pricing) antes de habilitar alertas proativos em produção. Mensagens livres e modelos Utility enviados dentro da janela de atendimento podem ser gratuitos, conforme as regras vigentes da Meta.
-
-## 4. Prepare o PostgreSQL
+## 5. Prepare o PostgreSQL
 
 Instale o PostgreSQL 16 para Windows, incluindo o servidor e o pgAdmin. Durante a instalação, defina e guarde a senha do usuário administrador `postgres`; mantenha a porta padrão `5432` e confirme que o serviço do PostgreSQL está iniciado no Windows.
 
@@ -97,9 +133,9 @@ Substitua `escolha-uma-senha-local` pela senha escolhida. Use exatamente o mesmo
 DATABASE_URL="postgresql://monitor:escolha-uma-senha-local@localhost:5432/monitoramento?schema=public"
 ```
 
-Se a senha tiver caracteres reservados de URL, como `@`, `:`, `/` ou `#`, codifique-os na URL. Para simplificar a configuração local, prefira uma senha forte sem esses caracteres. O PostgreSQL é executado diretamente como serviço do Windows; o Docker Compose do repositório não é necessário.
+Se a senha tiver caracteres reservados de URL, como `@`, `:`, `/` ou `#`, codifique-os na URL. Para simplificar a configuração local, prefira uma senha forte sem esses caracteres.
 
-## 5. Crie o banco e a conta inicial
+## 6. Crie o banco e a conta inicial
 
 Com o PostgreSQL ativo e o `.env` preenchido, execute na raiz:
 
@@ -117,7 +153,7 @@ Ao atualizar para esta versão, execute `db:generate` e `db:push` para adicionar
 
 O seed pode ser executado novamente, mas isso redefine a senha da conta para o valor atual em `.env`.
 
-## 6. Inicie a aplicação
+## 7. Inicie a aplicação
 
 Na raiz do projeto:
 
@@ -133,7 +169,7 @@ Esse comando inicia API e painel juntos. Mantenha o terminal aberto enquanto est
 
 Acesse o painel e entre com o e-mail e a senha definidos em `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD`.
 
-Para testar com um aparelho ficticio que envia novas leituras a cada 15 segundos, execute `npm.cmd run demo` no lugar de `npm.cmd run dev`. O sensor de demonstracao aparece no painel e varia temperatura, umidade e gas. Pressione Ctrl+C para encerrar API, painel e simulador. Se API e painel ja estiverem rodando com `npm.cmd run dev`, abra outro terminal e execute `npm.cmd run simulate:device`; pressione Ctrl+C nesse terminal para parar somente o simulador.
+Para testar com um aparelho fictício que envia novas leituras a cada 15 segundos, execute `npm.cmd run demo` no lugar de `npm.cmd run dev`. O sensor de demonstração aparece no painel e varia temperatura, umidade e gás. Pressione Ctrl+C para encerrar API, painel e simulador. Se API e painel já estiverem rodando com `npm.cmd run dev`, abra outro terminal e execute `npm.cmd run simulate:device`; pressione Ctrl+C nesse terminal para parar somente o simulador.
 
 Para iniciar os serviços em terminais separados, use a raiz do projeto e execute um comando em cada terminal:
 
@@ -147,7 +183,7 @@ npm.cmd run dev -w @monitoramento/dashboard
 
 Se a porta 5173 já estiver ocupada, o Vite escolhe outra, como 5174, e informa o endereço no terminal. Feche a instância antiga ou use a porta anunciada.
 
-## 7. Verifique testes e build
+## 8. Verifique testes e build
 
 Os comandos abaixo também devem ser executados antes de preparar uma publicação:
 
@@ -158,7 +194,7 @@ npm.cmd run build
 
 O build do painel fica em `apps/dashboard/dist`. O build da API é gerado em `apps/api/dist`.
 
-## 8. Firmware ESP32 (opcional)
+## 9. Firmware ESP32 (opcional)
 
 A dashboard Vue/API e a página local hospedada pelo ESP32 são interfaces distintas. O firmware compila os próprios arquivos web em `projeto/web_assets.hpp`.
 
@@ -197,7 +233,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Volte ao Arduino IDE e carregue o sketch atualizado. O processo normal incorpora os assets no firmware; não é necessário enviar uma imagem LittleFS separadamente.
 
-## 9. Conecte o ESP32 à dashboard
+## 10. Conecte o ESP32 à dashboard
 
 Há dois logins diferentes nesse processo:
 
@@ -226,7 +262,7 @@ Após o vínculo, o firmware envia temperatura, umidade e leitura do sensor de g
 
 Em produção, publique API e painel sob o mesmo domínio HTTPS com certificado confiável. O firmware sincroniza a hora por NTP e valida o certificado HTTPS pelo bundle de CAs do ESP32; a rede precisa permitir DNS, NTP e conexões HTTPS de saída.
 
-## 10. Publicação em produção
+## 11. Publicação em produção
 
 O procedimento acima é para desenvolvimento. Antes de publicar:
 

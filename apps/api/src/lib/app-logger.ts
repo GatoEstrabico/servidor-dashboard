@@ -52,6 +52,7 @@ const levelColors: Record<string, string> = {
   FATAL: '\u001b[1;31m'
 };
 const timeColor = '\u001b[33m';
+const prefixColor = '\u001b[34m';
 const colorReset = '\u001b[0m';
 const brazilDateTime = new Intl.DateTimeFormat('pt-BR', {
   timeZone: 'America/Sao_Paulo',
@@ -100,7 +101,7 @@ const output = new Writable({
       const coloredTimestamp = colorize(`[${timestamp}]`, timeColor);
       const coloredLevel = colorize(`[${level}]`, levelColors[level] ?? colorReset);
       const sourceLabel = source ?? (service === 'api-libsignal' ? 'LibSignal' : service);
-      const consoleLine = `${colorize(`[${sourceLabel}]`, colorReset)} ${coloredTimestamp}${coloredLevel} ${message}${consoleSuffix}\n`;
+      const consoleLine = `${colorize(`[${sourceLabel}]`, prefixColor)} ${coloredTimestamp}${coloredLevel} ${message}${consoleSuffix}\n`;
       const destination = typeof entry.level === 'number' && entry.level >= 40 ? process.stderr : process.stdout;
       destination.write(consoleLine);
       fileStream?.write(line);

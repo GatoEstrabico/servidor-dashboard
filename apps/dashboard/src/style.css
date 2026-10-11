@@ -139,6 +139,7 @@ button:disabled { cursor: wait; opacity: .7; }
 .notification-icon { display: grid; width: 29px; height: 29px; flex: 0 0 29px; place-items: center; border-radius: 50%; color: #a2692c; background: #faf1e2; }
 .notification-offline .notification-icon { color: #a85349; background: #f8e9e5; }
 .notification-online .notification-icon { color: #347751; background: #e8f3e9; }
+.notification-device-linked .notification-icon { color: #347751; background: #e8f3e9; }
 .notification-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }
 .notification-copy strong { color: #344139; font-size: 11px; }
 .notification-copy > span { color: #77837b; font-size: 10px; line-height: 1.45; }
@@ -273,16 +274,20 @@ button:disabled { cursor: wait; opacity: .7; }
 .workspace-manager-pane { gap: 11px; }
 .workspace-devices-title { margin: 0; color: #34423a; font-family: Manrope, sans-serif; font-size: 15px; }
 .workspace-device-list { display: grid; max-height: 330px; gap: 8px; overflow: auto; padding-right: 2px; }
-.workspace-device-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e5e9e3; border-radius: 5px; background: #fff; }
+.workspace-device-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, .55fr) minmax(180px, auto); align-items: center; gap: 10px; padding: 10px; border: 1px solid #e5e9e3; border-radius: 5px; background: #fff; }
 .workspace-device-summary { display: flex; min-width: 0; align-items: center; gap: 9px; }
-.workspace-device-summary > div { display: grid; min-width: 0; gap: 4px; }
+.workspace-device-summary > div { display: grid; min-width: 0; flex: 1; gap: 4px; }
 .workspace-device-summary strong { overflow: hidden; color: #34423a; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-device-summary small { overflow: hidden; color: #818d85; font-family: 'DM Mono', monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-device-icon { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border-radius: 4px; color: #377652; background: #edf5ef; }
 .workspace-device-assignment { display: grid; min-width: 0; gap: 4px; }
 .workspace-device-assignment span { color: #818d85; font-size: 9px; }
-.workspace-device-assignment strong { overflow: hidden; color: #34423a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-device-assignment strong { overflow-wrap: anywhere; color: #34423a; font-size: 10px; }
+.workspace-device-actions { display: grid; min-width: 0; gap: 6px; }
+.workspace-device-access-note { grid-column: 3; margin: 0; color: #818d85; font-size: 10px; line-height: 1.45; }
 .workspace-device-action { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; padding: 0 8px; font-size: 9px; white-space: nowrap; }
+.workspace-device-remove-action { color: #9a5148; }
+.workspace-device-remove-action:hover { border-color: #d7aaa2; color: #853b33; background: #fff5f3; }
 .workspace-device-action:disabled { opacity: .65; cursor: default; }
 .workspace-device-empty { padding: 20px 12px; border: 1px dashed #dce4dc; border-radius: 5px; color: #77837c; font-size: 11px; text-align: center; }
 .workspace-device-note { margin: 0; color: #818d85; font-size: 10px; line-height: 1.5; }
@@ -323,6 +328,7 @@ button:disabled { cursor: wait; opacity: .7; }
 .notification-workspace-config { display: grid; width: min(100%, 760px); gap: 13px; }
 .notification-workspace-config .settings-section-heading { margin: 0 0 2px; }
 .notification-workspace-config .settings-section-heading h3 { font-size: 16px; }
+.notification-sounds-panel .alert-sound-settings { width: min(100%, 760px); padding-top: 0; border-top: 0; }
 .user-management-card { padding: 18px; border: 1px solid #e5e9e3; border-radius: 5px; background: #fff; }
 .whatsapp-management-panel { display: grid; gap: 18px; }
 .email-management-panel { min-width: 0; }
@@ -591,7 +597,10 @@ button:disabled { cursor: wait; opacity: .7; }
   .workspace-remove-panel { align-items: stretch; flex-direction: column; }
   .danger-button { width: 100%; }
   .workspace-manager-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .workspace-device-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .workspace-device-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 8px; }
+  .workspace-device-summary, .workspace-device-assignment, .workspace-device-actions, .workspace-device-access-note { grid-column: 1; min-width: 0; }
+  .workspace-device-summary { width: 100%; }
+  .workspace-device-access-note { padding-top: 2px; }
   .notification-device-row { grid-template-columns: minmax(0, 1fr) 74px 74px; gap: 6px; }
   .workspace-device-action { width: 100%; font-size: 10px; }
   .main-area { margin-left: 0; }
@@ -898,3 +907,4 @@ button:disabled { cursor: wait; opacity: .7; }
 :root.dark-mode .notification-icon { color: #e1b66d; background: #3a3021; }
 :root.dark-mode .notification-offline .notification-icon { color: #d89e93; background: #392826; }
 :root.dark-mode .notification-online .notification-icon { color: #8bd4a8; background: #203a2b; }
+:root.dark-mode .notification-device-linked .notification-icon { color: #8bd4a8; background: #203a2b; }

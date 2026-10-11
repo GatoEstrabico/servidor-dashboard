@@ -15,9 +15,11 @@ import { toAccountProfile } from './lib/account-user.js';
 import {
   buildDemoSensorExternalId,
   canUseDemoSensorForUser,
+  canViewDemoSensorForUser,
   DEMO_SENSOR_PREFIX,
   isDemoSensorExternalId,
-  LEGACY_DEMO_SENSOR_EXTERNAL_ID
+  LEGACY_DEMO_SENSOR_EXTERNAL_ID,
+  resolveDemoSensorWorkspaceId
 } from './lib/demo-sensor.js';
 import {
   adminUserUpdateSchema,
@@ -379,8 +381,8 @@ function createCsrfToken(sessionToken: string): string {
 
 type DemoSensorTx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
-async function ensureDemoSensorForUser(user: { id: string; email: string; isPlatformAdmin: boolean; isBootstrapAdmin: boolean }, tx: DemoSensorTx = prisma) {
-  if (!demoSensorEnabled) return null;
+async function ensureDemoSensorForUser(user: { id: string; email: string; isPlatformAdmin: boolean; isBootstrapAdmin: boolean; demoSensorDismissed?: boolean }, tx: DemoSensorTx = prisma) {
+  if (!demoSensorEnabled || user.demoSensorDismissed) return null;
   const canUseDemoSensor = canUseDemoSensorForUser({
     isPlatformAdmin: user.isPlatformAdmin,
     isBootstrapAdmin: user.isBootstrapAdmin,
@@ -389,7 +391,12 @@ async function ensureDemoSensorForUser(user: { id: string; email: string; isPlat
   });
   if (!canUseDemoSensor) return null;
 
-  const existing = await tx.device.findFirst({
+  const ownedWorkspace = await tx.workspaceMember.findFirst({
+    where: { userId: user.id, role: 'owner' },
+    select: { workspaceId: true },
+    orderBy: { createdAt: 'asc' }
+  });
+  const sensors = await tx.device.findMany({
     where: {
       ownerUserId: user.id,
       OR: [
@@ -397,28 +404,38 @@ async function ensureDemoSensorForUser(user: { id: string; email: string; isPlat
         { externalId: { startsWith: `${DEMO_SENSOR_PREFIX}-` } }
       ]
     },
-    select: { id: true, externalId: true }
-  });
-  if (existing) return existing;
-
-  const workspaceId = await tx.workspaceMember.findFirst({
-    where: { userId: user.id },
-    select: { workspaceId: true },
+    select: { id: true, externalId: true, workspaceId: true, createdAt: true },
     orderBy: { createdAt: 'asc' }
   });
+  const canonicalSensor = sensors.find((sensor) => sensor.externalId === buildDemoSensorExternalId(user.id))
+    ?? sensors.find((sensor) => sensor.workspaceId === ownedWorkspace?.workspaceId)
+    ?? sensors.find((sensor) => sensor.workspaceId === null)
+    ?? sensors[0];
 
-  return tx.device.create({
-    data: {
-      externalId: buildDemoSensorExternalId(user.id),
-      name: 'Sensor de teste',
-      alias: 'Sensor de teste',
-      workspaceId: workspaceId?.workspaceId ?? null,
-      ownerUserId: user.id,
-      status: 'online',
-      lastSeenAt: new Date(),
-      location: 'Simulação'
-    }
-  });
+  if (!canonicalSensor) {
+    return tx.device.create({
+      data: {
+        externalId: buildDemoSensorExternalId(user.id),
+        name: 'Sensor de teste',
+        alias: 'Sensor de teste',
+        workspaceId: ownedWorkspace?.workspaceId ?? null,
+        ownerUserId: user.id,
+        status: 'online',
+        lastSeenAt: new Date(),
+        location: 'Simulação'
+      },
+      select: { id: true, externalId: true, workspaceId: true }
+    });
+  }
+
+  const canonicalWorkspaceId = resolveDemoSensorWorkspaceId(canonicalSensor.workspaceId, ownedWorkspace?.workspaceId ?? null);
+  if (canonicalSensor.workspaceId !== canonicalWorkspaceId) {
+    await tx.device.update({ where: { id: canonicalSensor.id }, data: { workspaceId: canonicalWorkspaceId } });
+  }
+  const duplicateIds = sensors.filter((sensor) => sensor.id !== canonicalSensor.id).map((sensor) => sensor.id);
+  if (duplicateIds.length) await tx.device.deleteMany({ where: { id: { in: duplicateIds } } });
+
+  return { id: canonicalSensor.id, externalId: canonicalSensor.externalId, workspaceId: canonicalWorkspaceId };
 }
 
 function safeEqual(left: string, right: string): boolean {
@@ -454,7 +471,7 @@ async function getUserContext(userId: string) {
 
   const isBootstrapAdmin = Boolean(bootstrapAdminEmail && user.email.toLowerCase() === bootstrapAdminEmail);
   const isPlatformAdmin = user.isPlatformAdmin || isBootstrapAdmin;
-  await ensureDemoSensorForUser({ id: user.id, email: user.email, isPlatformAdmin, isBootstrapAdmin });
+  await ensureDemoSensorForUser({ id: user.id, email: user.email, isPlatformAdmin, isBootstrapAdmin, demoSensorDismissed: user.demoSensorDismissed });
 
   return {
     id: user.id,
@@ -1847,34 +1864,50 @@ app.post('/api/device-links/login', { config: { rateLimit: { max: 5, timeWindow:
   if (!user || !passwordMatches) return reply.code(401).send({ error: 'Email ou senha incorretos.' });
   if (!user.emailVerifiedAt) return reply.code(403).send({ error: 'Confirme o e-mail da conta antes de vincular o aparelho.' });
   const userContext = await getUserContext(user.id);
-  const workspaceId = parsed.data.workspaceId ?? userContext?.activeWorkspaceId;
-  if (!workspaceId || !getWorkspaceRole(userContext ?? { workspaces: [] }, workspaceId)) {
-    return reply.code(403).send({ error: 'Selecione um ambiente ao qual sua conta pertence.' });
+  if (parsed.data.workspaceId && !getWorkspaceRole(userContext ?? { workspaces: [] }, parsed.data.workspaceId)) {
+    return reply.code(403).send({ error: 'Você não pertence ao ambiente informado.' });
   }
+  const notificationWorkspaceId = userContext?.activeWorkspaceId
+    ?? parsed.data.workspaceId
+    ?? userContext?.workspaces[0]?.id
+    ?? null;
 
-  const existingDevice = await prisma.device.findUnique({ where: { externalId }, include: { deviceLink: true } });
-  if (existingDevice?.workspaceId && existingDevice.workspaceId !== workspaceId) {
-    return reply.code(409).send({ error: 'Este aparelho já pertence a outro ambiente. Remova o vínculo anterior primeiro.' });
-  }
-  if (existingDevice?.deviceLink && existingDevice.deviceLink.userId !== user.id) {
-    return reply.code(409).send({ error: 'Este aparelho ja esta vinculado a outra conta.' });
-  }
-
-  const device = await prisma.device.upsert({
-    where: { externalId },
-    update: { workspaceId, ownerUserId: user.id, name, ...(location !== undefined ? { location } : {}), status: 'online', lastSeenAt: new Date() },
-    create: { workspaceId, ownerUserId: user.id, externalId, name, location: location ?? null, status: 'online', lastSeenAt: new Date() }
-  });
-  if (existingDevice && existingDevice.status !== device.status) {
-    await notifyAlarmStatusChange(device, device.status);
-  }
-  publishDeviceUpdate(device.workspaceId);
   const deviceToken = randomBytes(32).toString('base64url');
-  await prisma.deviceLink.upsert({
-    where: { deviceId: device.id },
-    update: { tokenHash: hash(deviceToken), userId: user.id },
-    create: { tokenHash: hash(deviceToken), userId: user.id, deviceId: device.id }
+  const linked = await prisma.$transaction(async (transaction) => {
+    const existingDevice = await transaction.device.findUnique({
+      where: { externalId },
+      include: { deviceLink: true }
+    });
+    const isNewAccountLink = existingDevice?.deviceLink?.userId !== user.id;
+
+    const device = await transaction.device.upsert({
+      where: { externalId },
+      update: { ownerUserId: user.id, linkBlockedForUserId: null, name, ...(location !== undefined ? { location } : {}), status: 'online', lastSeenAt: new Date() },
+      create: { workspaceId: null, ownerUserId: user.id, externalId, name, location: location ?? null, status: 'online', lastSeenAt: new Date() }
+    });
+    await transaction.deviceLink.upsert({
+      where: { deviceId: device.id },
+      update: { tokenHash: hash(deviceToken), userId: user.id },
+      create: { tokenHash: hash(deviceToken), userId: user.id, deviceId: device.id }
+    });
+    if (isNewAccountLink && notificationWorkspaceId) {
+      await transaction.deviceNotification.create({
+        data: {
+          userId: user.id,
+          workspaceId: notificationWorkspaceId,
+          deviceId: null,
+          deviceName: name,
+          status: 'device-linked',
+          title: 'Novo aparelho vinculado',
+          message: `O aparelho ${name} foi vinculado à sua conta. Acesse Aparelhos para associá-lo a um ambiente.`
+        }
+      });
+    }
+    return { device, isNewAccountLink };
   });
+  const { device, isNewAccountLink } = linked;
+  if (isNewAccountLink && notificationWorkspaceId) publishDeviceUpdate(notificationWorkspaceId);
+  if (device.workspaceId) publishDeviceUpdate(device.workspaceId);
   return reply.code(201).send({ deviceToken, device: { externalId: device.externalId, name: device.name } });
 });
 
@@ -1884,14 +1917,20 @@ app.post('/api/device-links/logout', async (request, reply) => {
   if (!deviceToken) return reply.code(401).send({ error: 'Vinculo de aparelho nao encontrado.' });
   const link = await prisma.deviceLink.findUnique({ where: { tokenHash: hash(deviceToken) }, include: { device: true } });
   if (!link) return reply.code(401).send({ error: 'Vinculo de aparelho invalido ou ja removido.' });
-  await prisma.$transaction([
-    prisma.deviceLink.delete({ where: { id: link.id } }),
-    prisma.device.update({ where: { id: link.deviceId }, data: { status: 'offline' } })
-  ]);
+  const removed = await prisma.$transaction(async (transaction) => {
+    const deletedLink = await transaction.deviceLink.deleteMany({
+      where: { id: link.id, tokenHash: hash(deviceToken) }
+    });
+    if (!deletedLink.count) return false;
+    await transaction.device.update({
+      where: { id: link.deviceId },
+      data: { status: 'offline', workspaceId: null, ownerUserId: null, linkBlockedForUserId: link.userId }
+    });
+    return true;
+  });
+  if (!removed) return reply.code(401).send({ error: 'Vinculo de aparelho invalido ou ja removido.' });
   publishDeviceUpdate(link.device.workspaceId);
-  if (link.device.status !== 'offline') {
-    await notifyAlarmStatusChange(link.device, 'offline');
-  }
+  await prisma.deviceNotificationPreference.deleteMany({ where: { deviceId: link.deviceId } });
   return { ok: true };
 });
 
@@ -1908,14 +1947,16 @@ app.get('/api/devices', async (request, reply) => {
       deviceLink: { select: { userId: true } }
     }
   });
-  const canUseDemoSensor = canUseDemoSensorForUser({
-    isPlatformAdmin: auth.user.isPlatformAdmin,
-    isBootstrapAdmin: auth.user.isBootstrapAdmin,
-    demoSensorEnabled,
-    demoSensorAdminOnly
-  });
   return {
-    devices: devices.filter((device) => canUseDemoSensor || !isDemoSensorExternalId(device.externalId))
+    devices: devices.filter((device) => !isDemoSensorExternalId(device.externalId)
+      || canViewDemoSensorForUser({
+        ownerUserId: device.ownerUserId,
+        userId: auth.user.id,
+        isPlatformAdmin: auth.user.isPlatformAdmin,
+        isBootstrapAdmin: auth.user.isBootstrapAdmin,
+        demoSensorEnabled,
+        demoSensorAdminOnly
+      }))
       .map(({ ownerUserId, deviceLink, ...device }) => ({
       ...device,
       canSimulate: isDemoSensorExternalId(device.externalId) && ownerUserId === auth.user.id,
@@ -2027,7 +2068,6 @@ app.patch<{ Params: { id: string } }>('/api/devices/:id/alias', async (request, 
 app.get('/api/account/devices', async (request, reply) => {
   const auth = await requireSession(request, reply);
   if (!auth) return;
-  const workspaceIds = auth.user.workspaces.map((workspace) => workspace.id);
   const workspaceRoles = new Map(auth.user.workspaces.map((workspace) => [workspace.id, workspace.role]));
   const deviceRelations = { workspace: { select: { id: true, name: true } }, deviceLink: { select: { userId: true } } };
   const [links, accessibleDevices, orphanedDevices] = await Promise.all([
@@ -2037,13 +2077,13 @@ app.get('/api/account/devices', async (request, reply) => {
       orderBy: { createdAt: 'desc' }
     }),
     prisma.device.findMany({
-      where: { OR: [{ workspaceId: { in: workspaceIds } }, { ownerUserId: auth.user.id }] },
+      where: { ownerUserId: auth.user.id },
       include: deviceRelations,
       orderBy: { name: 'asc' }
     }),
     auth.user.isPlatformAdmin
       ? prisma.device.findMany({
-        where: { workspaceId: null, ownerUserId: null, deviceLink: { is: null } },
+        where: { workspaceId: null, ownerUserId: null, deviceLink: { is: null }, linkBlockedForUserId: null },
         include: deviceRelations,
         orderBy: { name: 'asc' }
       })
@@ -2062,19 +2102,67 @@ app.get('/api/account/devices', async (request, reply) => {
       lastSeenAt: device.lastSeenAt,
       workspaceId: device.workspaceId,
       workspaceName: device.workspace?.name ?? null,
-      canAssign: device.ownerUserId === auth.user.id
-        || device.deviceLink?.userId === auth.user.id
-        || canManageWorkspace(device.workspaceId ? workspaceRoles.get(device.workspaceId) ?? null : null)
+      canUnlink: !isDemoSensorExternalId(device.externalId)
+        && (device.deviceLink?.userId === auth.user.id || device.ownerUserId === auth.user.id),
+      canAssign: (device.ownerUserId === auth.user.id || device.deviceLink?.userId === auth.user.id)
+        && (!device.workspaceId || workspaceRoles.get(device.workspaceId) === 'owner')
         || (auth.user.isPlatformAdmin && !device.ownerUserId && !device.deviceLink && !device.workspaceId)
     }))
   };
 });
 
+app.delete<{ Params: { id: string } }>('/api/account/devices/:id', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  const demoSensor = await prisma.device.findFirst({
+    where: { id: request.params.id, ownerUserId: auth.user.id },
+    select: { externalId: true }
+  });
+  if (demoSensor && isDemoSensorExternalId(demoSensor.externalId)) {
+    return reply.code(403).send({ error: 'O sensor de teste não pode ser desvinculado por esta ação.' });
+  }
+  const link = await prisma.deviceLink.findFirst({
+    where: { deviceId: request.params.id, userId: auth.user.id },
+    include: { device: true }
+  });
+  const ownedDevice = link ? null : await prisma.device.findFirst({
+    where: { id: request.params.id, ownerUserId: auth.user.id, deviceLink: { is: null } }
+  });
+  const device = link?.device ?? ownedDevice;
+  if (!device) return reply.code(404).send({ error: 'Aparelho não vinculado à sua conta.' });
+
+  const removed = await prisma.$transaction(async (transaction) => {
+    if (link) {
+      const deletedLink = await transaction.deviceLink.deleteMany({
+        where: { id: link.id, userId: auth.user.id }
+      });
+      if (!deletedLink.count) return false;
+    } else {
+      const ownedDeviceStillExists = await transaction.device.findFirst({
+        where: { id: device.id, ownerUserId: auth.user.id, deviceLink: { is: null } },
+        select: { id: true }
+      });
+      if (!ownedDeviceStillExists) return false;
+    }
+    await transaction.reading.deleteMany({ where: { deviceId: device.id } });
+    await transaction.deviceNotificationPreference.deleteMany({ where: { deviceId: device.id } });
+    await transaction.device.update({
+      where: { id: device.id },
+      data: { status: 'offline', workspaceId: null, ownerUserId: null, linkBlockedForUserId: auth.user.id }
+    });
+    return true;
+  });
+  if (!removed) return reply.code(404).send({ error: 'Aparelho não vinculado à sua conta.' });
+
+  publishDeviceUpdate(device.workspaceId);
+  return { ok: true, message: 'Aparelho desvinculado da conta.' };
+});
+
 app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/devices', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
-  if (!getWorkspaceRole(auth.user, request.params.workspaceId)) {
-    return reply.code(403).send({ error: 'Você não pertence a esse ambiente.' });
+  if (getWorkspaceRole(auth.user, request.params.workspaceId) !== 'owner') {
+    return reply.code(403).send({ error: 'Só o proprietário pode adicionar ou mover aparelhos neste ambiente.' });
   }
   const parsed = assignWorkspaceDeviceSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'Aparelho inválido.' });
@@ -2085,7 +2173,10 @@ app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/devi
   if (!device) return reply.code(404).send({ error: 'Aparelho não encontrado.' });
   const sourceRole = device.workspaceId ? getWorkspaceRole(auth.user, device.workspaceId) : null;
   const isAdminRecovery = auth.user.isPlatformAdmin && !device.ownerUserId && !device.deviceLink && !device.workspaceId;
-  if (device.ownerUserId !== auth.user.id && device.deviceLink?.userId !== auth.user.id && !canManageWorkspace(sourceRole) && !isAdminRecovery) {
+  if (device.workspaceId && sourceRole !== 'owner') {
+    return reply.code(403).send({ error: 'Só o proprietário pode mover aparelhos para fora deste ambiente.' });
+  }
+  if (device.ownerUserId !== auth.user.id && device.deviceLink?.userId !== auth.user.id && !isAdminRecovery) {
     return reply.code(403).send({ error: 'Você não tem permissão para mover este aparelho.' });
   }
   await prisma.device.update({
@@ -2093,6 +2184,24 @@ app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/devi
     data: { workspaceId: request.params.workspaceId, ownerUserId: device.ownerUserId ?? device.deviceLink?.userId ?? auth.user.id }
   });
   return { ok: true, device: { id: device.id, name: device.name }, workspaceId: request.params.workspaceId };
+});
+
+app.delete<{ Params: { workspaceId: string; deviceId: string } }>('/api/workspaces/:workspaceId/devices/:deviceId', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  const role = getWorkspaceRole(auth.user, request.params.workspaceId);
+  if (role !== 'owner') return reply.code(403).send({ error: 'Só o proprietário pode remover aparelhos deste ambiente.' });
+  const device = await prisma.device.findUnique({
+    where: { id: request.params.deviceId, workspaceId: request.params.workspaceId },
+    include: { deviceLink: { select: { userId: true } } }
+  });
+  if (!device) return reply.code(404).send({ error: 'Aparelho não encontrado neste ambiente.' });
+  await prisma.$transaction([
+    prisma.device.update({ where: { id: device.id }, data: { workspaceId: null } }),
+    prisma.deviceNotificationPreference.deleteMany({ where: { workspaceId: request.params.workspaceId, deviceId: device.id } })
+  ]);
+  publishDeviceUpdate(request.params.workspaceId);
+  return { ok: true, device: { id: device.id, name: device.name } };
 });
 
 app.get<{ Params: { id: string } }>('/api/devices/:id', async (request, reply) => {

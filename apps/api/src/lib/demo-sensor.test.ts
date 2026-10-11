@@ -1,15 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildDemoSensorExternalId, canUseDemoSensorForUser, isDemoSensorExternalId, LEGACY_DEMO_SENSOR_EXTERNAL_ID } from './demo-sensor.js';
+import { buildDemoSensorExternalId, canUseDemoSensorForUser, canViewDemoSensorForUser, isDemoSensorExternalId, LEGACY_DEMO_SENSOR_EXTERNAL_ID, resolveDemoSensorWorkspaceId } from './demo-sensor.js';
 
 test('builds a unique demo sensor id per user', () => {
   assert.equal(buildDemoSensorExternalId('user-123'), 'demo-sensor-user-123');
+  assert.notEqual(buildDemoSensorExternalId('user-123'), buildDemoSensorExternalId('user-456'));
+});
+
+test('keeps one stable demo sensor id per account', () => {
+  assert.equal(buildDemoSensorExternalId('user-123'), buildDemoSensorExternalId('user-123'));
 });
 
 test('recognizes legacy and generated demo sensor ids', () => {
   assert.equal(isDemoSensorExternalId(LEGACY_DEMO_SENSOR_EXTERNAL_ID), true);
   assert.equal(isDemoSensorExternalId('demo-sensor-user-123'), true);
+  assert.equal(isDemoSensorExternalId('demo-sensor-user-123-workspace-a'), true);
   assert.equal(isDemoSensorExternalId('sensor-real-001'), false);
 });
 
@@ -44,4 +50,15 @@ test('allows admins to keep using the demo sensor in admin-only mode', () => {
     demoSensorEnabled: true,
     demoSensorAdminOnly: true
   }), true);
+});
+
+test('only shows a demo sensor to its owner', () => {
+  const settings = { isPlatformAdmin: false, isBootstrapAdmin: false, demoSensorEnabled: true, demoSensorAdminOnly: false };
+  assert.equal(canViewDemoSensorForUser({ ...settings, ownerUserId: 'owner-1', userId: 'owner-1' }), true);
+  assert.equal(canViewDemoSensorForUser({ ...settings, ownerUserId: 'owner-1', userId: 'member-1' }), false);
+});
+test('does not reassign an unassigned demo sensor after removal', () => {
+  assert.equal(resolveDemoSensorWorkspaceId(null, 'owned-workspace'), null);
+  assert.equal(resolveDemoSensorWorkspaceId('shared-workspace', 'owned-workspace'), null);
+  assert.equal(resolveDemoSensorWorkspaceId('owned-workspace', 'owned-workspace'), 'owned-workspace');
 });

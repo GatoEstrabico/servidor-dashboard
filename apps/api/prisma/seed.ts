@@ -68,7 +68,7 @@ async function main() {
 
   const demoSensorEnabled = (process.env.DEMO_SENSOR_ENABLED ?? 'true') === 'true';
   const demoSensorAdminOnly = (process.env.DEMO_SENSOR_ADMIN_ONLY ?? 'false') === 'true';
-  if (demoSensorEnabled && canUseDemoSensorForUser({ isPlatformAdmin: admin.isPlatformAdmin, isBootstrapAdmin: true, demoSensorEnabled: true, demoSensorAdminOnly: demoSensorAdminOnly })) {
+  if (demoSensorEnabled && !admin.demoSensorDismissed && canUseDemoSensorForUser({ isPlatformAdmin: admin.isPlatformAdmin, isBootstrapAdmin: true, demoSensorEnabled: true, demoSensorAdminOnly: demoSensorAdminOnly })) {
     const existingDemoSensor = await prisma.device.findFirst({
       where: {
         ownerUserId: admin.id,

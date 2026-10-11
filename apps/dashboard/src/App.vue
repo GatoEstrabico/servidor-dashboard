@@ -33,6 +33,7 @@ type AccountLinkedDevice = {
   lastSeenAt: string;
   workspaceId: string | null;
   workspaceName: string | null;
+  canUnlink: boolean;
   canAssign: boolean;
 };
 type WorkspaceMember = { id: string; email: string; displayName: string; role: string; emailVerifiedAt: string | null; isPlatformAdmin: boolean; createdAt: string };
@@ -74,9 +75,9 @@ type Device = {
 type DemoSimulationForm = { status: Device['status']; temperature: number; humidity: number; gas: number };
 type DeviceNotification = {
   id: string;
-  deviceId: string;
+  deviceId: string | null;
   deviceName: string;
-  status: Device['status'];
+  status: Device['status'] | 'device-linked';
   title: string;
   message: string;
   createdAt: string;
@@ -138,9 +139,11 @@ const accountLinkedDevices = ref<AccountLinkedDevice[]>([]);
 const accountDevicesLoading = ref(false);
 const accountDevicesError = ref('');
 const accountDevicesMessage = ref('');
+const accountDeviceUnlinkingId = ref<string | null>(null);
 const workspaceDeviceTargetId = ref<string | null>(null);
 const activeWorkspaceId = ref<string | null>(null);
 const activeWorkspace = computed(() => workspaces.value.find((workspace) => workspace.id === activeWorkspaceId.value) ?? null);
+const ownedWorkspaces = computed(() => workspaces.value.filter((workspace) => workspace.role === 'owner'));
 const notificationWorkspace = computed(() => workspaces.value.find((workspace) => workspace.id === notificationWorkspaceId.value) ?? null);
 const activeWorkspaceCode = computed(() => activeWorkspace.value?.accessCode ?? '');
 const canManageActiveWorkspace = computed(() => ['owner', 'admin'].includes(activeWorkspace.value?.role ?? ''));
@@ -264,7 +267,6 @@ const resetMessage = ref('');
 const resetError = ref('');
 const resetToken = ref('');
 const settingsOpen = ref(false);
-const settingsTab = ref<'preferences' | 'account' | 'sounds'>('preferences');
 const workspaceMenuOpen = ref(false);
 const mobileWorkspaceSelectorOpen = ref(false);
 const workspaceDialogOpen = ref(false);
@@ -314,7 +316,7 @@ const workspaceAlertPreferences = ref<WorkspaceAlertPreferences>({
   devices: []
 });
 const notificationWorkspaceId = ref<string | null>(null);
-const notificationSectionTab = ref<'configuration' | 'workspaces'>('configuration');
+const notificationSectionTab = ref<'configuration' | 'workspaces' | 'sounds'>('configuration');
 const workspaceAlertPreferencesLoading = ref(false);
 const workspaceAlertPreferencesSaving = ref(false);
 const workspaceAlertPreferencesMessage = ref('');
@@ -377,6 +379,7 @@ const englishText: Record<string, string> = {
   'Notificações': 'Notifications',
   'não lidas': 'unread',
   'Todas as notificações foram lidas': 'All notifications have been read',
+  'Novo aparelho vinculado': 'New device linked',
   'Apagar notificações': 'Delete notifications',
   'Apagar todas as notificações deste ambiente?': 'Delete all notifications in this workspace?',
   'Não foi possível apagar as notificações.': 'Could not delete notifications.',
@@ -445,6 +448,8 @@ const englishText: Record<string, string> = {
   'Inglês (Reino Unido)': 'English (United Kingdom)',
   'Salvar notificações': 'Save notification settings',
   'Modo escuro': 'Dark mode',
+  'Ativar modo escuro': 'Enable dark mode',
+  'Desativar modo escuro': 'Disable dark mode',
   'Aparencia salva neste navegador': 'Appearance saved in this browser',
   'Sons de alerta': 'Alert sounds',
   'Retorno ao normal': 'Back to normal',
@@ -568,8 +573,21 @@ const englishText: Record<string, string> = {
   'Mover para este ambiente': 'Move to this workspace',
   'Este aparelho já está neste ambiente': 'This device is already in this workspace',
   'Mover este aparelho? Ele deixará de aparecer no ambiente atual.': 'Move this device? It will no longer appear in its current workspace.',
+  'Você também pode remover um aparelho do ambiente sem excluí-lo da sua conta.': 'You can also remove a device from a workspace without unlinking it from your account.',
+  'Remover este aparelho do ambiente? Ele continuará vinculado à sua conta.': 'Remove this device from the workspace? It will remain linked to your account.',
   'Aparelho adicionado ao ambiente.': 'Device added to workspace.',
   'Aparelho movido para o ambiente.': 'Device moved to workspace.',
+  'Aparelho removido do ambiente.': 'Device removed from workspace.',
+  'Desvincular da conta': 'Unlink from account',
+  'Desvinculando...': 'Unlinking...',
+  'Desvincular este aparelho? Ele será removido de todos os ambientes e desta conta.': 'Unlink this device? It will be removed from all workspaces and from this account.',
+  'Aparelho desvinculado da conta.': 'Device unlinked from the account.',
+  'Não foi possível desvincular o aparelho.': 'Could not unlink the device.',
+  'Este aparelho foi desvinculado desta conta. Remova as credenciais salvas no aparelho antes de vinculá-lo novamente.': 'This device was unlinked from this account. Remove the saved credentials from the device before linking it again.',
+  'Desvincular': 'Unlink',
+  'Não foi possível remover o aparelho do ambiente.': 'Could not remove the device from the workspace.',
+  'Remover do ambiente': 'Remove from workspace',
+  'Você não tem permissão para remover este aparelho do ambiente.': 'You do not have permission to remove this device from the workspace.',
   'Nenhum aparelho de monitoramento vinculado à sua conta.': 'No monitoring devices are linked to your account.',
   'Falha ao carregar aparelhos vinculados.': 'Failed to load linked devices.',
   'Não foi possível adicionar o aparelho ao ambiente.': 'Could not add the device to the workspace.',
@@ -577,6 +595,11 @@ const englishText: Record<string, string> = {
   'Aparelho inválido.': 'Invalid device.',
   'Aparelho não vinculado à sua conta.': 'This device is not linked to your account.',
   'Você não tem permissão para mover este aparelho.': 'You do not have permission to move this device.',
+  'Só o proprietário pode adicionar ou mover aparelhos neste ambiente.': 'Only the workspace owner can add or move devices in this workspace.',
+  'Só o proprietário pode mover aparelhos para fora deste ambiente.': 'Only the workspace owner can move devices out of this workspace.',
+  'Só o proprietário pode remover aparelhos deste ambiente.': 'Only the workspace owner can remove devices from this workspace.',
+  'Você não é proprietário deste ambiente. Pode importá-lo e receber notificações, mas não gerenciar seus aparelhos.': 'You do not own this workspace. You can import it and receive notifications, but cannot manage its devices.',
+  'Você não possui ambientes próprios.': 'You do not own any workspaces.',
   'Gerenciamento de aparelhos': 'Device management',
   'Aparelhos de monitoramento vinculados à sua conta': 'Monitoring devices linked to your account',
   'Sem permissão para mover este aparelho.': 'You do not have permission to move this device.',
@@ -1011,7 +1034,12 @@ async function loadNotifications(playSoundsForNew = false): Promise<void> {
     const result = await api<{ notifications: DeviceNotification[] }>('/api/notifications');
     notifications.value = result.notifications;
     if (playSoundsForNew) {
-      for (const status of new Set(result.notifications.filter((notification) => !existingIds.has(notification.id)).map((notification) => notification.status))) {
+      const alertStatuses = new Set<AlertSoundStatus>();
+      for (const notification of result.notifications) {
+        if (existingIds.has(notification.id) || notification.status === 'device-linked') continue;
+        alertStatuses.add(notification.status);
+      }
+      for (const status of alertStatuses) {
         playAlertSound(alertSoundPreferences.value[status]);
       }
     }
@@ -1058,9 +1086,24 @@ async function deleteAllNotifications(): Promise<void> {
   }
 }
 
-function openDeviceNotification(notification: DeviceNotification) {
+async function openDeviceNotification(notification: DeviceNotification) {
   notificationOpen.value = false;
-  if (!devices.value.some((device) => device.id === notification.deviceId)) return;
+  if (notification.status === 'device-linked') {
+    if (!notification.read) {
+      try {
+        await api(`/api/notifications/${notification.id}/read`, {
+          method: 'PATCH',
+          headers: { 'X-CSRF-Token': csrfToken.value }
+        });
+        notifications.value = notifications.value.map((item) => item.id === notification.id ? { ...item, read: true } : item);
+      } catch {
+        pageError.value = t('Não foi possível marcar a notificação como lida.');
+      }
+    }
+    openWorkspaceManager('devices');
+    return;
+  }
+  if (!notification.deviceId || !devices.value.some((device) => device.id === notification.deviceId)) return;
   search.value = '';
   if (!expandedDeviceIds.value.includes(notification.deviceId)) {
     expandedDeviceIds.value = [...expandedDeviceIds.value, notification.deviceId];
@@ -1071,6 +1114,7 @@ function openDeviceNotification(notification: DeviceNotification) {
 }
 
 function notificationMessageInEnglish(notification: DeviceNotification) {
+  if (notification.status === 'device-linked') return `Device ${notification.deviceName} was linked to your account. Open Devices to assign it to a workspace.`;
   if (notification.status === 'online') return `Device ${notification.deviceName} is back online.`;
   if (notification.status === 'warning') return `Device ${notification.deviceName} requires attention.`;
   return `Device ${notification.deviceName} is offline.`;
@@ -1167,7 +1211,7 @@ async function loadAccountDevices() {
 
 async function assignAccountDevice(device: AccountLinkedDevice) {
   const targetWorkspaceId = workspaceDeviceTargetId.value;
-  if (!targetWorkspaceId || device.workspaceId === targetWorkspaceId) return;
+  if (!targetWorkspaceId || device.workspaceId === targetWorkspaceId || !device.canAssign) return;
   if (device.workspaceId && !window.confirm(t('Mover este aparelho? Ele deixará de aparecer no ambiente atual.'))) return;
   accountDevicesError.value = '';
   accountDevicesMessage.value = '';
@@ -1182,6 +1226,45 @@ async function assignAccountDevice(device: AccountLinkedDevice) {
     await loadDevices();
   } catch (error) {
     accountDevicesError.value = error instanceof Error ? t(error.message) : t('Não foi possível adicionar o aparelho ao ambiente.');
+  }
+}
+
+async function removeAccountDeviceFromWorkspace(device: AccountLinkedDevice) {
+  if (!device.workspaceId || !device.canAssign) return;
+  if (!window.confirm(t('Remover este aparelho do ambiente? Ele continuará vinculado à sua conta.'))) return;
+  accountDevicesError.value = '';
+  accountDevicesMessage.value = '';
+  try {
+    await api(`/api/workspaces/${device.workspaceId}/devices/${device.id}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken.value }
+    });
+    accountDevicesMessage.value = t('Aparelho removido do ambiente.');
+    await loadAccountDevices();
+    await loadDevices();
+  } catch (error) {
+    accountDevicesError.value = error instanceof Error ? t(error.message) : t('Não foi possível remover o aparelho do ambiente.');
+  }
+}
+
+async function unlinkAccountDevice(device: AccountLinkedDevice) {
+  if (!device.canUnlink || accountDeviceUnlinkingId.value) return;
+  if (!window.confirm(t('Desvincular este aparelho? Ele será removido de todos os ambientes e desta conta.'))) return;
+  accountDeviceUnlinkingId.value = device.id;
+  accountDevicesError.value = '';
+  accountDevicesMessage.value = '';
+  try {
+    await api(`/api/account/devices/${device.id}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken.value }
+    });
+    accountDevicesMessage.value = t('Aparelho desvinculado da conta.');
+    await loadAccountDevices();
+    await loadDevices();
+  } catch (error) {
+    accountDevicesError.value = error instanceof Error ? t(error.message) : t('Não foi possível desvincular o aparelho.');
+  } finally {
+    accountDeviceUnlinkingId.value = null;
   }
 }
 
@@ -1215,7 +1298,9 @@ function openWorkspaceManager(action: 'create' | 'edit' | 'import' | 'share' | '
   accountDevicesError.value = '';
   accountDevicesMessage.value = '';
   if (action === 'devices') {
-    workspaceDeviceTargetId.value = activeWorkspaceId.value;
+    workspaceDeviceTargetId.value = ownedWorkspaces.value.some((workspace) => workspace.id === activeWorkspaceId.value)
+      ? activeWorkspaceId.value
+      : ownedWorkspaces.value[0]?.id ?? null;
     void loadAccountDevices();
   }
   if (action === 'members') void loadWorkspaceMembers();
@@ -2257,7 +2342,6 @@ function reformatWhatsappNumberForCountry() {
 
 function openSettings() {
   syncProfileForm();
-  settingsTab.value = 'preferences';
   accountMessage.value = '';
   accountError.value = '';
   notificationMessage.value = '';
@@ -3012,6 +3096,7 @@ onUnmounted(() => {
         <div class="breadcrumb"><img class="dashboard-logo" src="/logo.jpg" alt="UERJ" /><span>{{ t('Monitoramento') }}</span><span>/</span><strong>{{ t(managementTab === 'notifications' ? 'Notificações' : managementTab === 'users' ? 'Usuários' : managementTab === 'whatsapp' ? 'WhatsApp API' : managementTab === 'email' ? 'E-mail API' : 'Visao geral') }}</strong></div>
         <div class="top-actions">
           <span class="last-update"><span class="live-dot"></span> {{ t('Atualizado') }} {{ formatRefreshTime() }}</span>
+          <button class="icon-button theme-mode-toggle" type="button" :aria-label="t(darkMode ? 'Desativar modo escuro' : 'Ativar modo escuro')" :title="t(darkMode ? 'Desativar modo escuro' : 'Ativar modo escuro')" :aria-pressed="darkMode" @click="toggleDarkMode"><Sun v-if="darkMode" :size="18" /><Moon v-else :size="18" /></button>
           <div class="language-flags" role="group" :aria-label="t('Idioma')">
             <button class="language-flag" :class="{ active: language === 'pt-BR' }" type="button" :aria-label="t('Português (Brasil)')" :aria-pressed="language === 'pt-BR'" :title="t('Português (Brasil)')" @click="setLanguage('pt-BR')"><img class="language-flag-image" src="/flags/br.svg" alt="" /></button>
             <button class="language-flag" :class="{ active: language === 'en' }" type="button" :aria-label="t('Inglês (Reino Unido)')" :aria-pressed="language === 'en'" :title="t('Inglês (Reino Unido)')" @click="setLanguage('en')"><img class="language-flag-image" src="/flags/gb.svg" alt="" /></button>
@@ -3042,7 +3127,7 @@ onUnmounted(() => {
                     type="button"
                     @click="openDeviceNotification(notification)"
                   >
-                    <span class="notification-icon"><CircleCheck v-if="notification.status === 'online'" :size="17" /><AlertTriangle v-else :size="17" /></span>
+                    <span class="notification-icon"><CircleCheck v-if="notification.status === 'online' || notification.status === 'device-linked'" :size="17" /><AlertTriangle v-else :size="17" /></span>
                     <span class="notification-copy">
                       <strong>{{ t(notification.title) }}</strong>
                       <span>{{ language === 'en' ? notificationMessageInEnglish(notification) : notification.message }}</span>
@@ -3172,6 +3257,7 @@ onUnmounted(() => {
           <nav class="settings-tabs whatsapp-tabs notification-section-tabs" role="tablist" :aria-label="t('Notificações')">
             <button id="notificationConfigurationTab" class="settings-tab" :class="{ active: notificationSectionTab === 'configuration' }" type="button" role="tab" :aria-selected="notificationSectionTab === 'configuration'" aria-controls="notificationConfigurationPanel" @click="notificationSectionTab = 'configuration'"><Settings :size="15" />{{ t('Configurações') }}</button>
             <button id="notificationWorkspacesTab" class="settings-tab" :class="{ active: notificationSectionTab === 'workspaces' }" type="button" role="tab" :aria-selected="notificationSectionTab === 'workspaces'" aria-controls="notificationWorkspacesPanel" @click="notificationSectionTab = 'workspaces'"><Building2 :size="15" />{{ t('Aparelhos e ambiente') }}</button>
+            <button id="notificationSoundsTab" class="settings-tab" :class="{ active: notificationSectionTab === 'sounds' }" type="button" role="tab" :aria-selected="notificationSectionTab === 'sounds'" aria-controls="notificationSoundsPanel" @click="notificationSectionTab = 'sounds'"><Volume2 :size="15" />{{ t('Sons') }}</button>
           </nav>
           <section v-if="notificationSectionTab === 'configuration'" id="notificationConfigurationPanel" class="whatsapp-config-section" role="tabpanel" aria-labelledby="notificationConfigurationTab">
           <form class="settings-pane account-settings-form notification-settings-form" @submit.prevent="updateNotificationPreferences">
@@ -3202,7 +3288,7 @@ onUnmounted(() => {
             <button class="primary-button settings-save-button" type="submit" :disabled="accountSaving">{{ accountSaving ? t('Salvando...') : t('Salvar notificações') }}</button>
           </form>
           </section>
-          <section v-else id="notificationWorkspacesPanel" class="whatsapp-config-section notification-workspaces-panel" role="tabpanel" aria-labelledby="notificationWorkspacesTab">
+          <section v-else-if="notificationSectionTab === 'workspaces'" id="notificationWorkspacesPanel" class="whatsapp-config-section notification-workspaces-panel" role="tabpanel" aria-labelledby="notificationWorkspacesTab">
             <label class="notification-workspace-selector" for="notificationWorkspaceSelect">
               <span>{{ t('Ambiente') }}</span>
               <select id="notificationWorkspaceSelect" v-model="notificationWorkspaceId" class="settings-input" :disabled="workspaceAlertPreferencesLoading || workspaceAlertPreferencesSaving">
@@ -3241,6 +3327,42 @@ onUnmounted(() => {
               <p v-if="workspaceAlertPreferencesSaving" class="settings-help">{{ t('Salvando...') }}</p>
             </div>
             <div v-else class="workspace-device-empty">{{ t('Nenhum ambiente disponível.') }}</div>
+          </section>
+          <section v-else id="notificationSoundsPanel" class="whatsapp-config-section notification-sounds-panel" role="tabpanel" aria-labelledby="notificationSoundsTab">
+            <div class="alert-sound-settings" aria-labelledby="alertSoundTitle">
+              <div class="settings-section-heading"><h3 id="alertSoundTitle">{{ t('Sons de alerta') }}</h3></div>
+              <p class="settings-help">{{ t('Escolha um som diferente para cada mudança de estado. Os arquivos enviados ficam disponíveis para todas as contas.') }}</p>
+              <div class="alert-sound-assignment-grid">
+                <label class="alert-sound-assignment">
+                  <span>{{ t('Retorno ao normal') }}</span>
+                  <select v-model="alertSoundDraftPreferences.online" class="settings-input select-input"><option v-if="!alertSounds.length" value="default">alert.mp3</option><option v-for="audio in alertSounds" :key="audio.id" :value="audio.id">{{ audio.name }}</option></select>
+                  <button class="secondary-button" type="button" :aria-label="t(alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som')" :title="t(alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som')" :aria-pressed="alertSoundPreviewStatus === 'online'" @click="toggleAlertSoundPreview('online')"><Square v-if="alertSoundPreviewStatus === 'online'" :size="14" fill="currentColor" /><Play v-else :size="14" />{{ t(alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som') }}</button>
+                </label>
+                <label class="alert-sound-assignment">
+                  <span>{{ t('Atenção') }}</span>
+                  <select v-model="alertSoundDraftPreferences.warning" class="settings-input select-input"><option v-if="!alertSounds.length" value="default">alert.mp3</option><option v-for="audio in alertSounds" :key="audio.id" :value="audio.id">{{ audio.name }}</option></select>
+                  <button class="secondary-button" type="button" :aria-label="t(alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som')" :title="t(alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som')" :aria-pressed="alertSoundPreviewStatus === 'warning'" @click="toggleAlertSoundPreview('warning')"><Square v-if="alertSoundPreviewStatus === 'warning'" :size="14" fill="currentColor" /><Play v-else :size="14" />{{ t(alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som') }}</button>
+                </label>
+                <label class="alert-sound-assignment">
+                  <span>{{ t('Offline') }}</span>
+                  <select v-model="alertSoundDraftPreferences.offline" class="settings-input select-input"><option v-if="!alertSounds.length" value="default">alert.mp3</option><option v-for="audio in alertSounds" :key="audio.id" :value="audio.id">{{ audio.name }}</option></select>
+                  <button class="secondary-button" type="button" :aria-label="t(alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som')" :title="t(alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som')" :aria-pressed="alertSoundPreviewStatus === 'offline'" @click="toggleAlertSoundPreview('offline')"><Square v-if="alertSoundPreviewStatus === 'offline'" :size="14" fill="currentColor" /><Play v-else :size="14" />{{ t(alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som') }}</button>
+                </label>
+              </div>
+              <button class="primary-button" type="button" :disabled="alertSoundSaving" @click="saveAlertSoundPreferences">{{ alertSoundSaving ? t('Salvando...') : t('Salvar sons por alerta') }}</button>
+              <section v-if="alertAudioUploadEnabled" class="alert-sound-upload" aria-labelledby="alertSoundLibraryTitle">
+                <div class="settings-section-heading"><h3 id="alertSoundLibraryTitle">{{ t('Biblioteca compartilhada') }}</h3><span>{{ alertSounds.length }}</span></div>
+                <p class="settings-help">{{ t('Adicione um áudio para disponibilizá-lo a todas as contas.') }}</p>
+                <label class="whatsapp-config-field" for="alertSoundName"><span>{{ t('Nome do áudio') }}</span><input id="alertSoundName" v-model="alertAudioUploadName" class="settings-input" type="text" maxlength="80" /></label>
+                <div class="alert-sound-actions">
+                  <label class="secondary-button avatar-upload-button" for="alertSoundFile">{{ alertAudioUploadName || t('Escolher áudio') }}</label>
+                  <input id="alertSoundFile" class="visually-hidden" type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg,audio/webm" @change="selectAlertSoundFile" />
+                  <button class="primary-button" type="button" :disabled="alertAudioUploading || !alertAudioUploadDataUrl || !alertAudioUploadName.trim()" @click="uploadAlertSound">{{ alertAudioUploading ? t('Salvando...') : t('Adicionar à biblioteca') }}</button>
+                </div>
+              </section>
+              <p v-if="alertSoundError" class="error-message" role="alert">{{ t(alertSoundError) }}</p>
+              <p v-if="alertSoundMessage" class="success-message" role="status">{{ t(alertSoundMessage) }}</p>
+            </div>
           </section>
         </div>
         <div v-else-if="managementTab === 'whatsapp' && isWhatsAppDashboardAdmin" class="whatsapp-management-panel">
@@ -3749,10 +3871,11 @@ onUnmounted(() => {
 
         <div v-else-if="workspaceDialogAction === 'devices'" class="settings-pane workspace-manager-pane">
           <h3 class="workspace-devices-title">{{ t('Aparelhos de monitoramento vinculados à sua conta') }}</h3>
-          <p class="form-subtitle">{{ t('Escolha o ambiente de destino para adicionar ou mover seus aparelhos vinculados.') }}</p>
+          <p class="form-subtitle">{{ t('Escolha o ambiente de destino para adicionar ou mover seus aparelhos vinculados.') }} {{ t('Você também pode remover um aparelho do ambiente sem excluí-lo da sua conta.') }} {{ t('Você não é proprietário deste ambiente. Pode importá-lo e receber notificações, mas não gerenciar seus aparelhos.') }}</p>
           <label for="workspaceDeviceTarget">{{ t('Selecionar ambiente de destino') }}</label>
           <select id="workspaceDeviceTarget" v-model="workspaceDeviceTargetId" class="settings-input select-input">
-            <option v-for="workspace in workspaces" :key="workspace.id" :value="workspace.id">{{ workspace.name }}</option>
+            <option v-if="!ownedWorkspaces.length" :value="null" disabled>{{ t('Você não possui ambientes próprios.') }}</option>
+            <option v-for="workspace in ownedWorkspaces" :key="workspace.id" :value="workspace.id">{{ workspace.name }}</option>
           </select>
           <p v-if="accountDevicesMessage" class="success-message" role="status">{{ accountDevicesMessage }}</p>
           <p v-if="accountDevicesError" class="error-message" role="alert">{{ accountDevicesError }}</p>
@@ -3764,9 +3887,16 @@ onUnmounted(() => {
                 <div><strong>{{ device.name }}</strong><small>{{ device.externalId }}<template v-if="device.location"> · {{ device.location }}</template></small></div>
               </div>
               <div class="workspace-device-assignment"><span>{{ t('Ambiente atual') }}</span><strong>{{ device.workspaceName || t('Sem ambiente') }}</strong></div>
-              <button class="secondary-button workspace-device-action" type="button" :disabled="!workspaceDeviceTargetId || !device.canAssign || device.workspaceId === workspaceDeviceTargetId" @click="assignAccountDevice(device)">
-                {{ !device.canAssign ? t('Sem permissão para mover este aparelho.') : device.workspaceId === workspaceDeviceTargetId ? t('Este aparelho já está neste ambiente') : device.workspaceId ? t('Mover para este ambiente') : t('Adicionar a este ambiente') }}
-              </button>
+              <div v-if="device.canAssign" class="workspace-device-actions">
+                <button class="secondary-button workspace-device-action" type="button" :disabled="!workspaceDeviceTargetId || !device.canAssign || device.workspaceId === workspaceDeviceTargetId" @click="assignAccountDevice(device)">
+                  {{ !device.canAssign ? t('Sem permissão para mover este aparelho.') : device.workspaceId === workspaceDeviceTargetId ? t('Este aparelho já está neste ambiente') : device.workspaceId ? t('Mover para este ambiente') : t('Adicionar a este ambiente') }}
+                </button>
+                <button v-if="device.workspaceId && device.canAssign" class="secondary-button workspace-device-action workspace-device-remove-action" type="button" @click="removeAccountDeviceFromWorkspace(device)">{{ t('Remover do ambiente') }}</button>
+              </div>
+              <p v-else class="workspace-device-access-note">{{ t('Você não é proprietário deste ambiente. Pode importá-lo e receber notificações, mas não gerenciar seus aparelhos.') }}</p>
+              <div v-if="device.canUnlink" class="workspace-device-actions">
+                <button class="secondary-button workspace-device-action workspace-device-remove-action" type="button" :disabled="accountDeviceUnlinkingId === device.id" @click="unlinkAccountDevice(device)">{{ accountDeviceUnlinkingId === device.id ? t('Desvinculando...') : t('Desvincular da conta') }}</button>
+              </div>
             </article>
           </div>
           <div v-else class="workspace-device-empty">{{ t('Nenhum aparelho de monitoramento vinculado à sua conta.') }}</div>
@@ -3834,25 +3964,10 @@ onUnmounted(() => {
     <div v-if="settingsOpen" class="settings-overlay" @click.self="settingsOpen = false">
       <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
         <header class="settings-header">
-          <div><p class="eyebrow">{{ t('SUA CONTA') }}</p><h2 id="settingsTitle">{{ t('Configuracoes') }}</h2></div>
+          <div><p class="eyebrow">{{ t('SUA CONTA') }}</p><h2 id="settingsTitle">{{ t('Conta') }}</h2></div>
           <button class="icon-button" type="button" :aria-label="t('Fechar configuracoes')" @click="settingsOpen = false"><X :size="19" /></button>
         </header>
-
-        <nav class="settings-tabs" role="tablist" :aria-label="t('Configurações')">
-          <button class="settings-tab" :class="{ active: settingsTab === 'preferences' }" type="button" role="tab" :aria-selected="settingsTab === 'preferences'" @click="settingsTab = 'preferences'">{{ t('Preferências') }}</button>
-          <button class="settings-tab" :class="{ active: settingsTab === 'account' }" type="button" role="tab" :aria-selected="settingsTab === 'account'" @click="settingsTab = 'account'">{{ t('Conta') }}</button>
-          <button class="settings-tab" :class="{ active: settingsTab === 'sounds' }" type="button" role="tab" :aria-selected="settingsTab === 'sounds'" @click="settingsTab = 'sounds'">{{ t('Sons') }}</button>
-        </nav>
-
-        <div v-if="settingsTab === 'preferences'" class="settings-pane">
-          <label class="theme-setting">
-            <span class="theme-setting-icon"><Moon v-if="!darkMode" :size="18" /><Sun v-else :size="18" /></span>
-            <span class="theme-setting-copy"><strong>{{ t('Modo escuro') }}</strong><small>{{ t('Aparencia salva neste navegador') }}</small></span>
-            <input class="theme-switch" type="checkbox" :checked="darkMode" @change="toggleDarkMode" />
-          </label>
-        </div>
-
-        <div v-else-if="settingsTab === 'account'" class="settings-pane">
+        <div class="settings-pane">
           <div class="account-settings-form">
             <div class="settings-section-heading"><h3>{{ t('Perfil') }}</h3><span>{{ t('Confirme sua senha para salvar') }}</span></div>
             <div class="avatar-editor">
@@ -3882,43 +3997,6 @@ onUnmounted(() => {
             <button class="secondary-button settings-save-button" type="submit" :disabled="accountSaving">{{ t('Alterar senha') }}</button>
           </form>
           <button class="secondary-button mobile-account-logout" type="button" @click="logout"><LogOut :size="17" />{{ t('Sair da conta') }}</button>
-        </div>
-
-        <div v-else class="settings-pane">
-          <section class="alert-sound-settings" aria-labelledby="alertSoundTitle">
-            <div class="settings-section-heading"><h3 id="alertSoundTitle">{{ t('Sons de alerta') }}</h3></div>
-            <p class="settings-help">{{ t('Escolha um som diferente para cada mudança de estado. Os arquivos enviados ficam disponíveis para todas as contas.') }}</p>
-            <div class="alert-sound-assignment-grid">
-              <label class="alert-sound-assignment">
-                <span>{{ t('Retorno ao normal') }}</span>
-                <select v-model="alertSoundDraftPreferences.online" class="settings-input select-input"><option v-if="!alertSounds.length" value="default">alert.mp3</option><option v-for="audio in alertSounds" :key="audio.id" :value="audio.id">{{ audio.name }}</option></select>
-                <button class="secondary-button" type="button" :aria-label="t(alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som')" :title="t(alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som')" :aria-pressed="alertSoundPreviewStatus === 'online'" @click="toggleAlertSoundPreview('online')"><Square v-if="alertSoundPreviewStatus === 'online'" :size="14" fill="currentColor" /><Play v-else :size="14" />{{ t(alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som') }}</button>
-              </label>
-              <label class="alert-sound-assignment">
-                <span>{{ t('Atenção') }}</span>
-                <select v-model="alertSoundDraftPreferences.warning" class="settings-input select-input"><option v-if="!alertSounds.length" value="default">alert.mp3</option><option v-for="audio in alertSounds" :key="audio.id" :value="audio.id">{{ audio.name }}</option></select>
-                <button class="secondary-button" type="button" :aria-label="t(alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som')" :title="t(alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som')" :aria-pressed="alertSoundPreviewStatus === 'warning'" @click="toggleAlertSoundPreview('warning')"><Square v-if="alertSoundPreviewStatus === 'warning'" :size="14" fill="currentColor" /><Play v-else :size="14" />{{ t(alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som') }}</button>
-              </label>
-              <label class="alert-sound-assignment">
-                <span>{{ t('Offline') }}</span>
-                <select v-model="alertSoundDraftPreferences.offline" class="settings-input select-input"><option v-if="!alertSounds.length" value="default">alert.mp3</option><option v-for="audio in alertSounds" :key="audio.id" :value="audio.id">{{ audio.name }}</option></select>
-                <button class="secondary-button" type="button" :aria-label="t(alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som')" :title="t(alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som')" :aria-pressed="alertSoundPreviewStatus === 'offline'" @click="toggleAlertSoundPreview('offline')"><Square v-if="alertSoundPreviewStatus === 'offline'" :size="14" fill="currentColor" /><Play v-else :size="14" />{{ t(alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som') }}</button>
-              </label>
-            </div>
-            <button class="primary-button" type="button" :disabled="alertSoundSaving" @click="saveAlertSoundPreferences">{{ alertSoundSaving ? t('Salvando...') : t('Salvar sons por alerta') }}</button>
-            <section v-if="alertAudioUploadEnabled" class="alert-sound-upload" aria-labelledby="alertSoundLibraryTitle">
-              <div class="settings-section-heading"><h3 id="alertSoundLibraryTitle">{{ t('Biblioteca compartilhada') }}</h3><span>{{ alertSounds.length }}</span></div>
-              <p class="settings-help">{{ t('Adicione um áudio para disponibilizá-lo a todas as contas.') }}</p>
-              <label class="whatsapp-config-field" for="alertSoundName"><span>{{ t('Nome do áudio') }}</span><input id="alertSoundName" v-model="alertAudioUploadName" class="settings-input" type="text" maxlength="80" /></label>
-              <div class="alert-sound-actions">
-                <label class="secondary-button avatar-upload-button" for="alertSoundFile">{{ alertAudioUploadName || t('Escolher áudio') }}</label>
-                <input id="alertSoundFile" class="visually-hidden" type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg,audio/webm" @change="selectAlertSoundFile" />
-                <button class="primary-button" type="button" :disabled="alertAudioUploading || !alertAudioUploadDataUrl || !alertAudioUploadName.trim()" @click="uploadAlertSound">{{ alertAudioUploading ? t('Salvando...') : t('Adicionar à biblioteca') }}</button>
-              </div>
-            </section>
-            <p v-if="alertSoundError" class="error-message" role="alert">{{ t(alertSoundError) }}</p>
-            <p v-if="alertSoundMessage" class="success-message" role="status">{{ t(alertSoundMessage) }}</p>
-          </section>
         </div>
       </section>
     </div>

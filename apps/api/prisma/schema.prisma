@@ -22,6 +22,7 @@ model User {
   whatsappNotifications Boolean       @default(false)
   isPlatformAdmin Boolean             @default(false)
   passwordResetRequired Boolean        @default(false)
+  demoSensorDismissed Boolean          @default(false)
   activeWorkspaceId String?
   passwordHash   String
   createdAt      DateTime             @default(now())
@@ -74,6 +75,7 @@ model Device {
   workspaceId String?
   workspace  Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   ownerUserId String?
+  linkBlockedForUserId String?
   owner       User?     @relation("DeviceOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   readings   Reading[]
   deviceLink DeviceLink?

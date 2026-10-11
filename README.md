@@ -21,7 +21,16 @@ O painel web continua funcionando no navegador. Para gerar e instalar o APK Andr
   CREATE DATABASE monitoramento OWNER monitor;
   ```
 
-3. O arquivo `.env` local ja esta preparado. Troque `SESSION_SECRET`, `INGESTION_API_KEY`, a senha do usuario `monitor` (atualizando tambem o SQL acima e `DATABASE_URL`) e a senha inicial do administrador antes de expor o sistema fora desta maquina.
+3. O arquivo `.env` local ja esta preparado. Todos os arquivos de ambiente do projeto ficam na raiz do repositório: `.env`, `.env.android.local` e `.env.production.local` (quando usados). O projeto já está configurado para ler esses arquivos na raiz, e não deve haver cópias em `apps/api` ou `apps/dashboard`. Troque `SESSION_SECRET`, `INGESTION_API_KEY`, a senha do usuario `monitor` (atualizando tambem o SQL acima e `DATABASE_URL`) e a senha inicial do administrador antes de expor o sistema fora desta maquina.
+
+   Para criar os arquivos locais a partir dos modelos:
+
+   ```powershell
+   Copy-Item .env.example .env
+   Copy-Item .env.android.example .env.android.local
+   Copy-Item .env.production.example .env.production.local
+   ```
+
 4. Instale dependencias com `npm.cmd install`. No PowerShell, use o sufixo `.cmd` se a politica de execucao bloquear o script `npm.ps1`; alternativamente, use Prompt de Comando (cmd).
 5. Gere o Prisma Client e crie as tabelas: `npm.cmd run db:generate` e `npm.cmd run db:push`.
 6. Crie/atualize o usuario administrador: `npm.cmd run db:seed`.

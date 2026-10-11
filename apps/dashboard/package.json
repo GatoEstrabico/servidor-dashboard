@@ -12,7 +12,7 @@
     "android:sync": "npm run build && cap sync android",
     "android:open": "cap open android",
     "android:build:debug": "npm run android:sync && node scripts/build-android-debug.mjs",
-    "android:build:release": "npm run android:sync && node scripts/build-android-release.mjs"
+    "android:build:release": "node scripts/build-android-release.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",

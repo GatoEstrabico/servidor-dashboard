@@ -250,12 +250,11 @@ Tambem pode copiar o APK para o celular e abri-lo. O Android pode solicitar perm
 Para distribuir ou usar o app sem deixar o dashboard Vite rodando no PC:
 
 1. Publique a API em um endereco HTTPS acessivel ao celular, com certificado confiavel.
-2. Apague a linha `CAPACITOR_SERVER_URL` de `.env.android.local` na raiz ou deixe-a vazia. Assim o HTML/Vue sera incorporado ao APK.
-3. Antes do build, defina `VITE_API_BASE_URL` com a origem HTTPS da API, sem `/api` no final. No PowerShell: `$env:VITE_API_BASE_URL = "https://api.seu-dominio.com"`. No Linux: `export VITE_API_BASE_URL="https://api.seu-dominio.com"`.
-4. No `.env` do servidor, permita a origem Capacitor e cookies seguros: `ANDROID_APP_ORIGIN="https://localhost"`, `COOKIE_SAME_SITE=none` e `COOKIE_SECURE=true`.
-5. Crie ou selecione um keystore conforme a proxima secao e execute `android:build:release`.
+2. Crie `.env.production.local` na raiz a partir de `.env.production.example` e configure `VITE_API_BASE_URL` com a origem HTTPS publica da API, sem `/api` no final.
+3. No `.env` do servidor, permita a origem Capacitor e cookies seguros: `ANDROID_APP_ORIGIN="https://localhost"`, `COOKIE_SAME_SITE=none` e `COOKIE_SECURE=true`.
+4. Crie ou selecione um keystore conforme a proxima secao e execute `android:build:release`.
 
-`VITE_API_BASE_URL` e incorporada na build; nao coloque senhas, tokens de sessao, credenciais SMTP ou `INGESTION_API_KEY` no frontend ou no APK.
+O arquivo `.env.production.local` na raiz e ignorado pelo Git. O Vite foi configurado para carregar os envs da raiz em builds production. O script release valida que a URL e HTTPS e nao e o dominio de exemplo, desativa `CAPACITOR_SERVER_URL` somente durante essa build e empacota os assets locais. Esse arquivo deve conter apenas a URL publica da API; nunca coloque nele senhas, tokens de sessao, credenciais SMTP ou `INGESTION_API_KEY`.
 
 ## 8. Criar keystore pelo terminal
 
@@ -287,17 +286,19 @@ As perguntas sobre nome/organizacao sao os dados do certificado. Nao coloque o k
 
 ## 9. Gerar e assinar release pelo terminal
 
-Confirme primeiro a configuracao de producao descrita na secao 7. No arquivo `.env.android.local` na raiz, remova `CAPACITOR_SERVER_URL` ou deixe a linha vazia para empacotar os assets no APK. Se essa variavel foi exportada no terminal, remova-a tambem.
+Confirme primeiro a configuracao de producao descrita na secao 7. O script `android:build:release` ignora a URL de teste de `.env.android.local` para este processo e usa os assets locais do APK.
 
 No `.env` do servidor, use HTTPS e permita a origem Capacitor: `ANDROID_APP_ORIGIN="https://localhost"`, `COOKIE_SAME_SITE=none` e `COOKIE_SECURE=true`. Mantenha `SESSION_SECRET`, senhas, credenciais SMTP e `INGESTION_API_KEY` somente no servidor.
 
 ### Windows PowerShell
 
-Abra um novo PowerShell na raiz do repositorio, configure `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT` e `PATH` conforme a secao 2 e informe a URL HTTPS publica da API:
+Abra um novo PowerShell na raiz do repositorio, configure `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT` e `PATH` conforme a secao 2. Crie o env de producao e informe a URL HTTPS real da API:
 
 ```powershell
-Remove-Item Env:CAPACITOR_SERVER_URL -ErrorAction SilentlyContinue
-$env:VITE_API_BASE_URL = "https://api.seu-dominio.com"
+Copy-Item .env.production.example .env.production.local -Force
+$apiUrl = Read-Host "URL HTTPS publica da API, sem /api no final"
+if ($apiUrl -notmatch '^https://') { throw "A URL da API precisa usar HTTPS." }
+"VITE_API_BASE_URL=$apiUrl" | Set-Content .env.production.local -Encoding ascii
 $env:ANDROID_KEYSTORE_PATH = "$env:USERPROFILE\.android\monitoramento-release.jks"
 $env:ANDROID_KEY_ALIAS = "monitoramento-release"
 $securePassword = Read-Host "Senha do keystore" -AsSecureString
@@ -311,11 +312,13 @@ Remove-Variable plainPassword,securePassword -ErrorAction SilentlyContinue
 
 ### Linux
 
-Abra um novo terminal na raiz do repositorio, configure `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT` e `PATH` conforme a secao 3:
+Abra um novo terminal na raiz do repositorio, configure `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT` e `PATH` conforme a secao 3. Crie o env de producao e informe a URL HTTPS real da API:
 
 ```bash
-unset CAPACITOR_SERVER_URL
-export VITE_API_BASE_URL="https://api.seu-dominio.com"
+cp .env.production.example .env.production.local
+read -r -p "URL HTTPS publica da API, sem /api no final: " API_URL
+[[ "$API_URL" == https://* ]] || { echo "A URL da API precisa usar HTTPS."; exit 1; }
+printf 'VITE_API_BASE_URL=%s\n' "$API_URL" > .env.production.local
 export ANDROID_KEYSTORE_PATH="$HOME/.android/monitoramento-release.jks"
 export ANDROID_KEY_ALIAS="monitoramento-release"
 read -r -s -p "Senha do keystore: " ANDROID_KEYSTORE_PASSWORD

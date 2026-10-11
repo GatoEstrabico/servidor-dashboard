@@ -10,8 +10,8 @@ const config: CapacitorConfig = {
   appName: 'Monitoramento de Laboratorio',
   webDir: 'dist',
   server: localDashboardUrl
-    ? { url: localDashboardUrl, cleartext: localDashboardUrl.startsWith('http://') }
-    : { androidScheme: 'https' }
+    ? { url: localDashboardUrl, cleartext: localDashboardUrl.startsWith('http://'), errorPath: 'offline.html' }
+    : { androidScheme: 'https', errorPath: 'offline.html' }
 };
 
 export default config;

@@ -123,6 +123,7 @@ const search = ref('');
 const loginError = ref('');
 const pageError = ref('');
 const loading = ref(true);
+const serverUnavailable = ref(false);
 const submitting = ref(false);
 const loginMode = ref<'login' | 'register' | 'forgot' | 'reset'>('login');
 const workspaceName = ref('');
@@ -977,15 +978,23 @@ const unreadNotificationCount = computed(() => notifications.value.filter((notif
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...options,
-    credentials: 'include',
-    headers: {
-      ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...options.headers
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...options.headers
+      }
+    });
+  } catch (error) {
+    serverUnavailable.value = true;
+    throw error;
+  }
+  serverUnavailable.value = false;
   if (!response.ok) {
+    if (response.status >= 500) serverUnavailable.value = true;
     const body = await response.json().catch(() => ({}));
     throw new Error(body.error ?? 'Nao foi possivel concluir a solicitacao.');
   }
@@ -2374,6 +2383,12 @@ async function checkSession() {
   }
 }
 
+async function retryServerConnection() {
+  serverUnavailable.value = false;
+  loading.value = true;
+  await checkSession();
+}
+
 async function login() {
   submitting.value = true;
   loginError.value = '';
@@ -3074,6 +3089,18 @@ onUnmounted(() => {
   <main v-if="loading" class="loading-screen" :aria-label="t('Carregando')">
     <LoaderCircle class="spin" :size="28" />
     <span>{{ t('Conectando ao monitoramento') }}</span>
+  </main>
+
+  <main v-else-if="serverUnavailable" class="server-offline-screen" role="alert" aria-live="polite">
+    <section class="server-offline-panel">
+      <img class="server-offline-logo" src="/logo.jpg" alt="" />
+      <p class="eyebrow">LAB / MONITOR</p>
+      <h1>{{ t('Servidor indisponível') }}</h1>
+      <p class="server-offline-copy">{{ t('Não foi possível conectar à API. Verifique se o servidor está ligado e tente novamente.') }}</p>
+      <button class="primary-button server-offline-retry" type="button" @click="retryServerConnection">
+        <RefreshCw :size="16" />{{ t('Tentar novamente') }}
+      </button>
+    </section>
   </main>
 
   <main v-else-if="!user" class="login-layout">

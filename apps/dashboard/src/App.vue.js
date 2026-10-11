@@ -30,6 +30,7 @@ const search = ref('');
 const loginError = ref('');
 const pageError = ref('');
 const loading = ref(true);
+const serverUnavailable = ref(false);
 const submitting = ref(false);
 const loginMode = ref('login');
 const workspaceName = ref('');
@@ -875,15 +876,25 @@ const latestReadings = computed(() => devices.value.reduce((total, device) => to
 const unreadNotificationCount = computed(() => notifications.value.filter((notification) => !notification.read).length);
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 async function api(path, options = {}) {
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-        ...options,
-        credentials: 'include',
-        headers: {
-            ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-            ...options.headers
-        }
-    });
+    let response;
+    try {
+        response = await fetch(`${apiBaseUrl}${path}`, {
+            ...options,
+            credentials: 'include',
+            headers: {
+                ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+                ...options.headers
+            }
+        });
+    }
+    catch (error) {
+        serverUnavailable.value = true;
+        throw error;
+    }
+    serverUnavailable.value = false;
     if (!response.ok) {
+        if (response.status >= 500)
+            serverUnavailable.value = true;
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error ?? 'Nao foi possivel concluir a solicitacao.');
     }
@@ -1103,8 +1114,16 @@ function openUserManagement() {
     if (!canManageUserAccounts.value)
         return;
     managementTab.value = 'users';
-    userManagementTab.value = 'accounts';
-    void loadAdminUsers();
+    userManagementTab.value = 'members';
+    void loadWorkspaceMembers();
+}
+function openWhatsAppManagement() {
+    whatsappTab.value = 'log';
+    managementTab.value = 'whatsapp';
+}
+function openEmailManagement() {
+    emailTab.value = 'log';
+    managementTab.value = 'email';
 }
 function resetAccountSessionState() {
     settingsOpen.value = false;
@@ -2338,6 +2357,11 @@ async function checkSession() {
         loading.value = false;
     }
 }
+async function retryServerConnection() {
+    serverUnavailable.value = false;
+    loading.value = true;
+    await checkSession();
+}
 async function login() {
     submitting.value = true;
     loginError.value = '';
@@ -3092,6 +3116,45 @@ if (__VLS_ctx.loading) {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Conectando ao monitoramento'));
 }
+else if (__VLS_ctx.serverUnavailable) {
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.main, __VLS_intrinsicElements.main)({
+        ...{ class: "server-offline-screen" },
+        role: "alert",
+        'aria-live': "polite",
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+        ...{ class: "server-offline-panel" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.img)({
+        ...{ class: "server-offline-logo" },
+        src: "/logo.jpg",
+        alt: "",
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+        ...{ class: "eyebrow" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.h1, __VLS_intrinsicElements.h1)({});
+    (__VLS_ctx.t('Servidor indisponível'));
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+        ...{ class: "server-offline-copy" },
+    });
+    (__VLS_ctx.t('Não foi possível conectar à API. Verifique se o servidor está ligado e tente novamente.'));
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+        ...{ onClick: (__VLS_ctx.retryServerConnection) },
+        ...{ class: "primary-button server-offline-retry" },
+        type: "button",
+    });
+    const __VLS_4 = {}.RefreshCw;
+    /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
+    // @ts-ignore
+    const __VLS_5 = __VLS_asFunctionalComponent(__VLS_4, new __VLS_4({
+        size: (16),
+    }));
+    const __VLS_6 = __VLS_5({
+        size: (16),
+    }, ...__VLS_functionalComponentArgsRest(__VLS_5));
+    (__VLS_ctx.t('Tentar novamente'));
+}
 else if (!__VLS_ctx.user) {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.main, __VLS_intrinsicElements.main)({
         ...{ class: "login-layout" },
@@ -3204,6 +3267,8 @@ else if (!__VLS_ctx.user) {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!(!__VLS_ctx.user))
                         return;
                     if (!(__VLS_ctx.loginMode === 'login'))
@@ -3228,17 +3293,17 @@ else if (!__VLS_ctx.user) {
             disabled: (__VLS_ctx.submitting),
         });
         if (__VLS_ctx.submitting) {
-            const __VLS_4 = {}.LoaderCircle;
+            const __VLS_8 = {}.LoaderCircle;
             /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_5 = __VLS_asFunctionalComponent(__VLS_4, new __VLS_4({
+            const __VLS_9 = __VLS_asFunctionalComponent(__VLS_8, new __VLS_8({
                 ...{ class: "spin" },
                 size: (17),
             }));
-            const __VLS_6 = __VLS_5({
+            const __VLS_10 = __VLS_9({
                 ...{ class: "spin" },
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_5));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_9));
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.submitting ? __VLS_ctx.t('Entrando...') : __VLS_ctx.t('Entrar'));
@@ -3246,6 +3311,8 @@ else if (!__VLS_ctx.user) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(__VLS_ctx.serverUnavailable))
                             return;
                         if (!(!__VLS_ctx.user))
                             return;
@@ -3263,15 +3330,15 @@ else if (!__VLS_ctx.user) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "secure-note" },
         });
-        const __VLS_8 = {}.ShieldCheck;
+        const __VLS_12 = {}.ShieldCheck;
         /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
         // @ts-ignore
-        const __VLS_9 = __VLS_asFunctionalComponent(__VLS_8, new __VLS_8({
+        const __VLS_13 = __VLS_asFunctionalComponent(__VLS_12, new __VLS_12({
             size: (16),
         }));
-        const __VLS_10 = __VLS_9({
+        const __VLS_14 = __VLS_13({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_9));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_13));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('Sessao protegida com criptografia'));
     }
@@ -3279,6 +3346,8 @@ else if (!__VLS_ctx.user) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!(!__VLS_ctx.user))
                         return;
@@ -3293,15 +3362,15 @@ else if (!__VLS_ctx.user) {
             ...{ class: "back-link" },
             type: "button",
         });
-        const __VLS_12 = {}.ChevronDown;
+        const __VLS_16 = {}.ChevronDown;
         /** @type {[typeof __VLS_components.ChevronDown, ]} */ ;
         // @ts-ignore
-        const __VLS_13 = __VLS_asFunctionalComponent(__VLS_12, new __VLS_12({
+        const __VLS_17 = __VLS_asFunctionalComponent(__VLS_16, new __VLS_16({
             size: (16),
         }));
-        const __VLS_14 = __VLS_13({
+        const __VLS_18 = __VLS_17({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_13));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_17));
         (__VLS_ctx.t('Voltar ao login'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
             ...{ class: "eyebrow" },
@@ -3371,17 +3440,17 @@ else if (!__VLS_ctx.user) {
             disabled: (__VLS_ctx.submitting),
         });
         if (__VLS_ctx.submitting) {
-            const __VLS_16 = {}.LoaderCircle;
+            const __VLS_20 = {}.LoaderCircle;
             /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_17 = __VLS_asFunctionalComponent(__VLS_16, new __VLS_16({
+            const __VLS_21 = __VLS_asFunctionalComponent(__VLS_20, new __VLS_20({
                 ...{ class: "spin" },
                 size: (17),
             }));
-            const __VLS_18 = __VLS_17({
+            const __VLS_22 = __VLS_21({
                 ...{ class: "spin" },
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_17));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_21));
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.submitting ? 'Criando conta...' : 'Criar conta');
@@ -3390,6 +3459,8 @@ else if (!__VLS_ctx.user) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!(!__VLS_ctx.user))
                         return;
@@ -3406,15 +3477,15 @@ else if (!__VLS_ctx.user) {
             ...{ class: "back-link" },
             type: "button",
         });
-        const __VLS_20 = {}.ChevronDown;
+        const __VLS_24 = {}.ChevronDown;
         /** @type {[typeof __VLS_components.ChevronDown, ]} */ ;
         // @ts-ignore
-        const __VLS_21 = __VLS_asFunctionalComponent(__VLS_20, new __VLS_20({
+        const __VLS_25 = __VLS_asFunctionalComponent(__VLS_24, new __VLS_24({
             size: (16),
         }));
-        const __VLS_22 = __VLS_21({
+        const __VLS_26 = __VLS_25({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_21));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_25));
         (__VLS_ctx.t('Voltar ao login'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
             ...{ class: "eyebrow" },
@@ -3459,17 +3530,17 @@ else if (!__VLS_ctx.user) {
             disabled: (__VLS_ctx.submitting),
         });
         if (__VLS_ctx.submitting) {
-            const __VLS_24 = {}.LoaderCircle;
+            const __VLS_28 = {}.LoaderCircle;
             /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_25 = __VLS_asFunctionalComponent(__VLS_24, new __VLS_24({
+            const __VLS_29 = __VLS_asFunctionalComponent(__VLS_28, new __VLS_28({
                 ...{ class: "spin" },
                 size: (17),
             }));
-            const __VLS_26 = __VLS_25({
+            const __VLS_30 = __VLS_29({
                 ...{ class: "spin" },
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_25));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_29));
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('Enviar link'));
@@ -3532,17 +3603,17 @@ else if (!__VLS_ctx.user) {
             disabled: (__VLS_ctx.submitting || !!__VLS_ctx.resetMessage),
         });
         if (__VLS_ctx.submitting) {
-            const __VLS_28 = {}.LoaderCircle;
+            const __VLS_32 = {}.LoaderCircle;
             /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_29 = __VLS_asFunctionalComponent(__VLS_28, new __VLS_28({
+            const __VLS_33 = __VLS_asFunctionalComponent(__VLS_32, new __VLS_32({
                 ...{ class: "spin" },
                 size: (17),
             }));
-            const __VLS_30 = __VLS_29({
+            const __VLS_34 = __VLS_33({
                 ...{ class: "spin" },
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_29));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_33));
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('Salvar nova senha'));
@@ -3550,6 +3621,8 @@ else if (!__VLS_ctx.user) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(__VLS_ctx.serverUnavailable))
                             return;
                         if (!(!__VLS_ctx.user))
                             return;
@@ -3589,15 +3662,15 @@ else {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
         ...{ class: "brand-mark" },
     });
-    const __VLS_32 = {}.Activity;
+    const __VLS_36 = {}.Activity;
     /** @type {[typeof __VLS_components.Activity, ]} */ ;
     // @ts-ignore
-    const __VLS_33 = __VLS_asFunctionalComponent(__VLS_32, new __VLS_32({
+    const __VLS_37 = __VLS_asFunctionalComponent(__VLS_36, new __VLS_36({
         size: (18),
     }));
-    const __VLS_34 = __VLS_33({
+    const __VLS_38 = __VLS_37({
         size: (18),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_33));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_37));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
         ...{ class: "brand-light" },
@@ -3609,6 +3682,8 @@ else {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
         ...{ onClick: (...[$event]) => {
                 if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(__VLS_ctx.serverUnavailable))
                     return;
                 if (!!(!__VLS_ctx.user))
                     return;
@@ -3636,15 +3711,15 @@ else {
     (__VLS_ctx.activeWorkspace?.name || __VLS_ctx.t('Nenhum ambiente selecionado'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
     (__VLS_ctx.activeWorkspace ? __VLS_ctx.t('Plano operacional') : __VLS_ctx.t('Crie ou importe um ambiente'));
-    const __VLS_36 = {}.ChevronDown;
+    const __VLS_40 = {}.ChevronDown;
     /** @type {[typeof __VLS_components.ChevronDown, ]} */ ;
     // @ts-ignore
-    const __VLS_37 = __VLS_asFunctionalComponent(__VLS_36, new __VLS_36({
+    const __VLS_41 = __VLS_asFunctionalComponent(__VLS_40, new __VLS_40({
         size: (15),
     }));
-    const __VLS_38 = __VLS_37({
+    const __VLS_42 = __VLS_41({
         size: (15),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_37));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_41));
     if (__VLS_ctx.workspaceMenuOpen) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "workspace-dropdown" },
@@ -3657,6 +3732,8 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                     ...{ onClick: (...[$event]) => {
                             if (!!(__VLS_ctx.loading))
+                                return;
+                            if (!!(__VLS_ctx.serverUnavailable))
                                 return;
                             if (!!(!__VLS_ctx.user))
                                 return;
@@ -3697,6 +3774,8 @@ else {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!(__VLS_ctx.workspaceMenuOpen))
@@ -3707,15 +3786,15 @@ else {
             ...{ class: "workspace-manage-button" },
             type: "button",
         });
-        const __VLS_40 = {}.Plus;
+        const __VLS_44 = {}.Plus;
         /** @type {[typeof __VLS_components.Plus, ]} */ ;
         // @ts-ignore
-        const __VLS_41 = __VLS_asFunctionalComponent(__VLS_40, new __VLS_40({
+        const __VLS_45 = __VLS_asFunctionalComponent(__VLS_44, new __VLS_44({
             size: (15),
         }));
-        const __VLS_42 = __VLS_41({
+        const __VLS_46 = __VLS_45({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_41));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_45));
         (__VLS_ctx.t('Adicionar/editar ambiente'));
     }
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
@@ -3727,6 +3806,8 @@ else {
         ...{ onClick: (...[$event]) => {
                 if (!!(__VLS_ctx.loading))
                     return;
+                if (!!(__VLS_ctx.serverUnavailable))
+                    return;
                 if (!!(!__VLS_ctx.user))
                     return;
                 __VLS_ctx.managementTab = 'overview';
@@ -3735,15 +3816,15 @@ else {
         ...{ class: ({ active: __VLS_ctx.managementTab === 'overview' }) },
         href: "#inicio",
     });
-    const __VLS_44 = {}.LayoutDashboard;
+    const __VLS_48 = {}.LayoutDashboard;
     /** @type {[typeof __VLS_components.LayoutDashboard, ]} */ ;
     // @ts-ignore
-    const __VLS_45 = __VLS_asFunctionalComponent(__VLS_44, new __VLS_44({
+    const __VLS_49 = __VLS_asFunctionalComponent(__VLS_48, new __VLS_48({
         size: (17),
     }));
-    const __VLS_46 = __VLS_45({
+    const __VLS_50 = __VLS_49({
         size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_45));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_49));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Visao geral'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
@@ -3756,15 +3837,15 @@ else {
         ...{ class: ({ active: __VLS_ctx.managementTab === 'notifications' }) },
         type: "button",
     });
-    const __VLS_48 = {}.Bell;
+    const __VLS_52 = {}.Bell;
     /** @type {[typeof __VLS_components.Bell, ]} */ ;
     // @ts-ignore
-    const __VLS_49 = __VLS_asFunctionalComponent(__VLS_48, new __VLS_48({
+    const __VLS_53 = __VLS_asFunctionalComponent(__VLS_52, new __VLS_52({
         size: (17),
     }));
-    const __VLS_50 = __VLS_49({
+    const __VLS_54 = __VLS_53({
         size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_49));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_53));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Notificações'));
     if (__VLS_ctx.canManageUserAccounts) {
@@ -3774,35 +3855,8 @@ else {
             ...{ class: ({ active: __VLS_ctx.managementTab === 'users' }) },
             type: "button",
         });
-        const __VLS_52 = {}.UsersRound;
+        const __VLS_56 = {}.UsersRound;
         /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
-        // @ts-ignore
-        const __VLS_53 = __VLS_asFunctionalComponent(__VLS_52, new __VLS_52({
-            size: (17),
-        }));
-        const __VLS_54 = __VLS_53({
-            size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_53));
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-        (__VLS_ctx.t('Usuários'));
-    }
-    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-            ...{ onClick: (...[$event]) => {
-                    if (!!(__VLS_ctx.loading))
-                        return;
-                    if (!!(!__VLS_ctx.user))
-                        return;
-                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
-                        return;
-                    __VLS_ctx.managementTab = 'whatsapp';
-                } },
-            ...{ class: "nav-link" },
-            ...{ class: ({ active: __VLS_ctx.managementTab === 'whatsapp' }) },
-            type: "button",
-        });
-        const __VLS_56 = {}.MessageCircle;
-        /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
         // @ts-ignore
         const __VLS_57 = __VLS_asFunctionalComponent(__VLS_56, new __VLS_56({
             size: (17),
@@ -3811,25 +3865,17 @@ else {
             size: (17),
         }, ...__VLS_functionalComponentArgsRest(__VLS_57));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-        (__VLS_ctx.t('WhatsApp API'));
+        (__VLS_ctx.t('Usuários'));
     }
     if (__VLS_ctx.isWhatsAppDashboardAdmin) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-            ...{ onClick: (...[$event]) => {
-                    if (!!(__VLS_ctx.loading))
-                        return;
-                    if (!!(!__VLS_ctx.user))
-                        return;
-                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
-                        return;
-                    __VLS_ctx.managementTab = 'email';
-                } },
+            ...{ onClick: (__VLS_ctx.openWhatsAppManagement) },
             ...{ class: "nav-link" },
-            ...{ class: ({ active: __VLS_ctx.managementTab === 'email' }) },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'whatsapp' }) },
             type: "button",
         });
-        const __VLS_60 = {}.Mail;
-        /** @type {[typeof __VLS_components.Mail, ]} */ ;
+        const __VLS_60 = {}.MessageCircle;
+        /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
         // @ts-ignore
         const __VLS_61 = __VLS_asFunctionalComponent(__VLS_60, new __VLS_60({
             size: (17),
@@ -3837,6 +3883,25 @@ else {
         const __VLS_62 = __VLS_61({
             size: (17),
         }, ...__VLS_functionalComponentArgsRest(__VLS_61));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('WhatsApp API'));
+    }
+    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (__VLS_ctx.openEmailManagement) },
+            ...{ class: "nav-link" },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'email' }) },
+            type: "button",
+        });
+        const __VLS_64 = {}.Mail;
+        /** @type {[typeof __VLS_components.Mail, ]} */ ;
+        // @ts-ignore
+        const __VLS_65 = __VLS_asFunctionalComponent(__VLS_64, new __VLS_64({
+            size: (17),
+        }));
+        const __VLS_66 = __VLS_65({
+            size: (17),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_65));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('E-mail API'));
     }
@@ -3884,15 +3949,15 @@ else {
         title: (__VLS_ctx.t('Sair')),
         'aria-label': (__VLS_ctx.t('Sair')),
     });
-    const __VLS_64 = {}.LogOut;
+    const __VLS_68 = {}.LogOut;
     /** @type {[typeof __VLS_components.LogOut, ]} */ ;
     // @ts-ignore
-    const __VLS_65 = __VLS_asFunctionalComponent(__VLS_64, new __VLS_64({
+    const __VLS_69 = __VLS_asFunctionalComponent(__VLS_68, new __VLS_68({
         size: (17),
     }));
-    const __VLS_66 = __VLS_65({
+    const __VLS_70 = __VLS_69({
         size: (17),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_65));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_69));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
         ...{ class: "main-area" },
     });
@@ -3932,19 +3997,8 @@ else {
         'aria-pressed': (__VLS_ctx.darkMode),
     });
     if (__VLS_ctx.darkMode) {
-        const __VLS_68 = {}.Sun;
+        const __VLS_72 = {}.Sun;
         /** @type {[typeof __VLS_components.Sun, ]} */ ;
-        // @ts-ignore
-        const __VLS_69 = __VLS_asFunctionalComponent(__VLS_68, new __VLS_68({
-            size: (18),
-        }));
-        const __VLS_70 = __VLS_69({
-            size: (18),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_69));
-    }
-    else {
-        const __VLS_72 = {}.Moon;
-        /** @type {[typeof __VLS_components.Moon, ]} */ ;
         // @ts-ignore
         const __VLS_73 = __VLS_asFunctionalComponent(__VLS_72, new __VLS_72({
             size: (18),
@@ -3952,6 +4006,17 @@ else {
         const __VLS_74 = __VLS_73({
             size: (18),
         }, ...__VLS_functionalComponentArgsRest(__VLS_73));
+    }
+    else {
+        const __VLS_76 = {}.Moon;
+        /** @type {[typeof __VLS_components.Moon, ]} */ ;
+        // @ts-ignore
+        const __VLS_77 = __VLS_asFunctionalComponent(__VLS_76, new __VLS_76({
+            size: (18),
+        }));
+        const __VLS_78 = __VLS_77({
+            size: (18),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_77));
     }
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
         ...{ class: "language-flags" },
@@ -3961,6 +4026,8 @@ else {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
         ...{ onClick: (...[$event]) => {
                 if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(__VLS_ctx.serverUnavailable))
                     return;
                 if (!!(!__VLS_ctx.user))
                     return;
@@ -3981,6 +4048,8 @@ else {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
         ...{ onClick: (...[$event]) => {
                 if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(__VLS_ctx.serverUnavailable))
                     return;
                 if (!!(!__VLS_ctx.user))
                     return;
@@ -4010,15 +4079,15 @@ else {
         'aria-expanded': (__VLS_ctx.notificationOpen),
         'aria-haspopup': "dialog",
     });
-    const __VLS_76 = {}.Bell;
+    const __VLS_80 = {}.Bell;
     /** @type {[typeof __VLS_components.Bell, ]} */ ;
     // @ts-ignore
-    const __VLS_77 = __VLS_asFunctionalComponent(__VLS_76, new __VLS_76({
+    const __VLS_81 = __VLS_asFunctionalComponent(__VLS_80, new __VLS_80({
         size: (18),
     }));
-    const __VLS_78 = __VLS_77({
+    const __VLS_82 = __VLS_81({
         size: (18),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_77));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_81));
     if (__VLS_ctx.unreadNotificationCount) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "notification-count" },
@@ -4061,6 +4130,8 @@ else {
                     ...{ onClick: (...[$event]) => {
                             if (!!(__VLS_ctx.loading))
                                 return;
+                            if (!!(__VLS_ctx.serverUnavailable))
+                                return;
                             if (!!(!__VLS_ctx.user))
                                 return;
                             if (!(__VLS_ctx.notificationOpen))
@@ -4077,19 +4148,8 @@ else {
                     ...{ class: "notification-icon" },
                 });
                 if (notification.status === 'online' || notification.status === 'device-linked') {
-                    const __VLS_80 = {}.CircleCheck;
+                    const __VLS_84 = {}.CircleCheck;
                     /** @type {[typeof __VLS_components.CircleCheck, ]} */ ;
-                    // @ts-ignore
-                    const __VLS_81 = __VLS_asFunctionalComponent(__VLS_80, new __VLS_80({
-                        size: (17),
-                    }));
-                    const __VLS_82 = __VLS_81({
-                        size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_81));
-                }
-                else {
-                    const __VLS_84 = {}.AlertTriangle;
-                    /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
                     // @ts-ignore
                     const __VLS_85 = __VLS_asFunctionalComponent(__VLS_84, new __VLS_84({
                         size: (17),
@@ -4097,6 +4157,17 @@ else {
                     const __VLS_86 = __VLS_85({
                         size: (17),
                     }, ...__VLS_functionalComponentArgsRest(__VLS_85));
+                }
+                else {
+                    const __VLS_88 = {}.AlertTriangle;
+                    /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_89 = __VLS_asFunctionalComponent(__VLS_88, new __VLS_88({
+                        size: (17),
+                    }));
+                    const __VLS_90 = __VLS_89({
+                        size: (17),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_89));
                 }
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "notification-copy" },
@@ -4121,15 +4192,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "notification-empty" },
             });
-            const __VLS_88 = {}.Bell;
+            const __VLS_92 = {}.Bell;
             /** @type {[typeof __VLS_components.Bell, ]} */ ;
             // @ts-ignore
-            const __VLS_89 = __VLS_asFunctionalComponent(__VLS_88, new __VLS_88({
+            const __VLS_93 = __VLS_asFunctionalComponent(__VLS_92, new __VLS_92({
                 size: (22),
             }));
-            const __VLS_90 = __VLS_89({
+            const __VLS_94 = __VLS_93({
                 size: (22),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_89));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_93));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
             (__VLS_ctx.t('Nenhuma notificação'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -4187,6 +4258,8 @@ else {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -4199,20 +4272,22 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.userManagementTab === 'members'),
         });
-        const __VLS_92 = {}.UsersRound;
+        const __VLS_96 = {}.UsersRound;
         /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
         // @ts-ignore
-        const __VLS_93 = __VLS_asFunctionalComponent(__VLS_92, new __VLS_92({
+        const __VLS_97 = __VLS_asFunctionalComponent(__VLS_96, new __VLS_96({
             size: (15),
         }));
-        const __VLS_94 = __VLS_93({
+        const __VLS_98 = __VLS_97({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_93));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_97));
         (__VLS_ctx.t('Membros'));
         if (__VLS_ctx.canManageUserAccounts) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(__VLS_ctx.serverUnavailable))
                             return;
                         if (!!(!__VLS_ctx.user))
                             return;
@@ -4229,21 +4304,23 @@ else {
                 role: "tab",
                 'aria-selected': (__VLS_ctx.userManagementTab === 'accounts'),
             });
-            const __VLS_96 = {}.UsersRound;
+            const __VLS_100 = {}.UsersRound;
             /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
             // @ts-ignore
-            const __VLS_97 = __VLS_asFunctionalComponent(__VLS_96, new __VLS_96({
+            const __VLS_101 = __VLS_asFunctionalComponent(__VLS_100, new __VLS_100({
                 size: (15),
             }));
-            const __VLS_98 = __VLS_97({
+            const __VLS_102 = __VLS_101({
                 size: (15),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_97));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_101));
             (__VLS_ctx.t('Usuários cadastrados'));
         }
         if (__VLS_ctx.isWhatsAppDashboardAdmin) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(__VLS_ctx.serverUnavailable))
                             return;
                         if (!!(!__VLS_ctx.user))
                             return;
@@ -4259,15 +4336,15 @@ else {
                 role: "tab",
                 'aria-selected': (__VLS_ctx.userManagementTab === 'registration'),
             });
-            const __VLS_100 = {}.ShieldCheck;
+            const __VLS_104 = {}.ShieldCheck;
             /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
             // @ts-ignore
-            const __VLS_101 = __VLS_asFunctionalComponent(__VLS_100, new __VLS_100({
+            const __VLS_105 = __VLS_asFunctionalComponent(__VLS_104, new __VLS_104({
                 size: (15),
             }));
-            const __VLS_102 = __VLS_101({
+            const __VLS_106 = __VLS_105({
                 size: (15),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_101));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_105));
             (__VLS_ctx.t('Cadastro público'));
         }
         if (__VLS_ctx.userManagementTab === 'registration' && __VLS_ctx.isWhatsAppDashboardAdmin) {
@@ -4285,15 +4362,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-icon" },
             });
-            const __VLS_104 = {}.ShieldCheck;
+            const __VLS_108 = {}.ShieldCheck;
             /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
             // @ts-ignore
-            const __VLS_105 = __VLS_asFunctionalComponent(__VLS_104, new __VLS_104({
+            const __VLS_109 = __VLS_asFunctionalComponent(__VLS_108, new __VLS_108({
                 size: (18),
             }));
-            const __VLS_106 = __VLS_105({
+            const __VLS_110 = __VLS_109({
                 size: (18),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_105));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_109));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
             });
@@ -4369,15 +4446,15 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                             ...{ class: "protected-member-role" },
                         });
-                        const __VLS_108 = {}.LockKeyhole;
+                        const __VLS_112 = {}.LockKeyhole;
                         /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
                         // @ts-ignore
-                        const __VLS_109 = __VLS_asFunctionalComponent(__VLS_108, new __VLS_108({
+                        const __VLS_113 = __VLS_asFunctionalComponent(__VLS_112, new __VLS_112({
                             size: (14),
                         }));
-                        const __VLS_110 = __VLS_109({
+                        const __VLS_114 = __VLS_113({
                             size: (14),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_109));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_113));
                         (__VLS_ctx.t('Administrador da plataforma'));
                     }
                     else {
@@ -4393,6 +4470,8 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                             ...{ onClick: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
                                         return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
@@ -4416,15 +4495,15 @@ else {
                             'aria-expanded': (__VLS_ctx.memberActionsOpenId === `account-${account.id}`),
                             title: (__VLS_ctx.t('Ações')),
                         });
-                        const __VLS_112 = {}.EllipsisVertical;
+                        const __VLS_116 = {}.EllipsisVertical;
                         /** @type {[typeof __VLS_components.EllipsisVertical, ]} */ ;
                         // @ts-ignore
-                        const __VLS_113 = __VLS_asFunctionalComponent(__VLS_112, new __VLS_112({
+                        const __VLS_117 = __VLS_asFunctionalComponent(__VLS_116, new __VLS_116({
                             size: (18),
                         }));
-                        const __VLS_114 = __VLS_113({
+                        const __VLS_118 = __VLS_117({
                             size: (18),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_113));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_117));
                         if (__VLS_ctx.memberActionsOpenId === `account-${account.id}`) {
                             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                                 ...{ class: "member-actions-menu admin-account-actions" },
@@ -4433,6 +4512,8 @@ else {
                             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                                 ...{ onClick: (...[$event]) => {
                                         if (!!(__VLS_ctx.loading))
+                                            return;
+                                        if (!!(__VLS_ctx.serverUnavailable))
                                             return;
                                         if (!!(!__VLS_ctx.user))
                                             return;
@@ -4455,20 +4536,22 @@ else {
                                 type: "button",
                                 role: "menuitem",
                             });
-                            const __VLS_116 = {}.Pencil;
+                            const __VLS_120 = {}.Pencil;
                             /** @type {[typeof __VLS_components.Pencil, ]} */ ;
                             // @ts-ignore
-                            const __VLS_117 = __VLS_asFunctionalComponent(__VLS_116, new __VLS_116({
+                            const __VLS_121 = __VLS_asFunctionalComponent(__VLS_120, new __VLS_120({
                                 size: (14),
                             }));
-                            const __VLS_118 = __VLS_117({
+                            const __VLS_122 = __VLS_121({
                                 size: (14),
-                            }, ...__VLS_functionalComponentArgsRest(__VLS_117));
+                            }, ...__VLS_functionalComponentArgsRest(__VLS_121));
                             (__VLS_ctx.t('Editar usuário'));
                             if (!account.isPlatformAdmin) {
                                 __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                                     ...{ onClick: (...[$event]) => {
                                             if (!!(__VLS_ctx.loading))
+                                                return;
+                                            if (!!(__VLS_ctx.serverUnavailable))
                                                 return;
                                             if (!!(!__VLS_ctx.user))
                                                 return;
@@ -4495,19 +4578,21 @@ else {
                                     role: "menuitem",
                                     disabled: (__VLS_ctx.adminUserActionId === account.id || account.passwordResetRequired),
                                 });
-                                const __VLS_120 = {}.LockKeyhole;
+                                const __VLS_124 = {}.LockKeyhole;
                                 /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
                                 // @ts-ignore
-                                const __VLS_121 = __VLS_asFunctionalComponent(__VLS_120, new __VLS_120({
+                                const __VLS_125 = __VLS_asFunctionalComponent(__VLS_124, new __VLS_124({
                                     size: (14),
                                 }));
-                                const __VLS_122 = __VLS_121({
+                                const __VLS_126 = __VLS_125({
                                     size: (14),
-                                }, ...__VLS_functionalComponentArgsRest(__VLS_121));
+                                }, ...__VLS_functionalComponentArgsRest(__VLS_125));
                                 (account.passwordResetRequired ? __VLS_ctx.t('Redefinição já exigida') : __VLS_ctx.t('Remover senha e exigir nova senha'));
                                 __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                                     ...{ onClick: (...[$event]) => {
                                             if (!!(__VLS_ctx.loading))
+                                                return;
+                                            if (!!(__VLS_ctx.serverUnavailable))
                                                 return;
                                             if (!!(!__VLS_ctx.user))
                                                 return;
@@ -4533,15 +4618,15 @@ else {
                                     type: "button",
                                     role: "menuitem",
                                 });
-                                const __VLS_124 = {}.Trash2;
+                                const __VLS_128 = {}.Trash2;
                                 /** @type {[typeof __VLS_components.Trash2, ]} */ ;
                                 // @ts-ignore
-                                const __VLS_125 = __VLS_asFunctionalComponent(__VLS_124, new __VLS_124({
+                                const __VLS_129 = __VLS_asFunctionalComponent(__VLS_128, new __VLS_128({
                                     size: (14),
                                 }));
-                                const __VLS_126 = __VLS_125({
+                                const __VLS_130 = __VLS_129({
                                     size: (14),
-                                }, ...__VLS_functionalComponentArgsRest(__VLS_125));
+                                }, ...__VLS_functionalComponentArgsRest(__VLS_129));
                                 (__VLS_ctx.t('Excluir usuário permanentemente'));
                             }
                         }
@@ -4632,15 +4717,15 @@ else {
                             title: (__VLS_ctx.t('O papel deste administrador da plataforma não pode ser alterado.')),
                             'aria-label': (__VLS_ctx.t('Administrador da plataforma')),
                         });
-                        const __VLS_128 = {}.LockKeyhole;
+                        const __VLS_132 = {}.LockKeyhole;
                         /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
                         // @ts-ignore
-                        const __VLS_129 = __VLS_asFunctionalComponent(__VLS_128, new __VLS_128({
+                        const __VLS_133 = __VLS_asFunctionalComponent(__VLS_132, new __VLS_132({
                             size: (14),
                         }));
-                        const __VLS_130 = __VLS_129({
+                        const __VLS_134 = __VLS_133({
                             size: (14),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_129));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_133));
                         (__VLS_ctx.t('Administrador da plataforma'));
                     }
                     else if (__VLS_ctx.editingMemberId === member.id) {
@@ -4669,6 +4754,8 @@ else {
                             ...{ onClick: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
                                         return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
+                                        return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
                                     if (!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -4693,15 +4780,15 @@ else {
                             title: (__VLS_ctx.t('Salvar')),
                             'aria-label': (__VLS_ctx.t('Salvar')),
                         });
-                        const __VLS_132 = {}.Check;
+                        const __VLS_136 = {}.Check;
                         /** @type {[typeof __VLS_components.Check, ]} */ ;
                         // @ts-ignore
-                        const __VLS_133 = __VLS_asFunctionalComponent(__VLS_132, new __VLS_132({
+                        const __VLS_137 = __VLS_asFunctionalComponent(__VLS_136, new __VLS_136({
                             size: (16),
                         }));
-                        const __VLS_134 = __VLS_133({
+                        const __VLS_138 = __VLS_137({
                             size: (16),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_133));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_137));
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                             ...{ onClick: (__VLS_ctx.cancelMemberRoleEdit) },
                             ...{ class: "icon-button member-cancel-button" },
@@ -4710,15 +4797,15 @@ else {
                             title: (__VLS_ctx.t('Cancelar')),
                             'aria-label': (__VLS_ctx.t('Cancelar')),
                         });
-                        const __VLS_136 = {}.X;
+                        const __VLS_140 = {}.X;
                         /** @type {[typeof __VLS_components.X, ]} */ ;
                         // @ts-ignore
-                        const __VLS_137 = __VLS_asFunctionalComponent(__VLS_136, new __VLS_136({
+                        const __VLS_141 = __VLS_asFunctionalComponent(__VLS_140, new __VLS_140({
                             size: (16),
                         }));
-                        const __VLS_138 = __VLS_137({
+                        const __VLS_142 = __VLS_141({
                             size: (16),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_137));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_141));
                     }
                     else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
@@ -4733,6 +4820,8 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                             ...{ onClick: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
                                         return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
@@ -4756,15 +4845,15 @@ else {
                             'aria-expanded': (__VLS_ctx.memberActionsOpenId === member.id),
                             title: (__VLS_ctx.t('Ações')),
                         });
-                        const __VLS_140 = {}.EllipsisVertical;
+                        const __VLS_144 = {}.EllipsisVertical;
                         /** @type {[typeof __VLS_components.EllipsisVertical, ]} */ ;
                         // @ts-ignore
-                        const __VLS_141 = __VLS_asFunctionalComponent(__VLS_140, new __VLS_140({
+                        const __VLS_145 = __VLS_asFunctionalComponent(__VLS_144, new __VLS_144({
                             size: (18),
                         }));
-                        const __VLS_142 = __VLS_141({
+                        const __VLS_146 = __VLS_145({
                             size: (18),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_141));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_145));
                         if (__VLS_ctx.memberActionsOpenId === member.id) {
                             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                                 ...{ class: "member-actions-menu" },
@@ -4773,6 +4862,8 @@ else {
                             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                                 ...{ onClick: (...[$event]) => {
                                         if (!!(__VLS_ctx.loading))
+                                            return;
+                                        if (!!(__VLS_ctx.serverUnavailable))
                                             return;
                                         if (!!(!__VLS_ctx.user))
                                             return;
@@ -4795,20 +4886,22 @@ else {
                                 type: "button",
                                 role: "menuitem",
                             });
-                            const __VLS_144 = {}.Pencil;
+                            const __VLS_148 = {}.Pencil;
                             /** @type {[typeof __VLS_components.Pencil, ]} */ ;
                             // @ts-ignore
-                            const __VLS_145 = __VLS_asFunctionalComponent(__VLS_144, new __VLS_144({
+                            const __VLS_149 = __VLS_asFunctionalComponent(__VLS_148, new __VLS_148({
                                 size: (14),
                             }));
-                            const __VLS_146 = __VLS_145({
+                            const __VLS_150 = __VLS_149({
                                 size: (14),
-                            }, ...__VLS_functionalComponentArgsRest(__VLS_145));
+                            }, ...__VLS_functionalComponentArgsRest(__VLS_149));
                             (__VLS_ctx.t('Editar papel'));
                             if (__VLS_ctx.isWhatsAppDashboardAdmin) {
                                 __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                                     ...{ onClick: (...[$event]) => {
                                             if (!!(__VLS_ctx.loading))
+                                                return;
+                                            if (!!(__VLS_ctx.serverUnavailable))
                                                 return;
                                             if (!!(!__VLS_ctx.user))
                                                 return;
@@ -4834,15 +4927,15 @@ else {
                                     type: "button",
                                     role: "menuitem",
                                 });
-                                const __VLS_148 = {}.Trash2;
+                                const __VLS_152 = {}.Trash2;
                                 /** @type {[typeof __VLS_components.Trash2, ]} */ ;
                                 // @ts-ignore
-                                const __VLS_149 = __VLS_asFunctionalComponent(__VLS_148, new __VLS_148({
+                                const __VLS_153 = __VLS_asFunctionalComponent(__VLS_152, new __VLS_152({
                                     size: (14),
                                 }));
-                                const __VLS_150 = __VLS_149({
+                                const __VLS_154 = __VLS_153({
                                     size: (14),
-                                }, ...__VLS_functionalComponentArgsRest(__VLS_149));
+                                }, ...__VLS_functionalComponentArgsRest(__VLS_153));
                                 (__VLS_ctx.t('Excluir usuário permanentemente'));
                             }
                         }
@@ -4901,6 +4994,8 @@ else {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -4917,19 +5012,21 @@ else {
             'aria-selected': (__VLS_ctx.notificationSectionTab === 'configuration'),
             'aria-controls': "notificationConfigurationPanel",
         });
-        const __VLS_152 = {}.Settings;
+        const __VLS_156 = {}.Settings;
         /** @type {[typeof __VLS_components.Settings, ]} */ ;
         // @ts-ignore
-        const __VLS_153 = __VLS_asFunctionalComponent(__VLS_152, new __VLS_152({
+        const __VLS_157 = __VLS_asFunctionalComponent(__VLS_156, new __VLS_156({
             size: (15),
         }));
-        const __VLS_154 = __VLS_153({
+        const __VLS_158 = __VLS_157({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_153));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_157));
         (__VLS_ctx.t('Configurações'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -4947,19 +5044,21 @@ else {
             'aria-selected': (__VLS_ctx.notificationSectionTab === 'workspaces'),
             'aria-controls': "notificationWorkspacesPanel",
         });
-        const __VLS_156 = {}.Building2;
+        const __VLS_160 = {}.Building2;
         /** @type {[typeof __VLS_components.Building2, ]} */ ;
         // @ts-ignore
-        const __VLS_157 = __VLS_asFunctionalComponent(__VLS_156, new __VLS_156({
+        const __VLS_161 = __VLS_asFunctionalComponent(__VLS_160, new __VLS_160({
             size: (15),
         }));
-        const __VLS_158 = __VLS_157({
+        const __VLS_162 = __VLS_161({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_157));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_161));
         (__VLS_ctx.t('Aparelhos e ambiente'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -4977,15 +5076,15 @@ else {
             'aria-selected': (__VLS_ctx.notificationSectionTab === 'sounds'),
             'aria-controls': "notificationSoundsPanel",
         });
-        const __VLS_160 = {}.Volume2;
+        const __VLS_164 = {}.Volume2;
         /** @type {[typeof __VLS_components.Volume2, ]} */ ;
         // @ts-ignore
-        const __VLS_161 = __VLS_asFunctionalComponent(__VLS_160, new __VLS_160({
+        const __VLS_165 = __VLS_asFunctionalComponent(__VLS_164, new __VLS_164({
             size: (15),
         }));
-        const __VLS_162 = __VLS_161({
+        const __VLS_166 = __VLS_165({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_161));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_165));
         (__VLS_ctx.t('Sons'));
         if (__VLS_ctx.notificationSectionTab === 'configuration') {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
@@ -5011,15 +5110,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-icon" },
             });
-            const __VLS_164 = {}.Mail;
+            const __VLS_168 = {}.Mail;
             /** @type {[typeof __VLS_components.Mail, ]} */ ;
             // @ts-ignore
-            const __VLS_165 = __VLS_asFunctionalComponent(__VLS_164, new __VLS_164({
+            const __VLS_169 = __VLS_asFunctionalComponent(__VLS_168, new __VLS_168({
                 size: (18),
             }));
-            const __VLS_166 = __VLS_165({
+            const __VLS_170 = __VLS_169({
                 size: (18),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_165));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_169));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
             });
@@ -5039,15 +5138,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-icon" },
             });
-            const __VLS_168 = {}.MessageCircle;
+            const __VLS_172 = {}.MessageCircle;
             /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_169 = __VLS_asFunctionalComponent(__VLS_168, new __VLS_168({
+            const __VLS_173 = __VLS_asFunctionalComponent(__VLS_172, new __VLS_172({
                 size: (18),
             }));
-            const __VLS_170 = __VLS_169({
+            const __VLS_174 = __VLS_173({
                 size: (18),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_169));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_173));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
             });
@@ -5175,15 +5274,15 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "theme-setting-icon" },
                 });
-                const __VLS_172 = {}.Mail;
+                const __VLS_176 = {}.Mail;
                 /** @type {[typeof __VLS_components.Mail, ]} */ ;
                 // @ts-ignore
-                const __VLS_173 = __VLS_asFunctionalComponent(__VLS_172, new __VLS_172({
+                const __VLS_177 = __VLS_asFunctionalComponent(__VLS_176, new __VLS_176({
                     size: (18),
                 }));
-                const __VLS_174 = __VLS_173({
+                const __VLS_178 = __VLS_177({
                     size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_173));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_177));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "theme-setting-copy" },
                 });
@@ -5194,6 +5293,8 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                     ...{ onChange: (...[$event]) => {
                             if (!!(__VLS_ctx.loading))
+                                return;
+                            if (!!(__VLS_ctx.serverUnavailable))
                                 return;
                             if (!!(!__VLS_ctx.user))
                                 return;
@@ -5222,15 +5323,15 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "theme-setting-icon" },
                 });
-                const __VLS_176 = {}.MessageCircle;
+                const __VLS_180 = {}.MessageCircle;
                 /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
                 // @ts-ignore
-                const __VLS_177 = __VLS_asFunctionalComponent(__VLS_176, new __VLS_176({
+                const __VLS_181 = __VLS_asFunctionalComponent(__VLS_180, new __VLS_180({
                     size: (18),
                 }));
-                const __VLS_178 = __VLS_177({
+                const __VLS_182 = __VLS_181({
                     size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_177));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_181));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "theme-setting-copy" },
                 });
@@ -5241,6 +5342,8 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                     ...{ onChange: (...[$event]) => {
                             if (!!(__VLS_ctx.loading))
+                                return;
+                            if (!!(__VLS_ctx.serverUnavailable))
                                 return;
                             if (!!(!__VLS_ctx.user))
                                 return;
@@ -5269,15 +5372,15 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "theme-setting-icon" },
                 });
-                const __VLS_180 = {}.Bell;
+                const __VLS_184 = {}.Bell;
                 /** @type {[typeof __VLS_components.Bell, ]} */ ;
                 // @ts-ignore
-                const __VLS_181 = __VLS_asFunctionalComponent(__VLS_180, new __VLS_180({
+                const __VLS_185 = __VLS_asFunctionalComponent(__VLS_184, new __VLS_184({
                     size: (18),
                 }));
-                const __VLS_182 = __VLS_181({
+                const __VLS_186 = __VLS_185({
                     size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_181));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_185));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "theme-setting-copy" },
                 });
@@ -5310,6 +5413,8 @@ else {
                             ...{ onChange: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
                                         return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
+                                        return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
                                     if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -5340,6 +5445,8 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                             ...{ onChange: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
                                         return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
@@ -5451,6 +5558,8 @@ else {
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
                             return;
+                        if (!!(__VLS_ctx.serverUnavailable))
+                            return;
                         if (!!(!__VLS_ctx.user))
                             return;
                         if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -5470,28 +5579,28 @@ else {
                 'aria-pressed': (__VLS_ctx.alertSoundPreviewStatus === 'online'),
             });
             if (__VLS_ctx.alertSoundPreviewStatus === 'online') {
-                const __VLS_184 = {}.Square;
+                const __VLS_188 = {}.Square;
                 /** @type {[typeof __VLS_components.Square, ]} */ ;
-                // @ts-ignore
-                const __VLS_185 = __VLS_asFunctionalComponent(__VLS_184, new __VLS_184({
-                    size: (14),
-                    fill: "currentColor",
-                }));
-                const __VLS_186 = __VLS_185({
-                    size: (14),
-                    fill: "currentColor",
-                }, ...__VLS_functionalComponentArgsRest(__VLS_185));
-            }
-            else {
-                const __VLS_188 = {}.Play;
-                /** @type {[typeof __VLS_components.Play, ]} */ ;
                 // @ts-ignore
                 const __VLS_189 = __VLS_asFunctionalComponent(__VLS_188, new __VLS_188({
                     size: (14),
+                    fill: "currentColor",
                 }));
                 const __VLS_190 = __VLS_189({
                     size: (14),
+                    fill: "currentColor",
                 }, ...__VLS_functionalComponentArgsRest(__VLS_189));
+            }
+            else {
+                const __VLS_192 = {}.Play;
+                /** @type {[typeof __VLS_components.Play, ]} */ ;
+                // @ts-ignore
+                const __VLS_193 = __VLS_asFunctionalComponent(__VLS_192, new __VLS_192({
+                    size: (14),
+                }));
+                const __VLS_194 = __VLS_193({
+                    size: (14),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_193));
             }
             (__VLS_ctx.t(__VLS_ctx.alertSoundPreviewStatus === 'online' ? 'Parar som' : 'Tocar som'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
@@ -5519,6 +5628,8 @@ else {
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
                             return;
+                        if (!!(__VLS_ctx.serverUnavailable))
+                            return;
                         if (!!(!__VLS_ctx.user))
                             return;
                         if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -5538,28 +5649,28 @@ else {
                 'aria-pressed': (__VLS_ctx.alertSoundPreviewStatus === 'warning'),
             });
             if (__VLS_ctx.alertSoundPreviewStatus === 'warning') {
-                const __VLS_192 = {}.Square;
+                const __VLS_196 = {}.Square;
                 /** @type {[typeof __VLS_components.Square, ]} */ ;
-                // @ts-ignore
-                const __VLS_193 = __VLS_asFunctionalComponent(__VLS_192, new __VLS_192({
-                    size: (14),
-                    fill: "currentColor",
-                }));
-                const __VLS_194 = __VLS_193({
-                    size: (14),
-                    fill: "currentColor",
-                }, ...__VLS_functionalComponentArgsRest(__VLS_193));
-            }
-            else {
-                const __VLS_196 = {}.Play;
-                /** @type {[typeof __VLS_components.Play, ]} */ ;
                 // @ts-ignore
                 const __VLS_197 = __VLS_asFunctionalComponent(__VLS_196, new __VLS_196({
                     size: (14),
+                    fill: "currentColor",
                 }));
                 const __VLS_198 = __VLS_197({
                     size: (14),
+                    fill: "currentColor",
                 }, ...__VLS_functionalComponentArgsRest(__VLS_197));
+            }
+            else {
+                const __VLS_200 = {}.Play;
+                /** @type {[typeof __VLS_components.Play, ]} */ ;
+                // @ts-ignore
+                const __VLS_201 = __VLS_asFunctionalComponent(__VLS_200, new __VLS_200({
+                    size: (14),
+                }));
+                const __VLS_202 = __VLS_201({
+                    size: (14),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_201));
             }
             (__VLS_ctx.t(__VLS_ctx.alertSoundPreviewStatus === 'warning' ? 'Parar som' : 'Tocar som'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
@@ -5587,6 +5698,8 @@ else {
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
                             return;
+                        if (!!(__VLS_ctx.serverUnavailable))
+                            return;
                         if (!!(!__VLS_ctx.user))
                             return;
                         if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -5606,28 +5719,28 @@ else {
                 'aria-pressed': (__VLS_ctx.alertSoundPreviewStatus === 'offline'),
             });
             if (__VLS_ctx.alertSoundPreviewStatus === 'offline') {
-                const __VLS_200 = {}.Square;
+                const __VLS_204 = {}.Square;
                 /** @type {[typeof __VLS_components.Square, ]} */ ;
-                // @ts-ignore
-                const __VLS_201 = __VLS_asFunctionalComponent(__VLS_200, new __VLS_200({
-                    size: (14),
-                    fill: "currentColor",
-                }));
-                const __VLS_202 = __VLS_201({
-                    size: (14),
-                    fill: "currentColor",
-                }, ...__VLS_functionalComponentArgsRest(__VLS_201));
-            }
-            else {
-                const __VLS_204 = {}.Play;
-                /** @type {[typeof __VLS_components.Play, ]} */ ;
                 // @ts-ignore
                 const __VLS_205 = __VLS_asFunctionalComponent(__VLS_204, new __VLS_204({
                     size: (14),
+                    fill: "currentColor",
                 }));
                 const __VLS_206 = __VLS_205({
                     size: (14),
+                    fill: "currentColor",
                 }, ...__VLS_functionalComponentArgsRest(__VLS_205));
+            }
+            else {
+                const __VLS_208 = {}.Play;
+                /** @type {[typeof __VLS_components.Play, ]} */ ;
+                // @ts-ignore
+                const __VLS_209 = __VLS_asFunctionalComponent(__VLS_208, new __VLS_208({
+                    size: (14),
+                }));
+                const __VLS_210 = __VLS_209({
+                    size: (14),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_209));
             }
             (__VLS_ctx.t(__VLS_ctx.alertSoundPreviewStatus === 'offline' ? 'Parar som' : 'Tocar som'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
@@ -5729,6 +5842,8 @@ else {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -5745,15 +5860,15 @@ else {
             'aria-label': (__VLS_ctx.t('Atualizar')),
             title: (__VLS_ctx.t('Atualizar')),
         });
-        const __VLS_208 = {}.RefreshCw;
+        const __VLS_212 = {}.RefreshCw;
         /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
         // @ts-ignore
-        const __VLS_209 = __VLS_asFunctionalComponent(__VLS_208, new __VLS_208({
+        const __VLS_213 = __VLS_asFunctionalComponent(__VLS_212, new __VLS_212({
             size: (16),
         }));
-        const __VLS_210 = __VLS_209({
+        const __VLS_214 = __VLS_213({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_209));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_213));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
             ...{ class: "settings-tabs whatsapp-tabs" },
             role: "tablist",
@@ -5762,6 +5877,8 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -5781,19 +5898,21 @@ else {
             'aria-selected': (__VLS_ctx.whatsappTab === 'log'),
             'aria-controls': "whatsappLogPanel",
         });
-        const __VLS_212 = {}.List;
+        const __VLS_216 = {}.List;
         /** @type {[typeof __VLS_components.List, ]} */ ;
         // @ts-ignore
-        const __VLS_213 = __VLS_asFunctionalComponent(__VLS_212, new __VLS_212({
+        const __VLS_217 = __VLS_asFunctionalComponent(__VLS_216, new __VLS_216({
             size: (15),
         }));
-        const __VLS_214 = __VLS_213({
+        const __VLS_218 = __VLS_217({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_213));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_217));
         (__VLS_ctx.t('Log'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -5813,19 +5932,21 @@ else {
             'aria-selected': (__VLS_ctx.whatsappTab === 'configuration'),
             'aria-controls': "whatsappConfigurationPanel",
         });
-        const __VLS_216 = {}.Settings;
+        const __VLS_220 = {}.Settings;
         /** @type {[typeof __VLS_components.Settings, ]} */ ;
         // @ts-ignore
-        const __VLS_217 = __VLS_asFunctionalComponent(__VLS_216, new __VLS_216({
+        const __VLS_221 = __VLS_asFunctionalComponent(__VLS_220, new __VLS_220({
             size: (15),
         }));
-        const __VLS_218 = __VLS_217({
+        const __VLS_222 = __VLS_221({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_217));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_221));
         (__VLS_ctx.t('Configuração'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -5845,19 +5966,21 @@ else {
             'aria-selected': (__VLS_ctx.whatsappTab === 'notifications'),
             'aria-controls': "whatsappNotificationsPanel",
         });
-        const __VLS_220 = {}.Bell;
+        const __VLS_224 = {}.Bell;
         /** @type {[typeof __VLS_components.Bell, ]} */ ;
         // @ts-ignore
-        const __VLS_221 = __VLS_asFunctionalComponent(__VLS_220, new __VLS_220({
+        const __VLS_225 = __VLS_asFunctionalComponent(__VLS_224, new __VLS_224({
             size: (15),
         }));
-        const __VLS_222 = __VLS_221({
+        const __VLS_226 = __VLS_225({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_221));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_225));
         (__VLS_ctx.t('Notificações'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -5877,19 +6000,21 @@ else {
             'aria-selected': (__VLS_ctx.whatsappTab === 'profile'),
             'aria-controls': "whatsappProfilePanel",
         });
-        const __VLS_224 = {}.Pencil;
+        const __VLS_228 = {}.Pencil;
         /** @type {[typeof __VLS_components.Pencil, ]} */ ;
         // @ts-ignore
-        const __VLS_225 = __VLS_asFunctionalComponent(__VLS_224, new __VLS_224({
+        const __VLS_229 = __VLS_asFunctionalComponent(__VLS_228, new __VLS_228({
             size: (15),
         }));
-        const __VLS_226 = __VLS_225({
+        const __VLS_230 = __VLS_229({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_225));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_229));
         (__VLS_ctx.t('Perfil'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -5909,30 +6034,30 @@ else {
             'aria-selected': (__VLS_ctx.whatsappTab === 'connection'),
             'aria-controls': "whatsappConnectionPanel",
         });
-        const __VLS_228 = {}.MessageCircle;
+        const __VLS_232 = {}.MessageCircle;
         /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
         // @ts-ignore
-        const __VLS_229 = __VLS_asFunctionalComponent(__VLS_228, new __VLS_228({
+        const __VLS_233 = __VLS_asFunctionalComponent(__VLS_232, new __VLS_232({
             size: (15),
         }));
-        const __VLS_230 = __VLS_229({
+        const __VLS_234 = __VLS_233({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_229));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_233));
         (__VLS_ctx.t('Conexão'));
         if (__VLS_ctx.whatsappError) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "notice-error" },
                 role: "alert",
             });
-            const __VLS_232 = {}.AlertTriangle;
+            const __VLS_236 = {}.AlertTriangle;
             /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
             // @ts-ignore
-            const __VLS_233 = __VLS_asFunctionalComponent(__VLS_232, new __VLS_232({
+            const __VLS_237 = __VLS_asFunctionalComponent(__VLS_236, new __VLS_236({
                 size: (17),
             }));
-            const __VLS_234 = __VLS_233({
+            const __VLS_238 = __VLS_237({
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_233));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_237));
             (__VLS_ctx.t(__VLS_ctx.whatsappError));
         }
         if (__VLS_ctx.whatsappTab === 'log') {
@@ -5958,15 +6083,15 @@ else {
                     type: "button",
                     disabled: (__VLS_ctx.whatsappWorking),
                 });
-                const __VLS_236 = {}.Trash2;
+                const __VLS_240 = {}.Trash2;
                 /** @type {[typeof __VLS_components.Trash2, ]} */ ;
                 // @ts-ignore
-                const __VLS_237 = __VLS_asFunctionalComponent(__VLS_236, new __VLS_236({
+                const __VLS_241 = __VLS_asFunctionalComponent(__VLS_240, new __VLS_240({
                     size: (14),
                 }));
-                const __VLS_238 = __VLS_237({
+                const __VLS_242 = __VLS_241({
                     size: (14),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_237));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_241));
                 (__VLS_ctx.t('Apagar log'));
             }
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -5987,19 +6112,8 @@ else {
                         ...{ class: "whatsapp-log-icon" },
                     });
                     if (entry.level === 'success') {
-                        const __VLS_240 = {}.CircleCheck;
+                        const __VLS_244 = {}.CircleCheck;
                         /** @type {[typeof __VLS_components.CircleCheck, ]} */ ;
-                        // @ts-ignore
-                        const __VLS_241 = __VLS_asFunctionalComponent(__VLS_240, new __VLS_240({
-                            size: (16),
-                        }));
-                        const __VLS_242 = __VLS_241({
-                            size: (16),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_241));
-                    }
-                    else if (entry.level === 'error') {
-                        const __VLS_244 = {}.CircleAlert;
-                        /** @type {[typeof __VLS_components.CircleAlert, ]} */ ;
                         // @ts-ignore
                         const __VLS_245 = __VLS_asFunctionalComponent(__VLS_244, new __VLS_244({
                             size: (16),
@@ -6008,9 +6122,9 @@ else {
                             size: (16),
                         }, ...__VLS_functionalComponentArgsRest(__VLS_245));
                     }
-                    else {
-                        const __VLS_248 = {}.Activity;
-                        /** @type {[typeof __VLS_components.Activity, ]} */ ;
+                    else if (entry.level === 'error') {
+                        const __VLS_248 = {}.CircleAlert;
+                        /** @type {[typeof __VLS_components.CircleAlert, ]} */ ;
                         // @ts-ignore
                         const __VLS_249 = __VLS_asFunctionalComponent(__VLS_248, new __VLS_248({
                             size: (16),
@@ -6018,6 +6132,17 @@ else {
                         const __VLS_250 = __VLS_249({
                             size: (16),
                         }, ...__VLS_functionalComponentArgsRest(__VLS_249));
+                    }
+                    else {
+                        const __VLS_252 = {}.Activity;
+                        /** @type {[typeof __VLS_components.Activity, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_253 = __VLS_asFunctionalComponent(__VLS_252, new __VLS_252({
+                            size: (16),
+                        }));
+                        const __VLS_254 = __VLS_253({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_253));
                     }
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                         ...{ class: "whatsapp-log-copy" },
@@ -6036,15 +6161,15 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                     ...{ class: "whatsapp-log-empty" },
                 });
-                const __VLS_252 = {}.List;
+                const __VLS_256 = {}.List;
                 /** @type {[typeof __VLS_components.List, ]} */ ;
                 // @ts-ignore
-                const __VLS_253 = __VLS_asFunctionalComponent(__VLS_252, new __VLS_252({
+                const __VLS_257 = __VLS_asFunctionalComponent(__VLS_256, new __VLS_256({
                     size: (20),
                 }));
-                const __VLS_254 = __VLS_253({
+                const __VLS_258 = __VLS_257({
                     size: (20),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_253));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_257));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                 (__VLS_ctx.t('Nenhum evento registrado.'));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -6134,6 +6259,8 @@ else {
                     ...{ onInput: (...[$event]) => {
                             if (!!(__VLS_ctx.loading))
                                 return;
+                            if (!!(__VLS_ctx.serverUnavailable))
+                                return;
                             if (!!(!__VLS_ctx.user))
                                 return;
                             if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -6166,15 +6293,15 @@ else {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                         ...{ class: "theme-setting-icon" },
                     });
-                    const __VLS_256 = {}.LockKeyhole;
+                    const __VLS_260 = {}.LockKeyhole;
                     /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
                     // @ts-ignore
-                    const __VLS_257 = __VLS_asFunctionalComponent(__VLS_256, new __VLS_256({
+                    const __VLS_261 = __VLS_asFunctionalComponent(__VLS_260, new __VLS_260({
                         size: (17),
                     }));
-                    const __VLS_258 = __VLS_257({
+                    const __VLS_262 = __VLS_261({
                         size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_257));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_261));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                         ...{ class: "theme-setting-copy" },
                     });
@@ -6185,6 +6312,8 @@ else {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                         ...{ onChange: (...[$event]) => {
                                 if (!!(__VLS_ctx.loading))
+                                    return;
+                                if (!!(__VLS_ctx.serverUnavailable))
                                     return;
                                 if (!!(!__VLS_ctx.user))
                                     return;
@@ -6286,17 +6415,17 @@ else {
                     disabled: (__VLS_ctx.whatsappCloudSaving),
                 });
                 if (__VLS_ctx.whatsappCloudSaving) {
-                    const __VLS_260 = {}.LoaderCircle;
+                    const __VLS_264 = {}.LoaderCircle;
                     /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                     // @ts-ignore
-                    const __VLS_261 = __VLS_asFunctionalComponent(__VLS_260, new __VLS_260({
+                    const __VLS_265 = __VLS_asFunctionalComponent(__VLS_264, new __VLS_264({
                         ...{ class: "spin" },
                         size: (16),
                     }));
-                    const __VLS_262 = __VLS_261({
+                    const __VLS_266 = __VLS_265({
                         ...{ class: "spin" },
                         size: (16),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_261));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_265));
                 }
                 (__VLS_ctx.whatsappCloudSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar configuração'));
             }
@@ -6346,28 +6475,28 @@ else {
                         disabled: (__VLS_ctx.whatsappWorking || __VLS_ctx.whatsappCloudSettings.connectionMode !== __VLS_ctx.whatsappSavedConnectionMode),
                     });
                     if (__VLS_ctx.whatsappWorking) {
-                        const __VLS_264 = {}.LoaderCircle;
+                        const __VLS_268 = {}.LoaderCircle;
                         /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                         // @ts-ignore
-                        const __VLS_265 = __VLS_asFunctionalComponent(__VLS_264, new __VLS_264({
-                            ...{ class: "spin" },
-                            size: (16),
-                        }));
-                        const __VLS_266 = __VLS_265({
-                            ...{ class: "spin" },
-                            size: (16),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_265));
-                    }
-                    else {
-                        const __VLS_268 = {}.MessageCircle;
-                        /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
-                        // @ts-ignore
                         const __VLS_269 = __VLS_asFunctionalComponent(__VLS_268, new __VLS_268({
+                            ...{ class: "spin" },
                             size: (16),
                         }));
                         const __VLS_270 = __VLS_269({
+                            ...{ class: "spin" },
                             size: (16),
                         }, ...__VLS_functionalComponentArgsRest(__VLS_269));
+                    }
+                    else {
+                        const __VLS_272 = {}.MessageCircle;
+                        /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_273 = __VLS_asFunctionalComponent(__VLS_272, new __VLS_272({
+                            size: (16),
+                        }));
+                        const __VLS_274 = __VLS_273({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_273));
                     }
                     (__VLS_ctx.t('Iniciar conexão'));
                 }
@@ -6379,28 +6508,28 @@ else {
                         disabled: (__VLS_ctx.whatsappWorking),
                     });
                     if (__VLS_ctx.whatsappWorking) {
-                        const __VLS_272 = {}.LoaderCircle;
+                        const __VLS_276 = {}.LoaderCircle;
                         /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                         // @ts-ignore
-                        const __VLS_273 = __VLS_asFunctionalComponent(__VLS_272, new __VLS_272({
-                            ...{ class: "spin" },
-                            size: (16),
-                        }));
-                        const __VLS_274 = __VLS_273({
-                            ...{ class: "spin" },
-                            size: (16),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_273));
-                    }
-                    else {
-                        const __VLS_276 = {}.X;
-                        /** @type {[typeof __VLS_components.X, ]} */ ;
-                        // @ts-ignore
                         const __VLS_277 = __VLS_asFunctionalComponent(__VLS_276, new __VLS_276({
+                            ...{ class: "spin" },
                             size: (16),
                         }));
                         const __VLS_278 = __VLS_277({
+                            ...{ class: "spin" },
                             size: (16),
                         }, ...__VLS_functionalComponentArgsRest(__VLS_277));
+                    }
+                    else {
+                        const __VLS_280 = {}.X;
+                        /** @type {[typeof __VLS_components.X, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_281 = __VLS_asFunctionalComponent(__VLS_280, new __VLS_280({
+                            size: (16),
+                        }));
+                        const __VLS_282 = __VLS_281({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_281));
                     }
                     (__VLS_ctx.t('Desconectar conta'));
                 }
@@ -6419,34 +6548,34 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                             ...{ class: "whatsapp-qr-placeholder" },
                         });
-                        const __VLS_280 = {}.LoaderCircle;
+                        const __VLS_284 = {}.LoaderCircle;
                         /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                         // @ts-ignore
-                        const __VLS_281 = __VLS_asFunctionalComponent(__VLS_280, new __VLS_280({
+                        const __VLS_285 = __VLS_asFunctionalComponent(__VLS_284, new __VLS_284({
                             ...{ class: "spin" },
                             size: (24),
                         }));
-                        const __VLS_282 = __VLS_281({
+                        const __VLS_286 = __VLS_285({
                             ...{ class: "spin" },
                             size: (24),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_281));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_285));
                     }
                 }
                 else if (__VLS_ctx.whatsappStatus.state === 'connecting') {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                         ...{ class: "whatsapp-qr-placeholder" },
                     });
-                    const __VLS_284 = {}.LoaderCircle;
+                    const __VLS_288 = {}.LoaderCircle;
                     /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                     // @ts-ignore
-                    const __VLS_285 = __VLS_asFunctionalComponent(__VLS_284, new __VLS_284({
+                    const __VLS_289 = __VLS_asFunctionalComponent(__VLS_288, new __VLS_288({
                         ...{ class: "spin" },
                         size: (24),
                     }));
-                    const __VLS_286 = __VLS_285({
+                    const __VLS_290 = __VLS_289({
                         ...{ class: "spin" },
                         size: (24),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_285));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_289));
                 }
                 if (__VLS_ctx.whatsappCloudSettings.connectionMode !== __VLS_ctx.whatsappSavedConnectionMode) {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
@@ -6463,17 +6592,17 @@ else {
                         disabled: (__VLS_ctx.whatsappCloudSaving),
                     });
                     if (__VLS_ctx.whatsappCloudSaving) {
-                        const __VLS_288 = {}.LoaderCircle;
+                        const __VLS_292 = {}.LoaderCircle;
                         /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                         // @ts-ignore
-                        const __VLS_289 = __VLS_asFunctionalComponent(__VLS_288, new __VLS_288({
+                        const __VLS_293 = __VLS_asFunctionalComponent(__VLS_292, new __VLS_292({
                             ...{ class: "spin" },
                             size: (16),
                         }));
-                        const __VLS_290 = __VLS_289({
+                        const __VLS_294 = __VLS_293({
                             ...{ class: "spin" },
                             size: (16),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_289));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_293));
                     }
                     (__VLS_ctx.whatsappCloudSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar seleção do canal'));
                 }
@@ -6504,46 +6633,46 @@ else {
             });
             /** @type {[typeof MessageTemplateEditor, ]} */ ;
             // @ts-ignore
-            const __VLS_292 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+            const __VLS_296 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
                 id: "whatsappOnlineMessage",
                 modelValue: (__VLS_ctx.whatsappSettings.onlineMessage),
                 label: (__VLS_ctx.t('Mensagem ao normalizar')),
                 maxlength: (500),
             }));
-            const __VLS_293 = __VLS_292({
+            const __VLS_297 = __VLS_296({
                 id: "whatsappOnlineMessage",
                 modelValue: (__VLS_ctx.whatsappSettings.onlineMessage),
                 label: (__VLS_ctx.t('Mensagem ao normalizar')),
                 maxlength: (500),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_292));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_296));
             /** @type {[typeof MessageTemplateEditor, ]} */ ;
             // @ts-ignore
-            const __VLS_295 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+            const __VLS_299 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
                 id: "whatsappWarningMessage",
                 modelValue: (__VLS_ctx.whatsappSettings.warningMessage),
                 label: (__VLS_ctx.t('Mensagem em atenção')),
                 maxlength: (500),
             }));
-            const __VLS_296 = __VLS_295({
+            const __VLS_300 = __VLS_299({
                 id: "whatsappWarningMessage",
                 modelValue: (__VLS_ctx.whatsappSettings.warningMessage),
                 label: (__VLS_ctx.t('Mensagem em atenção')),
                 maxlength: (500),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_295));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_299));
             /** @type {[typeof MessageTemplateEditor, ]} */ ;
             // @ts-ignore
-            const __VLS_298 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+            const __VLS_302 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
                 id: "whatsappOfflineMessage",
                 modelValue: (__VLS_ctx.whatsappSettings.offlineMessage),
                 label: (__VLS_ctx.t('Mensagem offline')),
                 maxlength: (500),
             }));
-            const __VLS_299 = __VLS_298({
+            const __VLS_303 = __VLS_302({
                 id: "whatsappOfflineMessage",
                 modelValue: (__VLS_ctx.whatsappSettings.offlineMessage),
                 label: (__VLS_ctx.t('Mensagem offline')),
                 maxlength: (500),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_298));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_302));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.fieldset, __VLS_intrinsicElements.fieldset)({
                 ...{ class: "whatsapp-sticker-assignments" },
                 disabled: (__VLS_ctx.whatsappSavedConnectionMode !== 'qr'),
@@ -6571,6 +6700,8 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
                 ...{ onChange: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(__VLS_ctx.serverUnavailable))
                             return;
                         if (!!(!__VLS_ctx.user))
                             return;
@@ -6640,6 +6771,8 @@ else {
                 ...{ onChange: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
                             return;
+                        if (!!(__VLS_ctx.serverUnavailable))
+                            return;
                         if (!!(!__VLS_ctx.user))
                             return;
                         if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -6707,6 +6840,8 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
                 ...{ onChange: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(__VLS_ctx.serverUnavailable))
                             return;
                         if (!!(!__VLS_ctx.user))
                             return;
@@ -6801,15 +6936,15 @@ else {
                 ...{ class: "secondary-button whatsapp-sticker-file" },
                 for: "favoriteMediaFile",
             });
-            const __VLS_301 = {}.ImagePlus;
+            const __VLS_305 = {}.ImagePlus;
             /** @type {[typeof __VLS_components.ImagePlus, ]} */ ;
             // @ts-ignore
-            const __VLS_302 = __VLS_asFunctionalComponent(__VLS_301, new __VLS_301({
+            const __VLS_306 = __VLS_asFunctionalComponent(__VLS_305, new __VLS_305({
                 size: (15),
             }));
-            const __VLS_303 = __VLS_302({
+            const __VLS_307 = __VLS_306({
                 size: (15),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_302));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_306));
             (__VLS_ctx.favoriteMediaDataUrl ? __VLS_ctx.t('Mídia selecionada') : __VLS_ctx.t('Escolher mídia'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                 ...{ onChange: (__VLS_ctx.selectFavoriteWhatsAppMedia) },
@@ -6825,28 +6960,28 @@ else {
                 disabled: (__VLS_ctx.favoriteMediaSaving || !__VLS_ctx.favoriteMediaName.trim() || !__VLS_ctx.favoriteMediaDataUrl),
             });
             if (__VLS_ctx.favoriteMediaSaving) {
-                const __VLS_305 = {}.LoaderCircle;
+                const __VLS_309 = {}.LoaderCircle;
                 /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                 // @ts-ignore
-                const __VLS_306 = __VLS_asFunctionalComponent(__VLS_305, new __VLS_305({
-                    ...{ class: "spin" },
-                    size: (15),
-                }));
-                const __VLS_307 = __VLS_306({
-                    ...{ class: "spin" },
-                    size: (15),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_306));
-            }
-            else {
-                const __VLS_309 = {}.Plus;
-                /** @type {[typeof __VLS_components.Plus, ]} */ ;
-                // @ts-ignore
                 const __VLS_310 = __VLS_asFunctionalComponent(__VLS_309, new __VLS_309({
+                    ...{ class: "spin" },
                     size: (15),
                 }));
                 const __VLS_311 = __VLS_310({
+                    ...{ class: "spin" },
                     size: (15),
                 }, ...__VLS_functionalComponentArgsRest(__VLS_310));
+            }
+            else {
+                const __VLS_313 = {}.Plus;
+                /** @type {[typeof __VLS_components.Plus, ]} */ ;
+                // @ts-ignore
+                const __VLS_314 = __VLS_asFunctionalComponent(__VLS_313, new __VLS_313({
+                    size: (15),
+                }));
+                const __VLS_315 = __VLS_314({
+                    size: (15),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_314));
             }
             (__VLS_ctx.favoriteMediaSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Adicionar aos favoritos'));
             if (__VLS_ctx.favoriteMediaDataUrl) {
@@ -6890,6 +7025,8 @@ else {
                         ...{ onClick: (...[$event]) => {
                                 if (!!(__VLS_ctx.loading))
                                     return;
+                                if (!!(__VLS_ctx.serverUnavailable))
+                                    return;
                                 if (!!(!__VLS_ctx.user))
                                     return;
                                 if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -6916,15 +7053,15 @@ else {
                         'aria-label': (`${__VLS_ctx.t('Excluir a mídia')} ${media.name}`),
                         title: (__VLS_ctx.t('Excluir a mídia')),
                     });
-                    const __VLS_313 = {}.Trash2;
+                    const __VLS_317 = {}.Trash2;
                     /** @type {[typeof __VLS_components.Trash2, ]} */ ;
                     // @ts-ignore
-                    const __VLS_314 = __VLS_asFunctionalComponent(__VLS_313, new __VLS_313({
+                    const __VLS_318 = __VLS_asFunctionalComponent(__VLS_317, new __VLS_317({
                         size: (14),
                     }));
-                    const __VLS_315 = __VLS_314({
+                    const __VLS_319 = __VLS_318({
                         size: (14),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_314));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_318));
                 }
             }
             else {
@@ -6990,17 +7127,17 @@ else {
                 disabled: (__VLS_ctx.whatsappSettingsSaving || !__VLS_ctx.canSaveWhatsAppNotificationSettings()),
             });
             if (__VLS_ctx.whatsappSettingsSaving) {
-                const __VLS_317 = {}.LoaderCircle;
+                const __VLS_321 = {}.LoaderCircle;
                 /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                 // @ts-ignore
-                const __VLS_318 = __VLS_asFunctionalComponent(__VLS_317, new __VLS_317({
+                const __VLS_322 = __VLS_asFunctionalComponent(__VLS_321, new __VLS_321({
                     ...{ class: "spin" },
                     size: (16),
                 }));
-                const __VLS_319 = __VLS_318({
+                const __VLS_323 = __VLS_322({
                     ...{ class: "spin" },
                     size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_318));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_322));
             }
             (__VLS_ctx.whatsappSettingsSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar notificações'));
         }
@@ -7062,15 +7199,15 @@ else {
                     ...{ class: "secondary-button" },
                     for: "whatsappProfilePhotoFile",
                 });
-                const __VLS_321 = {}.ImagePlus;
+                const __VLS_325 = {}.ImagePlus;
                 /** @type {[typeof __VLS_components.ImagePlus, ]} */ ;
                 // @ts-ignore
-                const __VLS_322 = __VLS_asFunctionalComponent(__VLS_321, new __VLS_321({
+                const __VLS_326 = __VLS_asFunctionalComponent(__VLS_325, new __VLS_325({
                     size: (15),
                 }));
-                const __VLS_323 = __VLS_322({
+                const __VLS_327 = __VLS_326({
                     size: (15),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_322));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_326));
                 (__VLS_ctx.t('Escolher foto'));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                     ...{ onChange: (__VLS_ctx.selectWhatsAppProfilePhoto) },
@@ -7083,6 +7220,8 @@ else {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                         ...{ onClick: (...[$event]) => {
                                 if (!!(__VLS_ctx.loading))
+                                    return;
+                                if (!!(__VLS_ctx.serverUnavailable))
                                     return;
                                 if (!!(!__VLS_ctx.user))
                                     return;
@@ -7139,17 +7278,17 @@ else {
                     disabled: (__VLS_ctx.whatsappProfileSaving || !__VLS_ctx.whatsappProfileDraftName.trim()),
                 });
                 if (__VLS_ctx.whatsappProfileSaving) {
-                    const __VLS_325 = {}.LoaderCircle;
+                    const __VLS_329 = {}.LoaderCircle;
                     /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                     // @ts-ignore
-                    const __VLS_326 = __VLS_asFunctionalComponent(__VLS_325, new __VLS_325({
+                    const __VLS_330 = __VLS_asFunctionalComponent(__VLS_329, new __VLS_329({
                         ...{ class: "spin" },
                         size: (16),
                     }));
-                    const __VLS_327 = __VLS_326({
+                    const __VLS_331 = __VLS_330({
                         ...{ class: "spin" },
                         size: (16),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_326));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_330));
                 }
                 (__VLS_ctx.whatsappProfileSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar perfil'));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
@@ -7331,17 +7470,17 @@ else {
                     disabled: (__VLS_ctx.whatsappPrivacySaving),
                 });
                 if (__VLS_ctx.whatsappPrivacySaving) {
-                    const __VLS_329 = {}.LoaderCircle;
+                    const __VLS_333 = {}.LoaderCircle;
                     /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                     // @ts-ignore
-                    const __VLS_330 = __VLS_asFunctionalComponent(__VLS_329, new __VLS_329({
+                    const __VLS_334 = __VLS_asFunctionalComponent(__VLS_333, new __VLS_333({
                         ...{ class: "spin" },
                         size: (16),
                     }));
-                    const __VLS_331 = __VLS_330({
+                    const __VLS_335 = __VLS_334({
                         ...{ class: "spin" },
                         size: (16),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_330));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_334));
                 }
                 (__VLS_ctx.whatsappPrivacySaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar privacidade'));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
@@ -7384,6 +7523,8 @@ else {
                         ...{ onClick: (...[$event]) => {
                                 if (!!(__VLS_ctx.loading))
                                     return;
+                                if (!!(__VLS_ctx.serverUnavailable))
+                                    return;
                                 if (!!(!__VLS_ctx.user))
                                     return;
                                 if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -7409,28 +7550,28 @@ else {
                         disabled: (__VLS_ctx.whatsappProfileRestoringId !== null || snapshot.id === __VLS_ctx.whatsappProfile.history[0]?.id),
                     });
                     if (__VLS_ctx.whatsappProfileRestoringId === snapshot.id) {
-                        const __VLS_333 = {}.LoaderCircle;
+                        const __VLS_337 = {}.LoaderCircle;
                         /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                         // @ts-ignore
-                        const __VLS_334 = __VLS_asFunctionalComponent(__VLS_333, new __VLS_333({
-                            ...{ class: "spin" },
-                            size: (14),
-                        }));
-                        const __VLS_335 = __VLS_334({
-                            ...{ class: "spin" },
-                            size: (14),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_334));
-                    }
-                    else {
-                        const __VLS_337 = {}.RefreshCw;
-                        /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
-                        // @ts-ignore
                         const __VLS_338 = __VLS_asFunctionalComponent(__VLS_337, new __VLS_337({
+                            ...{ class: "spin" },
                             size: (14),
                         }));
                         const __VLS_339 = __VLS_338({
+                            ...{ class: "spin" },
                             size: (14),
                         }, ...__VLS_functionalComponentArgsRest(__VLS_338));
+                    }
+                    else {
+                        const __VLS_341 = {}.RefreshCw;
+                        /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_342 = __VLS_asFunctionalComponent(__VLS_341, new __VLS_341({
+                            size: (14),
+                        }));
+                        const __VLS_343 = __VLS_342({
+                            size: (14),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_342));
                     }
                     (__VLS_ctx.t('Restaurar esta versão'));
                 }
@@ -7484,17 +7625,17 @@ else {
                     disabled: (__VLS_ctx.whatsappProfileBaselineSaving || !__VLS_ctx.whatsappProfileBaselineName.trim()),
                 });
                 if (__VLS_ctx.whatsappProfileBaselineSaving) {
-                    const __VLS_341 = {}.LoaderCircle;
+                    const __VLS_345 = {}.LoaderCircle;
                     /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                     // @ts-ignore
-                    const __VLS_342 = __VLS_asFunctionalComponent(__VLS_341, new __VLS_341({
+                    const __VLS_346 = __VLS_asFunctionalComponent(__VLS_345, new __VLS_345({
                         ...{ class: "spin" },
                         size: (16),
                     }));
-                    const __VLS_343 = __VLS_342({
+                    const __VLS_347 = __VLS_346({
                         ...{ class: "spin" },
                         size: (16),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_342));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_346));
                 }
                 (__VLS_ctx.whatsappProfileBaselineSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar referência e abrir editor'));
             }
@@ -7502,15 +7643,15 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                     ...{ class: "whatsapp-log-empty" },
                 });
-                const __VLS_345 = {}.MessageCircle;
+                const __VLS_349 = {}.MessageCircle;
                 /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
                 // @ts-ignore
-                const __VLS_346 = __VLS_asFunctionalComponent(__VLS_345, new __VLS_345({
+                const __VLS_350 = __VLS_asFunctionalComponent(__VLS_349, new __VLS_349({
                     size: (22),
                 }));
-                const __VLS_347 = __VLS_346({
+                const __VLS_351 = __VLS_350({
                     size: (22),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_346));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_350));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                 (__VLS_ctx.t('Conecte a conta via QR para editar o perfil.'));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -7584,42 +7725,42 @@ else {
                 disabled: (__VLS_ctx.whatsappCloudConnectivityTesting || __VLS_ctx.whatsappCloudSettings.connectionMode !== __VLS_ctx.whatsappSavedConnectionMode || (__VLS_ctx.whatsappCloudSettings.connectionMode === 'cloud' && (!__VLS_ctx.whatsappCloudSettings.accessTokenConfigured || !__VLS_ctx.whatsappCloudSettings.phoneNumberId)) || (__VLS_ctx.whatsappCloudSettings.connectionMode === 'qr' && __VLS_ctx.whatsappStatus.state !== 'connected')),
             });
             if (__VLS_ctx.whatsappCloudConnectivityTesting) {
-                const __VLS_349 = {}.LoaderCircle;
+                const __VLS_353 = {}.LoaderCircle;
                 /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                 // @ts-ignore
-                const __VLS_350 = __VLS_asFunctionalComponent(__VLS_349, new __VLS_349({
-                    ...{ class: "spin" },
-                    size: (16),
-                }));
-                const __VLS_351 = __VLS_350({
-                    ...{ class: "spin" },
-                    size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_350));
-            }
-            else {
-                const __VLS_353 = {}.RefreshCw;
-                /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
-                // @ts-ignore
                 const __VLS_354 = __VLS_asFunctionalComponent(__VLS_353, new __VLS_353({
+                    ...{ class: "spin" },
                     size: (16),
                 }));
                 const __VLS_355 = __VLS_354({
+                    ...{ class: "spin" },
                     size: (16),
                 }, ...__VLS_functionalComponentArgsRest(__VLS_354));
+            }
+            else {
+                const __VLS_357 = {}.RefreshCw;
+                /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
+                // @ts-ignore
+                const __VLS_358 = __VLS_asFunctionalComponent(__VLS_357, new __VLS_357({
+                    size: (16),
+                }));
+                const __VLS_359 = __VLS_358({
+                    size: (16),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_358));
             }
             (__VLS_ctx.whatsappCloudConnectivityTesting ? __VLS_ctx.t('Testando conexão...') : __VLS_ctx.t('Testar conexão'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "email-connection-mark" },
             });
-            const __VLS_357 = {}.MessageCircle;
+            const __VLS_361 = {}.MessageCircle;
             /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
             // @ts-ignore
-            const __VLS_358 = __VLS_asFunctionalComponent(__VLS_357, new __VLS_357({
+            const __VLS_362 = __VLS_asFunctionalComponent(__VLS_361, new __VLS_361({
                 size: (36),
             }));
-            const __VLS_359 = __VLS_358({
+            const __VLS_363 = __VLS_362({
                 size: (36),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_358));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_362));
         }
     }
     else if (__VLS_ctx.managementTab === 'email' && __VLS_ctx.isWhatsAppDashboardAdmin) {
@@ -7644,6 +7785,8 @@ else {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -7662,15 +7805,15 @@ else {
             'aria-label': (__VLS_ctx.t('Atualizar')),
             title: (__VLS_ctx.t('Atualizar')),
         });
-        const __VLS_361 = {}.RefreshCw;
+        const __VLS_365 = {}.RefreshCw;
         /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
         // @ts-ignore
-        const __VLS_362 = __VLS_asFunctionalComponent(__VLS_361, new __VLS_361({
+        const __VLS_366 = __VLS_asFunctionalComponent(__VLS_365, new __VLS_365({
             size: (16),
         }));
-        const __VLS_363 = __VLS_362({
+        const __VLS_367 = __VLS_366({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_362));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_366));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
             ...{ class: "settings-tabs whatsapp-tabs" },
             role: "tablist",
@@ -7679,6 +7822,8 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -7700,19 +7845,21 @@ else {
             'aria-selected': (__VLS_ctx.emailTab === 'log'),
             'aria-controls': "emailLogPanel",
         });
-        const __VLS_365 = {}.List;
+        const __VLS_369 = {}.List;
         /** @type {[typeof __VLS_components.List, ]} */ ;
         // @ts-ignore
-        const __VLS_366 = __VLS_asFunctionalComponent(__VLS_365, new __VLS_365({
+        const __VLS_370 = __VLS_asFunctionalComponent(__VLS_369, new __VLS_369({
             size: (15),
         }));
-        const __VLS_367 = __VLS_366({
+        const __VLS_371 = __VLS_370({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_366));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_370));
         (__VLS_ctx.t('Log'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -7734,19 +7881,21 @@ else {
             'aria-selected': (__VLS_ctx.emailTab === 'configuration'),
             'aria-controls': "emailConfigurationPanel",
         });
-        const __VLS_369 = {}.Settings;
+        const __VLS_373 = {}.Settings;
         /** @type {[typeof __VLS_components.Settings, ]} */ ;
         // @ts-ignore
-        const __VLS_370 = __VLS_asFunctionalComponent(__VLS_369, new __VLS_369({
+        const __VLS_374 = __VLS_asFunctionalComponent(__VLS_373, new __VLS_373({
             size: (15),
         }));
-        const __VLS_371 = __VLS_370({
+        const __VLS_375 = __VLS_374({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_370));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_374));
         (__VLS_ctx.t('Configuração'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -7768,19 +7917,21 @@ else {
             'aria-selected': (__VLS_ctx.emailTab === 'notifications'),
             'aria-controls': "emailNotificationsPanel",
         });
-        const __VLS_373 = {}.Bell;
+        const __VLS_377 = {}.Bell;
         /** @type {[typeof __VLS_components.Bell, ]} */ ;
         // @ts-ignore
-        const __VLS_374 = __VLS_asFunctionalComponent(__VLS_373, new __VLS_373({
+        const __VLS_378 = __VLS_asFunctionalComponent(__VLS_377, new __VLS_377({
             size: (15),
         }));
-        const __VLS_375 = __VLS_374({
+        const __VLS_379 = __VLS_378({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_374));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_378));
         (__VLS_ctx.t('Notificações'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -7802,30 +7953,30 @@ else {
             'aria-selected': (__VLS_ctx.emailTab === 'connection'),
             'aria-controls': "emailConnectionPanel",
         });
-        const __VLS_377 = {}.Mail;
+        const __VLS_381 = {}.Mail;
         /** @type {[typeof __VLS_components.Mail, ]} */ ;
         // @ts-ignore
-        const __VLS_378 = __VLS_asFunctionalComponent(__VLS_377, new __VLS_377({
+        const __VLS_382 = __VLS_asFunctionalComponent(__VLS_381, new __VLS_381({
             size: (15),
         }));
-        const __VLS_379 = __VLS_378({
+        const __VLS_383 = __VLS_382({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_378));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_382));
         (__VLS_ctx.t('Conexão'));
         if (__VLS_ctx.emailError) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "notice-error" },
                 role: "alert",
             });
-            const __VLS_381 = {}.AlertTriangle;
+            const __VLS_385 = {}.AlertTriangle;
             /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
             // @ts-ignore
-            const __VLS_382 = __VLS_asFunctionalComponent(__VLS_381, new __VLS_381({
+            const __VLS_386 = __VLS_asFunctionalComponent(__VLS_385, new __VLS_385({
                 size: (17),
             }));
-            const __VLS_383 = __VLS_382({
+            const __VLS_387 = __VLS_386({
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_382));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_386));
             (__VLS_ctx.t(__VLS_ctx.emailError));
         }
         if (__VLS_ctx.emailMessage) {
@@ -7858,15 +8009,15 @@ else {
                     type: "button",
                     disabled: (__VLS_ctx.emailWorking),
                 });
-                const __VLS_385 = {}.Trash2;
+                const __VLS_389 = {}.Trash2;
                 /** @type {[typeof __VLS_components.Trash2, ]} */ ;
                 // @ts-ignore
-                const __VLS_386 = __VLS_asFunctionalComponent(__VLS_385, new __VLS_385({
+                const __VLS_390 = __VLS_asFunctionalComponent(__VLS_389, new __VLS_389({
                     size: (14),
                 }));
-                const __VLS_387 = __VLS_386({
+                const __VLS_391 = __VLS_390({
                     size: (14),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_386));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_390));
                 (__VLS_ctx.t('Apagar log de e-mail'));
             }
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -7887,19 +8038,8 @@ else {
                         ...{ class: "whatsapp-log-icon" },
                     });
                     if (entry.level === 'success') {
-                        const __VLS_389 = {}.CircleCheck;
+                        const __VLS_393 = {}.CircleCheck;
                         /** @type {[typeof __VLS_components.CircleCheck, ]} */ ;
-                        // @ts-ignore
-                        const __VLS_390 = __VLS_asFunctionalComponent(__VLS_389, new __VLS_389({
-                            size: (16),
-                        }));
-                        const __VLS_391 = __VLS_390({
-                            size: (16),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_390));
-                    }
-                    else if (entry.level === 'error') {
-                        const __VLS_393 = {}.CircleAlert;
-                        /** @type {[typeof __VLS_components.CircleAlert, ]} */ ;
                         // @ts-ignore
                         const __VLS_394 = __VLS_asFunctionalComponent(__VLS_393, new __VLS_393({
                             size: (16),
@@ -7908,9 +8048,9 @@ else {
                             size: (16),
                         }, ...__VLS_functionalComponentArgsRest(__VLS_394));
                     }
-                    else {
-                        const __VLS_397 = {}.Activity;
-                        /** @type {[typeof __VLS_components.Activity, ]} */ ;
+                    else if (entry.level === 'error') {
+                        const __VLS_397 = {}.CircleAlert;
+                        /** @type {[typeof __VLS_components.CircleAlert, ]} */ ;
                         // @ts-ignore
                         const __VLS_398 = __VLS_asFunctionalComponent(__VLS_397, new __VLS_397({
                             size: (16),
@@ -7918,6 +8058,17 @@ else {
                         const __VLS_399 = __VLS_398({
                             size: (16),
                         }, ...__VLS_functionalComponentArgsRest(__VLS_398));
+                    }
+                    else {
+                        const __VLS_401 = {}.Activity;
+                        /** @type {[typeof __VLS_components.Activity, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_402 = __VLS_asFunctionalComponent(__VLS_401, new __VLS_401({
+                            size: (16),
+                        }));
+                        const __VLS_403 = __VLS_402({
+                            size: (16),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_402));
                     }
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                         ...{ class: "whatsapp-log-copy" },
@@ -7936,15 +8087,15 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                     ...{ class: "whatsapp-log-empty" },
                 });
-                const __VLS_401 = {}.List;
+                const __VLS_405 = {}.List;
                 /** @type {[typeof __VLS_components.List, ]} */ ;
                 // @ts-ignore
-                const __VLS_402 = __VLS_asFunctionalComponent(__VLS_401, new __VLS_401({
+                const __VLS_406 = __VLS_asFunctionalComponent(__VLS_405, new __VLS_405({
                     size: (20),
                 }));
-                const __VLS_403 = __VLS_402({
+                const __VLS_407 = __VLS_406({
                     size: (20),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_402));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_406));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                 (__VLS_ctx.t('Nenhum e-mail enviado.'));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -8052,15 +8203,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-icon" },
             });
-            const __VLS_405 = {}.ShieldCheck;
+            const __VLS_409 = {}.ShieldCheck;
             /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
             // @ts-ignore
-            const __VLS_406 = __VLS_asFunctionalComponent(__VLS_405, new __VLS_405({
+            const __VLS_410 = __VLS_asFunctionalComponent(__VLS_409, new __VLS_409({
                 size: (17),
             }));
-            const __VLS_407 = __VLS_406({
+            const __VLS_411 = __VLS_410({
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_406));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_410));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "theme-setting-copy" },
             });
@@ -8082,15 +8233,15 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "theme-setting-icon" },
                 });
-                const __VLS_409 = {}.LockKeyhole;
+                const __VLS_413 = {}.LockKeyhole;
                 /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
                 // @ts-ignore
-                const __VLS_410 = __VLS_asFunctionalComponent(__VLS_409, new __VLS_409({
+                const __VLS_414 = __VLS_asFunctionalComponent(__VLS_413, new __VLS_413({
                     size: (17),
                 }));
-                const __VLS_411 = __VLS_410({
+                const __VLS_415 = __VLS_414({
                     size: (17),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_410));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_414));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "theme-setting-copy" },
                 });
@@ -8116,17 +8267,17 @@ else {
                 disabled: (__VLS_ctx.emailSettingsSaving),
             });
             if (__VLS_ctx.emailSettingsSaving) {
-                const __VLS_413 = {}.LoaderCircle;
+                const __VLS_417 = {}.LoaderCircle;
                 /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                 // @ts-ignore
-                const __VLS_414 = __VLS_asFunctionalComponent(__VLS_413, new __VLS_413({
+                const __VLS_418 = __VLS_asFunctionalComponent(__VLS_417, new __VLS_417({
                     ...{ class: "spin" },
                     size: (16),
                 }));
-                const __VLS_415 = __VLS_414({
+                const __VLS_419 = __VLS_418({
                     ...{ class: "spin" },
                     size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_414));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_418));
             }
             (__VLS_ctx.emailSettingsSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar configuração de e-mail'));
         }
@@ -8142,46 +8293,46 @@ else {
             });
             /** @type {[typeof MessageTemplateEditor, ]} */ ;
             // @ts-ignore
-            const __VLS_417 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+            const __VLS_421 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
                 id: "emailOnlineMessage",
                 modelValue: (__VLS_ctx.emailNotificationDraft.onlineMessage),
                 label: (__VLS_ctx.t('Mensagem de e-mail ao normalizar')),
                 maxlength: (1000),
             }));
-            const __VLS_418 = __VLS_417({
+            const __VLS_422 = __VLS_421({
                 id: "emailOnlineMessage",
                 modelValue: (__VLS_ctx.emailNotificationDraft.onlineMessage),
                 label: (__VLS_ctx.t('Mensagem de e-mail ao normalizar')),
                 maxlength: (1000),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_417));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_421));
             /** @type {[typeof MessageTemplateEditor, ]} */ ;
             // @ts-ignore
-            const __VLS_420 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+            const __VLS_424 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
                 id: "emailWarningMessage",
                 modelValue: (__VLS_ctx.emailNotificationDraft.warningMessage),
                 label: (__VLS_ctx.t('Mensagem de e-mail em atenção')),
                 maxlength: (1000),
             }));
-            const __VLS_421 = __VLS_420({
+            const __VLS_425 = __VLS_424({
                 id: "emailWarningMessage",
                 modelValue: (__VLS_ctx.emailNotificationDraft.warningMessage),
                 label: (__VLS_ctx.t('Mensagem de e-mail em atenção')),
                 maxlength: (1000),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_420));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_424));
             /** @type {[typeof MessageTemplateEditor, ]} */ ;
             // @ts-ignore
-            const __VLS_423 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
+            const __VLS_427 = __VLS_asFunctionalComponent(MessageTemplateEditor, new MessageTemplateEditor({
                 id: "emailOfflineMessage",
                 modelValue: (__VLS_ctx.emailNotificationDraft.offlineMessage),
                 label: (__VLS_ctx.t('Mensagem de e-mail offline')),
                 maxlength: (1000),
             }));
-            const __VLS_424 = __VLS_423({
+            const __VLS_428 = __VLS_427({
                 id: "emailOfflineMessage",
                 modelValue: (__VLS_ctx.emailNotificationDraft.offlineMessage),
                 label: (__VLS_ctx.t('Mensagem de e-mail offline')),
                 maxlength: (1000),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_423));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_427));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
                 ...{ class: "settings-help" },
             });
@@ -8234,17 +8385,17 @@ else {
                 disabled: (__VLS_ctx.emailSettingsSaving),
             });
             if (__VLS_ctx.emailSettingsSaving) {
-                const __VLS_426 = {}.LoaderCircle;
+                const __VLS_430 = {}.LoaderCircle;
                 /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                 // @ts-ignore
-                const __VLS_427 = __VLS_asFunctionalComponent(__VLS_426, new __VLS_426({
+                const __VLS_431 = __VLS_asFunctionalComponent(__VLS_430, new __VLS_430({
                     ...{ class: "spin" },
                     size: (16),
                 }));
-                const __VLS_428 = __VLS_427({
+                const __VLS_432 = __VLS_431({
                     ...{ class: "spin" },
                     size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_427));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_431));
             }
             (__VLS_ctx.emailSettingsSaving ? __VLS_ctx.t('Salvando...') : __VLS_ctx.t('Salvar notificações'));
         }
@@ -8282,42 +8433,42 @@ else {
                 disabled: (__VLS_ctx.emailWorking || !__VLS_ctx.emailSettings.passwordConfigured),
             });
             if (__VLS_ctx.emailWorking) {
-                const __VLS_430 = {}.LoaderCircle;
+                const __VLS_434 = {}.LoaderCircle;
                 /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                 // @ts-ignore
-                const __VLS_431 = __VLS_asFunctionalComponent(__VLS_430, new __VLS_430({
-                    ...{ class: "spin" },
-                    size: (16),
-                }));
-                const __VLS_432 = __VLS_431({
-                    ...{ class: "spin" },
-                    size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_431));
-            }
-            else {
-                const __VLS_434 = {}.ShieldCheck;
-                /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
-                // @ts-ignore
                 const __VLS_435 = __VLS_asFunctionalComponent(__VLS_434, new __VLS_434({
+                    ...{ class: "spin" },
                     size: (16),
                 }));
                 const __VLS_436 = __VLS_435({
+                    ...{ class: "spin" },
                     size: (16),
                 }, ...__VLS_functionalComponentArgsRest(__VLS_435));
+            }
+            else {
+                const __VLS_438 = {}.ShieldCheck;
+                /** @type {[typeof __VLS_components.ShieldCheck, ]} */ ;
+                // @ts-ignore
+                const __VLS_439 = __VLS_asFunctionalComponent(__VLS_438, new __VLS_438({
+                    size: (16),
+                }));
+                const __VLS_440 = __VLS_439({
+                    size: (16),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_439));
             }
             (__VLS_ctx.t('Testar conexão SMTP'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "email-connection-mark" },
             });
-            const __VLS_438 = {}.Mail;
+            const __VLS_442 = {}.Mail;
             /** @type {[typeof __VLS_components.Mail, ]} */ ;
             // @ts-ignore
-            const __VLS_439 = __VLS_asFunctionalComponent(__VLS_438, new __VLS_438({
+            const __VLS_443 = __VLS_asFunctionalComponent(__VLS_442, new __VLS_442({
                 size: (36),
             }));
-            const __VLS_440 = __VLS_439({
+            const __VLS_444 = __VLS_443({
                 size: (36),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_439));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_443));
         }
     }
     else {
@@ -8340,30 +8491,30 @@ else {
             ...{ class: "secondary-button" },
             disabled: (__VLS_ctx.loading),
         });
-        const __VLS_442 = {}.RefreshCw;
+        const __VLS_446 = {}.RefreshCw;
         /** @type {[typeof __VLS_components.RefreshCw, ]} */ ;
         // @ts-ignore
-        const __VLS_443 = __VLS_asFunctionalComponent(__VLS_442, new __VLS_442({
+        const __VLS_447 = __VLS_asFunctionalComponent(__VLS_446, new __VLS_446({
             size: (16),
         }));
-        const __VLS_444 = __VLS_443({
+        const __VLS_448 = __VLS_447({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_443));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_447));
         (__VLS_ctx.t('Atualizar'));
         if (__VLS_ctx.pageError) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: "notice-error" },
                 role: "alert",
             });
-            const __VLS_446 = {}.AlertTriangle;
+            const __VLS_450 = {}.AlertTriangle;
             /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
             // @ts-ignore
-            const __VLS_447 = __VLS_asFunctionalComponent(__VLS_446, new __VLS_446({
+            const __VLS_451 = __VLS_asFunctionalComponent(__VLS_450, new __VLS_450({
                 size: (17),
             }));
-            const __VLS_448 = __VLS_447({
+            const __VLS_452 = __VLS_451({
                 size: (17),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_447));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_451));
             (__VLS_ctx.t(__VLS_ctx.pageError));
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
@@ -8381,15 +8532,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "metric-icon" },
         });
-        const __VLS_450 = {}.Cpu;
+        const __VLS_454 = {}.Cpu;
         /** @type {[typeof __VLS_components.Cpu, ]} */ ;
         // @ts-ignore
-        const __VLS_451 = __VLS_asFunctionalComponent(__VLS_450, new __VLS_450({
+        const __VLS_455 = __VLS_asFunctionalComponent(__VLS_454, new __VLS_454({
             size: (17),
         }));
-        const __VLS_452 = __VLS_451({
+        const __VLS_456 = __VLS_455({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_451));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_455));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-value" },
         });
@@ -8414,15 +8565,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "metric-icon green" },
         });
-        const __VLS_454 = {}.Signal;
+        const __VLS_458 = {}.Signal;
         /** @type {[typeof __VLS_components.Signal, ]} */ ;
         // @ts-ignore
-        const __VLS_455 = __VLS_asFunctionalComponent(__VLS_454, new __VLS_454({
+        const __VLS_459 = __VLS_asFunctionalComponent(__VLS_458, new __VLS_458({
             size: (17),
         }));
-        const __VLS_456 = __VLS_455({
+        const __VLS_460 = __VLS_459({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_455));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_459));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-value" },
         });
@@ -8432,15 +8583,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-foot positive" },
         });
-        const __VLS_458 = {}.Check;
+        const __VLS_462 = {}.Check;
         /** @type {[typeof __VLS_components.Check, ]} */ ;
         // @ts-ignore
-        const __VLS_459 = __VLS_asFunctionalComponent(__VLS_458, new __VLS_458({
+        const __VLS_463 = __VLS_asFunctionalComponent(__VLS_462, new __VLS_462({
             size: (13),
         }));
-        const __VLS_460 = __VLS_459({
+        const __VLS_464 = __VLS_463({
             size: (13),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_459));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_463));
         (__VLS_ctx.t('Operando normalmente'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
             ...{ class: "metric" },
@@ -8453,15 +8604,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "metric-icon amber" },
         });
-        const __VLS_462 = {}.AlertTriangle;
+        const __VLS_466 = {}.AlertTriangle;
         /** @type {[typeof __VLS_components.AlertTriangle, ]} */ ;
         // @ts-ignore
-        const __VLS_463 = __VLS_asFunctionalComponent(__VLS_462, new __VLS_462({
+        const __VLS_467 = __VLS_asFunctionalComponent(__VLS_466, new __VLS_466({
             size: (17),
         }));
-        const __VLS_464 = __VLS_463({
+        const __VLS_468 = __VLS_467({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_463));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_467));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-value" },
         });
@@ -8484,15 +8635,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
             ...{ class: "metric-icon rose" },
         });
-        const __VLS_466 = {}.Activity;
+        const __VLS_470 = {}.Activity;
         /** @type {[typeof __VLS_components.Activity, ]} */ ;
         // @ts-ignore
-        const __VLS_467 = __VLS_asFunctionalComponent(__VLS_466, new __VLS_466({
+        const __VLS_471 = __VLS_asFunctionalComponent(__VLS_470, new __VLS_470({
             size: (17),
         }));
-        const __VLS_468 = __VLS_467({
+        const __VLS_472 = __VLS_471({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_467));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_471));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "metric-value" },
         });
@@ -8521,15 +8672,15 @@ else {
             ...{ class: "export-button" },
             title: (__VLS_ctx.t('Exportar lista')),
         });
-        const __VLS_470 = {}.ArrowDownToLine;
+        const __VLS_474 = {}.ArrowDownToLine;
         /** @type {[typeof __VLS_components.ArrowDownToLine, ]} */ ;
         // @ts-ignore
-        const __VLS_471 = __VLS_asFunctionalComponent(__VLS_470, new __VLS_470({
+        const __VLS_475 = __VLS_asFunctionalComponent(__VLS_474, new __VLS_474({
             size: (16),
         }));
-        const __VLS_472 = __VLS_471({
+        const __VLS_476 = __VLS_475({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_471));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_475));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('Exportar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
@@ -8546,15 +8697,15 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
             ...{ class: "search-field" },
         });
-        const __VLS_474 = {}.Search;
+        const __VLS_478 = {}.Search;
         /** @type {[typeof __VLS_components.Search, ]} */ ;
         // @ts-ignore
-        const __VLS_475 = __VLS_asFunctionalComponent(__VLS_474, new __VLS_474({
+        const __VLS_479 = __VLS_asFunctionalComponent(__VLS_478, new __VLS_478({
             size: (16),
         }));
-        const __VLS_476 = __VLS_475({
+        const __VLS_480 = __VLS_479({
             size: (16),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_475));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_479));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
             type: "search",
             placeholder: (__VLS_ctx.t('Buscar aparelho...')),
@@ -8575,6 +8726,8 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                     ...{ onClick: (...[$event]) => {
                             if (!!(__VLS_ctx.loading))
+                                return;
+                            if (!!(__VLS_ctx.serverUnavailable))
                                 return;
                             if (!!(!__VLS_ctx.user))
                                 return;
@@ -8602,19 +8755,8 @@ else {
                     ...{ class: "device-icon" },
                 });
                 if (device.canSimulate) {
-                    const __VLS_478 = {}.Bot;
+                    const __VLS_482 = {}.Bot;
                     /** @type {[typeof __VLS_components.Bot, ]} */ ;
-                    // @ts-ignore
-                    const __VLS_479 = __VLS_asFunctionalComponent(__VLS_478, new __VLS_478({
-                        size: (17),
-                    }));
-                    const __VLS_480 = __VLS_479({
-                        size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_479));
-                }
-                else {
-                    const __VLS_482 = {}.Cpu;
-                    /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                     // @ts-ignore
                     const __VLS_483 = __VLS_asFunctionalComponent(__VLS_482, new __VLS_482({
                         size: (17),
@@ -8622,6 +8764,17 @@ else {
                     const __VLS_484 = __VLS_483({
                         size: (17),
                     }, ...__VLS_functionalComponentArgsRest(__VLS_483));
+                }
+                else {
+                    const __VLS_486 = {}.Cpu;
+                    /** @type {[typeof __VLS_components.Cpu, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_487 = __VLS_asFunctionalComponent(__VLS_486, new __VLS_486({
+                        size: (17),
+                    }));
+                    const __VLS_488 = __VLS_487({
+                        size: (17),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_487));
                 }
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                     ...{ class: "device-identity-copy" },
@@ -8644,17 +8797,7 @@ else {
                         ...{ class: (sensor.reading ? (sensor.reading.alert ? 'health-warning' : device.status === 'offline' ? 'health-offline' : 'health-online') : 'health-missing') },
                         title: (`${sensor.name}: ${sensor.reading ? sensor.reading.alert ? __VLS_ctx.t('Em atenção') : device.status === 'offline' ? __VLS_ctx.deviceStatusLabel('offline') : __VLS_ctx.deviceStatusLabel('online') : __VLS_ctx.t('sem leitura recebida')}`),
                     });
-                    const __VLS_486 = ((__VLS_ctx.readingIcon(sensor.key)));
-                    // @ts-ignore
-                    const __VLS_487 = __VLS_asFunctionalComponent(__VLS_486, new __VLS_486({
-                        size: (15),
-                    }));
-                    const __VLS_488 = __VLS_487({
-                        size: (15),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_487));
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                    (sensor.shortName);
-                    const __VLS_490 = ((sensor.reading ? sensor.reading.alert ? __VLS_ctx.AlertTriangle : __VLS_ctx.deviceStatusIcon(device.status === 'offline' ? 'offline' : 'online') : __VLS_ctx.CircleMinus));
+                    const __VLS_490 = ((__VLS_ctx.readingIcon(sensor.key)));
                     // @ts-ignore
                     const __VLS_491 = __VLS_asFunctionalComponent(__VLS_490, new __VLS_490({
                         size: (15),
@@ -8662,20 +8805,30 @@ else {
                     const __VLS_492 = __VLS_491({
                         size: (15),
                     }, ...__VLS_functionalComponentArgsRest(__VLS_491));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    (sensor.shortName);
+                    const __VLS_494 = ((sensor.reading ? sensor.reading.alert ? __VLS_ctx.AlertTriangle : __VLS_ctx.deviceStatusIcon(device.status === 'offline' ? 'offline' : 'online') : __VLS_ctx.CircleMinus));
+                    // @ts-ignore
+                    const __VLS_495 = __VLS_asFunctionalComponent(__VLS_494, new __VLS_494({
+                        size: (15),
+                    }));
+                    const __VLS_496 = __VLS_495({
+                        size: (15),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_495));
                 }
-                const __VLS_494 = {}.ChevronDown;
+                const __VLS_498 = {}.ChevronDown;
                 /** @type {[typeof __VLS_components.ChevronDown, ]} */ ;
                 // @ts-ignore
-                const __VLS_495 = __VLS_asFunctionalComponent(__VLS_494, new __VLS_494({
+                const __VLS_499 = __VLS_asFunctionalComponent(__VLS_498, new __VLS_498({
                     ...{ class: "device-expand-icon" },
                     ...{ class: ({ expanded: __VLS_ctx.isDeviceExpanded(device.id) }) },
                     size: (18),
                 }));
-                const __VLS_496 = __VLS_495({
+                const __VLS_500 = __VLS_499({
                     ...{ class: "device-expand-icon" },
                     ...{ class: ({ expanded: __VLS_ctx.isDeviceExpanded(device.id) }) },
                     size: (18),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_495));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_499));
                 if (__VLS_ctx.isDeviceExpanded(device.id)) {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                         id: (`device-details-${device.id}`),
@@ -8693,6 +8846,8 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                             ...{ onKeydown: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
                                         return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
@@ -8734,6 +8889,8 @@ else {
                                 ...{ onClick: (...[$event]) => {
                                         if (!!(__VLS_ctx.loading))
                                             return;
+                                        if (!!(__VLS_ctx.serverUnavailable))
+                                            return;
                                         if (!!(!__VLS_ctx.user))
                                             return;
                                         if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -8761,28 +8918,28 @@ else {
                                 'aria-label': (__VLS_ctx.t('Salvar apelido')),
                             });
                             if (__VLS_ctx.deviceAliasSavingId === device.id) {
-                                const __VLS_498 = {}.LoaderCircle;
+                                const __VLS_502 = {}.LoaderCircle;
                                 /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                                 // @ts-ignore
-                                const __VLS_499 = __VLS_asFunctionalComponent(__VLS_498, new __VLS_498({
-                                    ...{ class: "spin" },
-                                    size: (15),
-                                }));
-                                const __VLS_500 = __VLS_499({
-                                    ...{ class: "spin" },
-                                    size: (15),
-                                }, ...__VLS_functionalComponentArgsRest(__VLS_499));
-                            }
-                            else {
-                                const __VLS_502 = {}.Check;
-                                /** @type {[typeof __VLS_components.Check, ]} */ ;
-                                // @ts-ignore
                                 const __VLS_503 = __VLS_asFunctionalComponent(__VLS_502, new __VLS_502({
-                                    size: (16),
+                                    ...{ class: "spin" },
+                                    size: (15),
                                 }));
                                 const __VLS_504 = __VLS_503({
-                                    size: (16),
+                                    ...{ class: "spin" },
+                                    size: (15),
                                 }, ...__VLS_functionalComponentArgsRest(__VLS_503));
+                            }
+                            else {
+                                const __VLS_506 = {}.Check;
+                                /** @type {[typeof __VLS_components.Check, ]} */ ;
+                                // @ts-ignore
+                                const __VLS_507 = __VLS_asFunctionalComponent(__VLS_506, new __VLS_506({
+                                    size: (16),
+                                }));
+                                const __VLS_508 = __VLS_507({
+                                    size: (16),
+                                }, ...__VLS_functionalComponentArgsRest(__VLS_507));
                             }
                             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                                 ...{ onClick: (__VLS_ctx.cancelDeviceAliasEdit) },
@@ -8792,20 +8949,22 @@ else {
                                 title: (__VLS_ctx.t('Cancelar')),
                                 'aria-label': (__VLS_ctx.t('Cancelar')),
                             });
-                            const __VLS_506 = {}.X;
+                            const __VLS_510 = {}.X;
                             /** @type {[typeof __VLS_components.X, ]} */ ;
                             // @ts-ignore
-                            const __VLS_507 = __VLS_asFunctionalComponent(__VLS_506, new __VLS_506({
+                            const __VLS_511 = __VLS_asFunctionalComponent(__VLS_510, new __VLS_510({
                                 size: (16),
                             }));
-                            const __VLS_508 = __VLS_507({
+                            const __VLS_512 = __VLS_511({
                                 size: (16),
-                            }, ...__VLS_functionalComponentArgsRest(__VLS_507));
+                            }, ...__VLS_functionalComponentArgsRest(__VLS_511));
                         }
                         else {
                             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                                 ...{ onClick: (...[$event]) => {
                                         if (!!(__VLS_ctx.loading))
+                                            return;
+                                        if (!!(__VLS_ctx.serverUnavailable))
                                             return;
                                         if (!!(!__VLS_ctx.user))
                                             return;
@@ -8832,36 +8991,23 @@ else {
                                 title: (__VLS_ctx.t('Editar apelido')),
                                 'aria-label': (__VLS_ctx.t('Editar apelido')),
                             });
-                            const __VLS_510 = {}.Pencil;
+                            const __VLS_514 = {}.Pencil;
                             /** @type {[typeof __VLS_components.Pencil, ]} */ ;
                             // @ts-ignore
-                            const __VLS_511 = __VLS_asFunctionalComponent(__VLS_510, new __VLS_510({
+                            const __VLS_515 = __VLS_asFunctionalComponent(__VLS_514, new __VLS_514({
                                 size: (15),
                             }));
-                            const __VLS_512 = __VLS_511({
+                            const __VLS_516 = __VLS_515({
                                 size: (15),
-                            }, ...__VLS_functionalComponentArgsRest(__VLS_511));
+                            }, ...__VLS_functionalComponentArgsRest(__VLS_515));
                         }
                     }
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                         ...{ class: "device-meta" },
                     });
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                    const __VLS_514 = {}.MapPin;
+                    const __VLS_518 = {}.MapPin;
                     /** @type {[typeof __VLS_components.MapPin, ]} */ ;
-                    // @ts-ignore
-                    const __VLS_515 = __VLS_asFunctionalComponent(__VLS_514, new __VLS_514({
-                        size: (14),
-                    }));
-                    const __VLS_516 = __VLS_515({
-                        size: (14),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_515));
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-                    (__VLS_ctx.t('Localizacao'));
-                    (device.location || __VLS_ctx.t('Nao informado'));
-                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                    const __VLS_518 = {}.Cpu;
-                    /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                     // @ts-ignore
                     const __VLS_519 = __VLS_asFunctionalComponent(__VLS_518, new __VLS_518({
                         size: (14),
@@ -8870,11 +9016,11 @@ else {
                         size: (14),
                     }, ...__VLS_functionalComponentArgsRest(__VLS_519));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
-                    (__VLS_ctx.t('Identificador'));
-                    (device.externalId);
+                    (__VLS_ctx.t('Localizacao'));
+                    (device.location || __VLS_ctx.t('Nao informado'));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-                    const __VLS_522 = {}.Clock3;
-                    /** @type {[typeof __VLS_components.Clock3, ]} */ ;
+                    const __VLS_522 = {}.Cpu;
+                    /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                     // @ts-ignore
                     const __VLS_523 = __VLS_asFunctionalComponent(__VLS_522, new __VLS_522({
                         size: (14),
@@ -8882,6 +9028,19 @@ else {
                     const __VLS_524 = __VLS_523({
                         size: (14),
                     }, ...__VLS_functionalComponentArgsRest(__VLS_523));
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (__VLS_ctx.t('Identificador'));
+                    (device.externalId);
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                    const __VLS_526 = {}.Clock3;
+                    /** @type {[typeof __VLS_components.Clock3, ]} */ ;
+                    // @ts-ignore
+                    const __VLS_527 = __VLS_asFunctionalComponent(__VLS_526, new __VLS_526({
+                        size: (14),
+                    }));
+                    const __VLS_528 = __VLS_527({
+                        size: (14),
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_527));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                     (__VLS_ctx.t('Ultimo contato'));
                     (__VLS_ctx.formatTime(device.lastSeenAt));
@@ -8896,14 +9055,14 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                             ...{ class: "sensor-detail-label" },
                         });
-                        const __VLS_526 = ((__VLS_ctx.readingIcon(sensor.key)));
+                        const __VLS_530 = ((__VLS_ctx.readingIcon(sensor.key)));
                         // @ts-ignore
-                        const __VLS_527 = __VLS_asFunctionalComponent(__VLS_526, new __VLS_526({
+                        const __VLS_531 = __VLS_asFunctionalComponent(__VLS_530, new __VLS_530({
                             size: (15),
                         }));
-                        const __VLS_528 = __VLS_527({
+                        const __VLS_532 = __VLS_531({
                             size: (15),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_527));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_531));
                         (sensor.name);
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({
                             ...{ class: ({ 'sensor-reading-alert': sensor.reading?.alert }) },
@@ -8929,15 +9088,15 @@ else {
                         (__VLS_ctx.t('Simular leituras'));
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
                         (__VLS_ctx.deviceDisplayName(device));
-                        const __VLS_530 = {}.Cpu;
+                        const __VLS_534 = {}.Cpu;
                         /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                         // @ts-ignore
-                        const __VLS_531 = __VLS_asFunctionalComponent(__VLS_530, new __VLS_530({
+                        const __VLS_535 = __VLS_asFunctionalComponent(__VLS_534, new __VLS_534({
                             size: (17),
                         }));
-                        const __VLS_532 = __VLS_531({
+                        const __VLS_536 = __VLS_535({
                             size: (17),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_531));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_535));
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                             ...{ class: "demo-simulation-fields" },
                         });
@@ -9007,6 +9166,8 @@ else {
                             ...{ onClick: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
                                         return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
+                                        return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
                                     if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
@@ -9030,17 +9191,17 @@ else {
                             disabled: (__VLS_ctx.simulationSavingId === device.id),
                         });
                         if (__VLS_ctx.simulationSavingId === device.id) {
-                            const __VLS_534 = {}.LoaderCircle;
+                            const __VLS_538 = {}.LoaderCircle;
                             /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                             // @ts-ignore
-                            const __VLS_535 = __VLS_asFunctionalComponent(__VLS_534, new __VLS_534({
+                            const __VLS_539 = __VLS_asFunctionalComponent(__VLS_538, new __VLS_538({
                                 ...{ class: "spin" },
                                 size: (16),
                             }));
-                            const __VLS_536 = __VLS_535({
+                            const __VLS_540 = __VLS_539({
                                 ...{ class: "spin" },
                                 size: (16),
-                            }, ...__VLS_functionalComponentArgsRest(__VLS_535));
+                            }, ...__VLS_functionalComponentArgsRest(__VLS_539));
                         }
                         (__VLS_ctx.t('Aplicar simulação'));
                     }
@@ -9054,15 +9215,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "empty-icon" },
             });
-            const __VLS_538 = {}.Cpu;
+            const __VLS_542 = {}.Cpu;
             /** @type {[typeof __VLS_components.Cpu, ]} */ ;
             // @ts-ignore
-            const __VLS_539 = __VLS_asFunctionalComponent(__VLS_538, new __VLS_538({
+            const __VLS_543 = __VLS_asFunctionalComponent(__VLS_542, new __VLS_542({
                 size: (22),
             }));
-            const __VLS_540 = __VLS_539({
+            const __VLS_544 = __VLS_543({
                 size: (22),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_539));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_543));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
             (__VLS_ctx.t(__VLS_ctx.search ? 'Nenhum aparelho encontrado' : 'Nenhum aparelho conectado'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -9099,6 +9260,8 @@ else {
         ...{ onClick: (...[$event]) => {
                 if (!!(__VLS_ctx.loading))
                     return;
+                if (!!(__VLS_ctx.serverUnavailable))
+                    return;
                 if (!!(!__VLS_ctx.user))
                     return;
                 __VLS_ctx.navigateMobileSection('home');
@@ -9108,15 +9271,15 @@ else {
         href: "#inicio",
         'aria-current': (__VLS_ctx.activeMobileTab === 'home' ? 'page' : undefined),
     });
-    const __VLS_542 = {}.LayoutDashboard;
+    const __VLS_546 = {}.LayoutDashboard;
     /** @type {[typeof __VLS_components.LayoutDashboard, ]} */ ;
     // @ts-ignore
-    const __VLS_543 = __VLS_asFunctionalComponent(__VLS_542, new __VLS_542({
+    const __VLS_547 = __VLS_asFunctionalComponent(__VLS_546, new __VLS_546({
         size: (20),
     }));
-    const __VLS_544 = __VLS_543({
+    const __VLS_548 = __VLS_547({
         size: (20),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_543));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_547));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Inicio'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
@@ -9125,30 +9288,8 @@ else {
         ...{ class: ({ active: __VLS_ctx.managementTab === 'notifications' }) },
         type: "button",
     });
-    const __VLS_546 = {}.Bell;
+    const __VLS_550 = {}.Bell;
     /** @type {[typeof __VLS_components.Bell, ]} */ ;
-    // @ts-ignore
-    const __VLS_547 = __VLS_asFunctionalComponent(__VLS_546, new __VLS_546({
-        size: (19),
-    }));
-    const __VLS_548 = __VLS_547({
-        size: (19),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_547));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-    (__VLS_ctx.t('Notificações'));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-        ...{ onClick: (...[$event]) => {
-                if (!!(__VLS_ctx.loading))
-                    return;
-                if (!!(!__VLS_ctx.user))
-                    return;
-                __VLS_ctx.mobileWorkspaceSelectorOpen = true;
-            } },
-        ...{ class: "mobile-nav-item" },
-        type: "button",
-    });
-    const __VLS_550 = {}.Building2;
-    /** @type {[typeof __VLS_components.Building2, ]} */ ;
     // @ts-ignore
     const __VLS_551 = __VLS_asFunctionalComponent(__VLS_550, new __VLS_550({
         size: (19),
@@ -9157,10 +9298,36 @@ else {
         size: (19),
     }, ...__VLS_functionalComponentArgsRest(__VLS_551));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    (__VLS_ctx.t('Notificações'));
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+        ...{ onClick: (...[$event]) => {
+                if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(__VLS_ctx.serverUnavailable))
+                    return;
+                if (!!(!__VLS_ctx.user))
+                    return;
+                __VLS_ctx.mobileWorkspaceSelectorOpen = true;
+            } },
+        ...{ class: "mobile-nav-item" },
+        type: "button",
+    });
+    const __VLS_554 = {}.Building2;
+    /** @type {[typeof __VLS_components.Building2, ]} */ ;
+    // @ts-ignore
+    const __VLS_555 = __VLS_asFunctionalComponent(__VLS_554, new __VLS_554({
+        size: (19),
+    }));
+    const __VLS_556 = __VLS_555({
+        size: (19),
+    }, ...__VLS_functionalComponentArgsRest(__VLS_555));
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Ambientes'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.a, __VLS_intrinsicElements.a)({
         ...{ onClick: (...[$event]) => {
                 if (!!(__VLS_ctx.loading))
+                    return;
+                if (!!(__VLS_ctx.serverUnavailable))
                     return;
                 if (!!(!__VLS_ctx.user))
                     return;
@@ -9171,21 +9338,23 @@ else {
         href: "#aparelhos",
         'aria-current': (__VLS_ctx.activeMobileTab === 'devices' ? 'page' : undefined),
     });
-    const __VLS_554 = {}.Cpu;
+    const __VLS_558 = {}.Cpu;
     /** @type {[typeof __VLS_components.Cpu, ]} */ ;
     // @ts-ignore
-    const __VLS_555 = __VLS_asFunctionalComponent(__VLS_554, new __VLS_554({
+    const __VLS_559 = __VLS_asFunctionalComponent(__VLS_558, new __VLS_558({
         size: (20),
     }));
-    const __VLS_556 = __VLS_555({
+    const __VLS_560 = __VLS_559({
         size: (20),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_555));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_559));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Aparelhos'));
     if (__VLS_ctx.canManageUserAccounts) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -9198,36 +9367,8 @@ else {
             ...{ class: ({ active: __VLS_ctx.managementTab === 'users' }) },
             type: "button",
         });
-        const __VLS_558 = {}.UsersRound;
+        const __VLS_562 = {}.UsersRound;
         /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
-        // @ts-ignore
-        const __VLS_559 = __VLS_asFunctionalComponent(__VLS_558, new __VLS_558({
-            size: (19),
-        }));
-        const __VLS_560 = __VLS_559({
-            size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_559));
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-        (__VLS_ctx.t('Usuários'));
-    }
-    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
-        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-            ...{ onClick: (...[$event]) => {
-                    if (!!(__VLS_ctx.loading))
-                        return;
-                    if (!!(!__VLS_ctx.user))
-                        return;
-                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
-                        return;
-                    __VLS_ctx.managementTab = 'whatsapp';
-                    __VLS_ctx.activeMobileTab = 'whatsapp';
-                } },
-            ...{ class: "mobile-nav-item" },
-            ...{ class: ({ active: __VLS_ctx.managementTab === 'whatsapp' }) },
-            type: "button",
-        });
-        const __VLS_562 = {}.MessageCircle;
-        /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
         // @ts-ignore
         const __VLS_563 = __VLS_asFunctionalComponent(__VLS_562, new __VLS_562({
             size: (19),
@@ -9236,26 +9377,28 @@ else {
             size: (19),
         }, ...__VLS_functionalComponentArgsRest(__VLS_563));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-        (__VLS_ctx.t('WhatsApp API'));
+        (__VLS_ctx.t('Usuários'));
     }
     if (__VLS_ctx.isWhatsAppDashboardAdmin) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
                         return;
-                    __VLS_ctx.managementTab = 'email';
-                    __VLS_ctx.activeMobileTab = 'email';
+                    __VLS_ctx.openWhatsAppManagement();
+                    __VLS_ctx.activeMobileTab = 'whatsapp';
                 } },
             ...{ class: "mobile-nav-item" },
-            ...{ class: ({ active: __VLS_ctx.managementTab === 'email' }) },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'whatsapp' }) },
             type: "button",
         });
-        const __VLS_566 = {}.Mail;
-        /** @type {[typeof __VLS_components.Mail, ]} */ ;
+        const __VLS_566 = {}.MessageCircle;
+        /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
         // @ts-ignore
         const __VLS_567 = __VLS_asFunctionalComponent(__VLS_566, new __VLS_566({
             size: (19),
@@ -9264,12 +9407,44 @@ else {
             size: (19),
         }, ...__VLS_functionalComponentArgsRest(__VLS_567));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.t('WhatsApp API'));
+    }
+    if (__VLS_ctx.isWhatsAppDashboardAdmin) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (...[$event]) => {
+                    if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
+                    if (!!(!__VLS_ctx.user))
+                        return;
+                    if (!(__VLS_ctx.isWhatsAppDashboardAdmin))
+                        return;
+                    __VLS_ctx.openEmailManagement();
+                    __VLS_ctx.activeMobileTab = 'email';
+                } },
+            ...{ class: "mobile-nav-item" },
+            ...{ class: ({ active: __VLS_ctx.managementTab === 'email' }) },
+            type: "button",
+        });
+        const __VLS_570 = {}.Mail;
+        /** @type {[typeof __VLS_components.Mail, ]} */ ;
+        // @ts-ignore
+        const __VLS_571 = __VLS_asFunctionalComponent(__VLS_570, new __VLS_570({
+            size: (19),
+        }));
+        const __VLS_572 = __VLS_571({
+            size: (19),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_571));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('E-mail API'));
     }
     if (__VLS_ctx.mobileWorkspaceSelectorOpen) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -9301,6 +9476,8 @@ else {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!(__VLS_ctx.mobileWorkspaceSelectorOpen))
@@ -9311,15 +9488,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar seleção de ambientes')),
         });
-        const __VLS_570 = {}.X;
+        const __VLS_574 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_571 = __VLS_asFunctionalComponent(__VLS_570, new __VLS_570({
+        const __VLS_575 = __VLS_asFunctionalComponent(__VLS_574, new __VLS_574({
             size: (19),
         }));
-        const __VLS_572 = __VLS_571({
+        const __VLS_576 = __VLS_575({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_571));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_575));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "workspace-list workspace-selector-list" },
         });
@@ -9327,6 +9504,8 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(__VLS_ctx.serverUnavailable))
                             return;
                         if (!!(!__VLS_ctx.user))
                             return;
@@ -9360,20 +9539,22 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
             (__VLS_ctx.workspaceRoleLabel(workspace.role));
             if (workspace.id === __VLS_ctx.activeWorkspaceId) {
-                const __VLS_574 = {}.Check;
+                const __VLS_578 = {}.Check;
                 /** @type {[typeof __VLS_components.Check, ]} */ ;
                 // @ts-ignore
-                const __VLS_575 = __VLS_asFunctionalComponent(__VLS_574, new __VLS_574({
+                const __VLS_579 = __VLS_asFunctionalComponent(__VLS_578, new __VLS_578({
                     size: (16),
                 }));
-                const __VLS_576 = __VLS_575({
+                const __VLS_580 = __VLS_579({
                     size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_575));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_579));
             }
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -9385,21 +9566,23 @@ else {
             ...{ class: "workspace-manage-button workspace-selector-manage" },
             type: "button",
         });
-        const __VLS_578 = {}.Plus;
+        const __VLS_582 = {}.Plus;
         /** @type {[typeof __VLS_components.Plus, ]} */ ;
         // @ts-ignore
-        const __VLS_579 = __VLS_asFunctionalComponent(__VLS_578, new __VLS_578({
+        const __VLS_583 = __VLS_asFunctionalComponent(__VLS_582, new __VLS_582({
             size: (15),
         }));
-        const __VLS_580 = __VLS_579({
+        const __VLS_584 = __VLS_583({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_579));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_583));
         (__VLS_ctx.t('Adicionar/editar ambiente'));
     }
     if (__VLS_ctx.workspaceDialogOpen) {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -9431,6 +9614,8 @@ else {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!(__VLS_ctx.workspaceDialogOpen))
@@ -9441,15 +9626,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar gerenciamento de ambientes')),
         });
-        const __VLS_582 = {}.X;
+        const __VLS_586 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_583 = __VLS_asFunctionalComponent(__VLS_582, new __VLS_582({
+        const __VLS_587 = __VLS_asFunctionalComponent(__VLS_586, new __VLS_586({
             size: (19),
         }));
-        const __VLS_584 = __VLS_583({
+        const __VLS_588 = __VLS_587({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_583));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_587));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
             ...{ class: "settings-tabs workspace-manager-tabs" },
             role: "tablist",
@@ -9458,6 +9643,8 @@ else {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -9471,19 +9658,21 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'create'),
         });
-        const __VLS_586 = {}.Plus;
+        const __VLS_590 = {}.Plus;
         /** @type {[typeof __VLS_components.Plus, ]} */ ;
         // @ts-ignore
-        const __VLS_587 = __VLS_asFunctionalComponent(__VLS_586, new __VLS_586({
+        const __VLS_591 = __VLS_asFunctionalComponent(__VLS_590, new __VLS_590({
             size: (14),
         }));
-        const __VLS_588 = __VLS_587({
+        const __VLS_592 = __VLS_591({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_587));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_591));
         (__VLS_ctx.t('Criar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -9497,19 +9686,21 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'edit'),
         });
-        const __VLS_590 = {}.Pencil;
+        const __VLS_594 = {}.Pencil;
         /** @type {[typeof __VLS_components.Pencil, ]} */ ;
         // @ts-ignore
-        const __VLS_591 = __VLS_asFunctionalComponent(__VLS_590, new __VLS_590({
+        const __VLS_595 = __VLS_asFunctionalComponent(__VLS_594, new __VLS_594({
             size: (14),
         }));
-        const __VLS_592 = __VLS_591({
+        const __VLS_596 = __VLS_595({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_591));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_595));
         (__VLS_ctx.t('Editar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -9523,19 +9714,21 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'import'),
         });
-        const __VLS_594 = {}.ArrowDownToLine;
+        const __VLS_598 = {}.ArrowDownToLine;
         /** @type {[typeof __VLS_components.ArrowDownToLine, ]} */ ;
         // @ts-ignore
-        const __VLS_595 = __VLS_asFunctionalComponent(__VLS_594, new __VLS_594({
+        const __VLS_599 = __VLS_asFunctionalComponent(__VLS_598, new __VLS_598({
             size: (14),
         }));
-        const __VLS_596 = __VLS_595({
+        const __VLS_600 = __VLS_599({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_595));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_599));
         (__VLS_ctx.t('Importar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -9549,19 +9742,21 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'devices'),
         });
-        const __VLS_598 = {}.Cpu;
+        const __VLS_602 = {}.Cpu;
         /** @type {[typeof __VLS_components.Cpu, ]} */ ;
         // @ts-ignore
-        const __VLS_599 = __VLS_asFunctionalComponent(__VLS_598, new __VLS_598({
+        const __VLS_603 = __VLS_asFunctionalComponent(__VLS_602, new __VLS_602({
             size: (14),
         }));
-        const __VLS_600 = __VLS_599({
+        const __VLS_604 = __VLS_603({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_599));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_603));
         (__VLS_ctx.t('Aparelhos'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
+                        return;
+                    if (!!(__VLS_ctx.serverUnavailable))
                         return;
                     if (!!(!__VLS_ctx.user))
                         return;
@@ -9575,20 +9770,22 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'share'),
         });
-        const __VLS_602 = {}.Share2;
+        const __VLS_606 = {}.Share2;
         /** @type {[typeof __VLS_components.Share2, ]} */ ;
         // @ts-ignore
-        const __VLS_603 = __VLS_asFunctionalComponent(__VLS_602, new __VLS_602({
+        const __VLS_607 = __VLS_asFunctionalComponent(__VLS_606, new __VLS_606({
             size: (14),
         }));
-        const __VLS_604 = __VLS_603({
+        const __VLS_608 = __VLS_607({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_603));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_607));
         (__VLS_ctx.t('Compartilhar'));
         if (__VLS_ctx.canManageActiveWorkspace) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(__VLS_ctx.serverUnavailable))
                             return;
                         if (!!(!__VLS_ctx.user))
                             return;
@@ -9604,15 +9801,15 @@ else {
                 role: "tab",
                 'aria-selected': (__VLS_ctx.workspaceDialogAction === 'members'),
             });
-            const __VLS_606 = {}.UsersRound;
+            const __VLS_610 = {}.UsersRound;
             /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
             // @ts-ignore
-            const __VLS_607 = __VLS_asFunctionalComponent(__VLS_606, new __VLS_606({
+            const __VLS_611 = __VLS_asFunctionalComponent(__VLS_610, new __VLS_610({
                 size: (14),
             }));
-            const __VLS_608 = __VLS_607({
+            const __VLS_612 = __VLS_611({
                 size: (14),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_607));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_611));
             (__VLS_ctx.t('Membros'));
         }
         if (__VLS_ctx.workspaceDialogAction === 'create' || __VLS_ctx.workspaceDialogAction === 'edit') {
@@ -9659,15 +9856,15 @@ else {
                     ...{ class: "secondary-button workspace-icon-upload" },
                     for: "workspaceIconFile",
                 });
-                const __VLS_610 = {}.ImagePlus;
+                const __VLS_614 = {}.ImagePlus;
                 /** @type {[typeof __VLS_components.ImagePlus, ]} */ ;
                 // @ts-ignore
-                const __VLS_611 = __VLS_asFunctionalComponent(__VLS_610, new __VLS_610({
+                const __VLS_615 = __VLS_asFunctionalComponent(__VLS_614, new __VLS_614({
                     size: (15),
                 }));
-                const __VLS_612 = __VLS_611({
+                const __VLS_616 = __VLS_615({
                     size: (15),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_611));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_615));
                 (__VLS_ctx.t('Escolher imagem'));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                     ...{ onChange: (__VLS_ctx.selectWorkspaceIcon) },
@@ -9686,6 +9883,8 @@ else {
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                     ...{ onClick: (...[$event]) => {
                             if (!!(__VLS_ctx.loading))
+                                return;
+                            if (!!(__VLS_ctx.serverUnavailable))
                                 return;
                             if (!!(!__VLS_ctx.user))
                                 return;
@@ -9783,15 +9982,15 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                             ...{ class: "protected-member-role" },
                         });
-                        const __VLS_614 = {}.LockKeyhole;
+                        const __VLS_618 = {}.LockKeyhole;
                         /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
                         // @ts-ignore
-                        const __VLS_615 = __VLS_asFunctionalComponent(__VLS_614, new __VLS_614({
+                        const __VLS_619 = __VLS_asFunctionalComponent(__VLS_618, new __VLS_618({
                             size: (14),
                         }));
-                        const __VLS_616 = __VLS_615({
+                        const __VLS_620 = __VLS_619({
                             size: (14),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_615));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_619));
                         (__VLS_ctx.t('Administrador da plataforma'));
                     }
                     else {
@@ -9804,6 +10003,8 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                             ...{ onClick: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
                                         return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
@@ -9907,15 +10108,15 @@ else {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                         ...{ class: "workspace-device-icon" },
                     });
-                    const __VLS_618 = {}.Cpu;
+                    const __VLS_622 = {}.Cpu;
                     /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                     // @ts-ignore
-                    const __VLS_619 = __VLS_asFunctionalComponent(__VLS_618, new __VLS_618({
+                    const __VLS_623 = __VLS_asFunctionalComponent(__VLS_622, new __VLS_622({
                         size: (17),
                     }));
-                    const __VLS_620 = __VLS_619({
+                    const __VLS_624 = __VLS_623({
                         size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_619));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_623));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                     (device.name);
@@ -9938,6 +10139,8 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                             ...{ onClick: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
                                         return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
@@ -9968,6 +10171,8 @@ else {
                             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                                 ...{ onClick: (...[$event]) => {
                                         if (!!(__VLS_ctx.loading))
+                                            return;
+                                        if (!!(__VLS_ctx.serverUnavailable))
                                             return;
                                         if (!!(!__VLS_ctx.user))
                                             return;
@@ -10010,6 +10215,8 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                             ...{ onClick: (...[$event]) => {
                                     if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
                                         return;
                                     if (!!(!__VLS_ctx.user))
                                         return;
@@ -10097,15 +10304,15 @@ else {
                     title: (__VLS_ctx.t('Copiar código do ambiente')),
                     'aria-label': (__VLS_ctx.t('Copiar código do ambiente')),
                 });
-                const __VLS_622 = {}.Copy;
+                const __VLS_626 = {}.Copy;
                 /** @type {[typeof __VLS_components.Copy, ]} */ ;
                 // @ts-ignore
-                const __VLS_623 = __VLS_asFunctionalComponent(__VLS_622, new __VLS_622({
+                const __VLS_627 = __VLS_asFunctionalComponent(__VLS_626, new __VLS_626({
                     size: (16),
                 }));
-                const __VLS_624 = __VLS_623({
+                const __VLS_628 = __VLS_627({
                     size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_623));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_627));
                 if (__VLS_ctx.workspaceShareMessage) {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
                         ...{ class: "success-message" },
@@ -10156,15 +10363,15 @@ else {
             disabled: (__VLS_ctx.userDeletionSaving),
             'aria-label': (__VLS_ctx.t('Fechar')),
         });
-        const __VLS_626 = {}.X;
+        const __VLS_630 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_627 = __VLS_asFunctionalComponent(__VLS_626, new __VLS_626({
+        const __VLS_631 = __VLS_asFunctionalComponent(__VLS_630, new __VLS_630({
             size: (19),
         }));
-        const __VLS_628 = __VLS_627({
+        const __VLS_632 = __VLS_631({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_627));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_631));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
             ...{ class: "form-subtitle" },
         });
@@ -10241,15 +10448,15 @@ else {
             disabled: (__VLS_ctx.accountEditSaving),
             'aria-label': (__VLS_ctx.t('Fechar')),
         });
-        const __VLS_630 = {}.X;
+        const __VLS_634 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_631 = __VLS_asFunctionalComponent(__VLS_630, new __VLS_630({
+        const __VLS_635 = __VLS_asFunctionalComponent(__VLS_634, new __VLS_634({
             size: (19),
         }));
-        const __VLS_632 = __VLS_631({
+        const __VLS_636 = __VLS_635({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_631));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_635));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
             for: "accountEditRole",
         });
@@ -10327,6 +10534,8 @@ else {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!(__VLS_ctx.settingsOpen))
@@ -10357,6 +10566,8 @@ else {
             ...{ onClick: (...[$event]) => {
                     if (!!(__VLS_ctx.loading))
                         return;
+                    if (!!(__VLS_ctx.serverUnavailable))
+                        return;
                     if (!!(!__VLS_ctx.user))
                         return;
                     if (!(__VLS_ctx.settingsOpen))
@@ -10367,15 +10578,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar configuracoes')),
         });
-        const __VLS_634 = {}.X;
+        const __VLS_638 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_635 = __VLS_asFunctionalComponent(__VLS_634, new __VLS_634({
+        const __VLS_639 = __VLS_asFunctionalComponent(__VLS_638, new __VLS_638({
             size: (19),
         }));
-        const __VLS_636 = __VLS_635({
+        const __VLS_640 = __VLS_639({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_635));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_639));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "settings-pane" },
         });
@@ -10409,15 +10620,15 @@ else {
             ...{ class: "secondary-button avatar-upload-button" },
             for: "avatarFile",
         });
-        const __VLS_638 = {}.ImagePlus;
+        const __VLS_642 = {}.ImagePlus;
         /** @type {[typeof __VLS_components.ImagePlus, ]} */ ;
         // @ts-ignore
-        const __VLS_639 = __VLS_asFunctionalComponent(__VLS_638, new __VLS_638({
+        const __VLS_643 = __VLS_asFunctionalComponent(__VLS_642, new __VLS_642({
             size: (15),
         }));
-        const __VLS_640 = __VLS_639({
+        const __VLS_644 = __VLS_643({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_639));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_643));
         (__VLS_ctx.t('Alterar foto'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
             ...{ onChange: (__VLS_ctx.selectAvatar) },
@@ -10430,6 +10641,8 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.loading))
+                            return;
+                        if (!!(__VLS_ctx.serverUnavailable))
                             return;
                         if (!!(!__VLS_ctx.user))
                             return;
@@ -10555,20 +10768,27 @@ else {
             ...{ class: "secondary-button mobile-account-logout" },
             type: "button",
         });
-        const __VLS_642 = {}.LogOut;
+        const __VLS_646 = {}.LogOut;
         /** @type {[typeof __VLS_components.LogOut, ]} */ ;
         // @ts-ignore
-        const __VLS_643 = __VLS_asFunctionalComponent(__VLS_642, new __VLS_642({
+        const __VLS_647 = __VLS_asFunctionalComponent(__VLS_646, new __VLS_646({
             size: (17),
         }));
-        const __VLS_644 = __VLS_643({
+        const __VLS_648 = __VLS_647({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_643));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_647));
         (__VLS_ctx.t('Sair da conta'));
     }
 }
 /** @type {__VLS_StyleScopedClasses['loading-screen']} */ ;
 /** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['server-offline-screen']} */ ;
+/** @type {__VLS_StyleScopedClasses['server-offline-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['server-offline-logo']} */ ;
+/** @type {__VLS_StyleScopedClasses['eyebrow']} */ ;
+/** @type {__VLS_StyleScopedClasses['server-offline-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['server-offline-retry']} */ ;
 /** @type {__VLS_StyleScopedClasses['login-layout']} */ ;
 /** @type {__VLS_StyleScopedClasses['login-story']} */ ;
 /** @type {__VLS_StyleScopedClasses['story-top']} */ ;
@@ -11465,6 +11685,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             loginError: loginError,
             pageError: pageError,
             loading: loading,
+            serverUnavailable: serverUnavailable,
             submitting: submitting,
             loginMode: loginMode,
             workspaceName: workspaceName,
@@ -11635,6 +11856,8 @@ const __VLS_self = (await import('vue')).defineComponent({
             notificationMessageInEnglish: notificationMessageInEnglish,
             loadAdminUsers: loadAdminUsers,
             openUserManagement: openUserManagement,
+            openWhatsAppManagement: openWhatsAppManagement,
+            openEmailManagement: openEmailManagement,
             assignAccountDevice: assignAccountDevice,
             removeAccountDeviceFromWorkspace: removeAccountDeviceFromWorkspace,
             unlinkAccountDevice: unlinkAccountDevice,
@@ -11680,6 +11903,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             selectAlertSoundFile: selectAlertSoundFile,
             uploadAlertSound: uploadAlertSound,
             saveAlertSoundPreferences: saveAlertSoundPreferences,
+            retryServerConnection: retryServerConnection,
             login: login,
             requestPasswordReset: requestPasswordReset,
             submitPasswordReset: submitPasswordReset,

@@ -35,13 +35,15 @@ Se a pasta tiver outro nome, entre nela em vez de usar `cd servidor`.
 
 ## 3. Configure as variáveis de ambiente (`.env`)
 
-Na raiz do projeto, copie o modelo `.env.example` para `.env`:
+Na raiz do projeto, copie os modelos de exemplo para os arquivos locais que serão usados em desenvolvimento e em builds específicos. Todos os arquivos `.env*` ficam na raiz do repositório; não crie versões em `apps/api` ou `apps/dashboard`.
 
 ```powershell
 Copy-Item .env.example .env
+Copy-Item .env.android.example .env.android.local
+Copy-Item .env.production.example .env.production.local
 ```
 
-> **Aviso de Segurança:** O arquivo `.env` contém chaves criptográficas e credenciais de acesso. Ele está incluído no `.gitignore` e **nunca** deve ser commitado no repositório Git.
+> **Aviso de Segurança:** Os arquivos `.env*` contêm chaves criptográficas e credenciais de acesso. Eles estão incluídos no `.gitignore` e **nunca** devem ser commitados no repositório Git.
 
 Abra o arquivo `.env` gerado e ajuste suas variáveis conforme as explicações detalhadas abaixo:
 

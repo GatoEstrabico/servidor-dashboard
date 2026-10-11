@@ -1192,8 +1192,31 @@ async function loadAdminUsers() {
 function openUserManagement() {
   if (!canManageUserAccounts.value) return;
   managementTab.value = 'users';
-  userManagementTab.value = 'accounts';
-  void loadAdminUsers();
+  userManagementTab.value = 'members';
+  void loadWorkspaceMembers();
+}
+
+function openWhatsAppManagement() {
+  whatsappTab.value = 'log';
+  managementTab.value = 'whatsapp';
+}
+
+function openEmailManagement() {
+  emailTab.value = 'log';
+  managementTab.value = 'email';
+}
+
+function resetDashboardNavigation() {
+  settingsOpen.value = false;
+  workspaceDialogOpen.value = false;
+  mobileWorkspaceSelectorOpen.value = false;
+  notificationOpen.value = false;
+  managementTab.value = 'overview';
+  activeMobileTab.value = 'home';
+  notificationSectionTab.value = 'configuration';
+  userManagementTab.value = 'members';
+  whatsappTab.value = 'log';
+  emailTab.value = 'log';
 }
 
 async function loadAccountDevices() {
@@ -2235,6 +2258,7 @@ async function checkSession() {
     ]);
     user.value = meResult.user;
     csrfToken.value = meResult.csrfToken;
+    resetDashboardNavigation();
     registrationEnabled.value = settingsResult.enabled;
     syncProfileForm();
     await loadWorkspaces();
@@ -2264,6 +2288,7 @@ async function login() {
     });
     user.value = result.user;
     csrfToken.value = result.csrfToken;
+    resetDashboardNavigation();
     password.value = '';
     await loadWorkspaces();
     await loadAlertSoundPreference();
@@ -2733,6 +2758,7 @@ async function saveAdminUserEdit() {
 async function logout() {
   try {
     await api('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken.value } });
+    resetDashboardNavigation();
     user.value = null;
     workspaces.value = [];
     activeWorkspaceId.value = null;
@@ -3078,10 +3104,10 @@ onUnmounted(() => {
         <button v-if="canManageUserAccounts" class="nav-link" :class="{ active: managementTab === 'users' }" type="button" @click="openUserManagement">
           <UsersRound :size="17" /><span>{{ t('Usuários') }}</span>
         </button>
-        <button v-if="isWhatsAppDashboardAdmin" class="nav-link" :class="{ active: managementTab === 'whatsapp' }" type="button" @click="managementTab = 'whatsapp'">
+        <button v-if="isWhatsAppDashboardAdmin" class="nav-link" :class="{ active: managementTab === 'whatsapp' }" type="button" @click="openWhatsAppManagement">
           <MessageCircle :size="17" /><span>{{ t('WhatsApp API') }}</span>
         </button>
-        <button v-if="isWhatsAppDashboardAdmin" class="nav-link" :class="{ active: managementTab === 'email' }" type="button" @click="managementTab = 'email'">
+        <button v-if="isWhatsAppDashboardAdmin" class="nav-link" :class="{ active: managementTab === 'email' }" type="button" @click="openEmailManagement">
           <Mail :size="17" /><span>{{ t('E-mail API') }}</span>
         </button>
       </nav>
@@ -3780,10 +3806,10 @@ onUnmounted(() => {
       <button v-if="canManageUserAccounts" class="mobile-nav-item" :class="{ active: managementTab === 'users' }" type="button" @click="openUserManagement(); activeMobileTab = 'users'">
         <UsersRound :size="19" /><span>{{ t('Usuários') }}</span>
       </button>
-      <button v-if="isWhatsAppDashboardAdmin" class="mobile-nav-item" :class="{ active: managementTab === 'whatsapp' }" type="button" @click="managementTab = 'whatsapp'; activeMobileTab = 'whatsapp'">
+      <button v-if="isWhatsAppDashboardAdmin" class="mobile-nav-item" :class="{ active: managementTab === 'whatsapp' }" type="button" @click="openWhatsAppManagement(); activeMobileTab = 'whatsapp'">
         <MessageCircle :size="19" /><span>{{ t('WhatsApp API') }}</span>
       </button>
-      <button v-if="isWhatsAppDashboardAdmin" class="mobile-nav-item" :class="{ active: managementTab === 'email' }" type="button" @click="managementTab = 'email'; activeMobileTab = 'email'">
+      <button v-if="isWhatsAppDashboardAdmin" class="mobile-nav-item" :class="{ active: managementTab === 'email' }" type="button" @click="openEmailManagement(); activeMobileTab = 'email'">
         <Mail :size="19" /><span>{{ t('E-mail API') }}</span>
       </button>
     </nav>

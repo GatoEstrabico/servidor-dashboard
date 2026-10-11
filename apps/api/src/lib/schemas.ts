@@ -52,6 +52,11 @@ export const updateWorkspaceMemberSchema = z.object({
   userId: trimmed(64),
   role: z.enum(['admin', 'member'])
 }).strict();
+export const adminUserUpdateSchema = z.object({
+  displayName: z.string().trim().min(1).max(80),
+  email: z.string().trim().email().max(254),
+  isPlatformAdmin: z.boolean()
+}).strict();
 export const registrationSettingSchema = z.object({ enabled: z.boolean() }).strict();
 const whatsappMessageTemplate = z.string().trim().min(1).max(500).refine((message) => {
   const validPlaceholders = new Set(['laboratorio', 'aparelho', 'status', 'localizacao', 'identificador']);
@@ -139,8 +144,24 @@ export const updateProfileSchema = z.object({
   }
 });
 
+export const updateNotificationPreferencesSchema = z.object({
+  whatsappNumber: phoneNumber,
+  emailNotifications: z.boolean(),
+  whatsappNotifications: z.boolean()
+}).strict().superRefine((preferences, context) => {
+  if (preferences.whatsappNotifications && !preferences.whatsappNumber) {
+    context.addIssue({
+      code: 'custom',
+      path: ['whatsappNumber'],
+      message: 'Informe um número de WhatsApp para ativar as notificações.'
+    });
+  }
+});
+
 export const workspaceNotificationPreferencesSchema = z.object({
   notifyAllDevices: z.boolean(),
+  emailNotificationsEnabled: z.boolean().default(true),
+  whatsappNotificationsEnabled: z.boolean().default(true),
   devices: z.array(z.object({
     deviceId: trimmed(64),
     emailEnabled: z.boolean(),

@@ -11,7 +11,16 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from './lib/prisma.js';
 import { getAppLogger } from './lib/app-logger.js';
+import { toAccountProfile } from './lib/account-user.js';
 import {
+  buildDemoSensorExternalId,
+  canUseDemoSensorForUser,
+  DEMO_SENSOR_PREFIX,
+  isDemoSensorExternalId,
+  LEGACY_DEMO_SENSOR_EXTERNAL_ID
+} from './lib/demo-sensor.js';
+import {
+  adminUserUpdateSchema,
   assignWorkspaceDeviceSchema,
   activeWorkspaceSchema,
   alertAudioUploadSchema,
@@ -39,6 +48,7 @@ import {
   whatsappProfileUpdateSchema,
   whatsappNotificationSettingsSchema,
   updateProfileSchema,
+  updateNotificationPreferencesSchema,
   updateWorkspaceSchema,
   updateWorkspaceMemberSchema,
   updateDeviceAliasSchema,
@@ -94,6 +104,8 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   ALERT_AUDIO_UPLOAD_ENABLED: z.enum(['true', 'false']).default('true'),
   SHOW_WORKSPACE_SETUP_WHEN_EMPTY: z.enum(['true', 'false']).default('true'),
+  DEMO_SENSOR_ENABLED: z.enum(['true', 'false']).default('true'),
+  DEMO_SENSOR_ADMIN_ONLY: z.enum(['true', 'false']).default('false'),
   DASHBOARD_ORIGIN: z.string().url(),
   DASHBOARD_PUBLIC_URL: z.string().url().refine((value) => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
   SESSION_SECRET: z.string().min(32),
@@ -130,6 +142,8 @@ const envSchema = z.object({
 });
 const env = envSchema.parse(process.env);
 const alertAudioUploadEnabled = env.ALERT_AUDIO_UPLOAD_ENABLED === 'true';
+const demoSensorEnabled = env.DEMO_SENSOR_ENABLED === 'true';
+const demoSensorAdminOnly = env.DEMO_SENSOR_ADMIN_ONLY === 'true';
 const dashboardOrigins = [...new Set([env.DASHBOARD_ORIGIN, env.DASHBOARD_PUBLIC_URL].filter((value): value is string => Boolean(value)).map((value) => new URL(value).origin))];
 const parsedSmtpFrom = env.SMTP_FROM?.match(/^(.*?)\s*<([^<>]+)>$/);
 await initializeEmailService({
@@ -261,12 +275,12 @@ async function sendAlarmNotifications(device: { id: string; name: string; extern
       app.log.error({ err: error, deviceId: device.externalId }, 'Falha ao persistir notificacoes do aparelho');
     }
   }
-  const recipients = memberships.map(({ user, notifyAllDevices, deviceNotificationPreferences }) => {
+  const recipients = memberships.map(({ user, notifyAllDevices, emailNotificationsEnabled, whatsappNotificationsEnabled, deviceNotificationPreferences }) => {
     const preference = deviceNotificationPreferences[0];
     return {
       ...user,
-      emailNotifications: user.emailNotifications && (notifyAllDevices || preference?.emailEnabled === true),
-      whatsappNotifications: user.whatsappNotifications && (notifyAllDevices || preference?.whatsappEnabled === true)
+      emailNotifications: user.emailNotifications && emailNotificationsEnabled && (notifyAllDevices || preference?.emailEnabled === true),
+      whatsappNotifications: user.whatsappNotifications && whatsappNotificationsEnabled && (notifyAllDevices || preference?.whatsappEnabled === true)
     };
   });
   const emailRecipients = recipients.filter((recipient) => recipient.emailNotifications);
@@ -363,6 +377,50 @@ function createCsrfToken(sessionToken: string): string {
   return createHmac('sha256', env.SESSION_SECRET).update('csrf:').update(sessionToken).digest('base64url');
 }
 
+type DemoSensorTx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+async function ensureDemoSensorForUser(user: { id: string; email: string; isPlatformAdmin: boolean; isBootstrapAdmin: boolean }, tx: DemoSensorTx = prisma) {
+  if (!demoSensorEnabled) return null;
+  const canUseDemoSensor = canUseDemoSensorForUser({
+    isPlatformAdmin: user.isPlatformAdmin,
+    isBootstrapAdmin: user.isBootstrapAdmin,
+    demoSensorEnabled: true,
+    demoSensorAdminOnly: demoSensorAdminOnly
+  });
+  if (!canUseDemoSensor) return null;
+
+  const existing = await tx.device.findFirst({
+    where: {
+      ownerUserId: user.id,
+      OR: [
+        { externalId: LEGACY_DEMO_SENSOR_EXTERNAL_ID },
+        { externalId: { startsWith: `${DEMO_SENSOR_PREFIX}-` } }
+      ]
+    },
+    select: { id: true, externalId: true }
+  });
+  if (existing) return existing;
+
+  const workspaceId = await tx.workspaceMember.findFirst({
+    where: { userId: user.id },
+    select: { workspaceId: true },
+    orderBy: { createdAt: 'asc' }
+  });
+
+  return tx.device.create({
+    data: {
+      externalId: buildDemoSensorExternalId(user.id),
+      name: 'Sensor de teste',
+      alias: 'Sensor de teste',
+      workspaceId: workspaceId?.workspaceId ?? null,
+      ownerUserId: user.id,
+      status: 'online',
+      lastSeenAt: new Date(),
+      location: 'Simulação'
+    }
+  });
+}
+
 function safeEqual(left: string, right: string): boolean {
   return timingSafeEqual(Buffer.from(hash(left)), Buffer.from(hash(right)));
 }
@@ -396,6 +454,7 @@ async function getUserContext(userId: string) {
 
   const isBootstrapAdmin = Boolean(bootstrapAdminEmail && user.email.toLowerCase() === bootstrapAdminEmail);
   const isPlatformAdmin = user.isPlatformAdmin || isBootstrapAdmin;
+  await ensureDemoSensorForUser({ id: user.id, email: user.email, isPlatformAdmin, isBootstrapAdmin });
 
   return {
     id: user.id,
@@ -919,6 +978,12 @@ app.post('/api/auth/verify-email', async (request, reply) => {
         emailVerifiedAt: new Date()
       }
     });
+    await ensureDemoSensorForUser({
+      id: createdUser.id,
+      email: createdUser.email,
+      isPlatformAdmin: false,
+      isBootstrapAdmin: false
+    }, tx);
     if (invitation) {
       await tx.workspaceMember.create({
         data: { workspaceId: invitation.workspaceId, userId: createdUser.id, role: invitation.role }
@@ -1133,7 +1198,7 @@ app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/notif
   if (!auth) return;
   const membership = await prisma.workspaceMember.findUnique({
     where: { workspaceId_userId: { workspaceId: request.params.workspaceId, userId: auth.user.id } },
-    select: { notifyAllDevices: true }
+    select: { notifyAllDevices: true, emailNotificationsEnabled: true, whatsappNotificationsEnabled: true }
   });
   if (!membership) return reply.code(403).send({ error: 'Você não pertence a este ambiente.' });
 
@@ -1147,8 +1212,11 @@ app.get<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/notif
   const preferenceByDevice = new Map(preferences.map((preference) => [preference.deviceId, preference]));
   return {
     notifyAllDevices: membership.notifyAllDevices,
+    emailNotificationsEnabled: membership.emailNotificationsEnabled,
+    whatsappNotificationsEnabled: membership.whatsappNotificationsEnabled,
     devices: devices.map((device) => ({
-      ...device,
+      deviceId: device.id,
+      name: device.name,
       emailEnabled: preferenceByDevice.get(device.id)?.emailEnabled ?? false,
       whatsappEnabled: preferenceByDevice.get(device.id)?.whatsappEnabled ?? false
     }))
@@ -1175,7 +1243,11 @@ app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/noti
   await prisma.$transaction(async (tx) => {
     await tx.workspaceMember.update({
       where: { workspaceId_userId: { workspaceId: request.params.workspaceId, userId: auth.user.id } },
-      data: { notifyAllDevices: parsed.data.notifyAllDevices }
+      data: {
+        notifyAllDevices: parsed.data.notifyAllDevices,
+        emailNotificationsEnabled: parsed.data.emailNotificationsEnabled,
+        whatsappNotificationsEnabled: parsed.data.whatsappNotificationsEnabled
+      }
     });
     if (deviceIds.length) {
       await tx.deviceNotificationPreference.deleteMany({
@@ -1236,10 +1308,9 @@ app.post<{ Params: { workspaceId: string } }>('/api/workspaces/:workspaceId/invi
     return reply.code(409).send({ error: 'Você já pertence a este ambiente.' });
   }
   const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-  if (existingUser && await prisma.workspaceMember.findUnique({
-    where: { workspaceId_userId: { workspaceId: request.params.workspaceId, userId: existingUser.id } },
-    select: { userId: true }
-  })) return reply.code(409).send({ error: 'Este usuário já pertence ao ambiente.' });
+  if (existingUser) {
+    return reply.code(409).send({ error: 'Este e-mail já possui uma conta na plataforma e não pode receber um convite.' });
+  }
 
   const workspace = await prisma.workspace.findUnique({ where: { id: request.params.workspaceId }, select: { name: true } });
   if (!workspace) return reply.code(404).send({ error: 'Ambiente não encontrado.' });
@@ -1436,6 +1507,7 @@ app.get('/api/admin/users', async (request, reply) => {
   return { users: users.map((listedUser) => ({
     ...listedUser,
     isPlatformAdmin: listedUser.isPlatformAdmin || Boolean(bootstrapAdminEmail && listedUser.email.toLowerCase() === bootstrapAdminEmail),
+    isBootstrapAdmin: Boolean(bootstrapAdminEmail && listedUser.email.toLowerCase() === bootstrapAdminEmail),
     workspaces: listedUser.memberships.map(({ role, workspace }) => ({ ...workspace, role }))
   })) };
 });
@@ -1446,10 +1518,7 @@ app.patch<{ Params: { userId: string } }>('/api/admin/users/:userId', async (req
   if (!auth.user.isPlatformAdmin && !canManageWhatsApp(auth.user.email)) return reply.code(403).send({ error: 'Apenas o administrador da plataforma pode editar contas.' });
   if (request.params.userId === auth.user.id) return reply.code(400).send({ error: 'Edite sua própria conta nas configurações do perfil.' });
 
-  const parsed = z.object({
-    displayName: z.string().trim().min(1).max(80),
-    email: z.string().trim().email().max(254)
-  }).strict().safeParse(request.body);
+  const parsed = adminUserUpdateSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'Informe um nome e um e-mail válidos.' });
 
   const target = await prisma.user.findUnique({
@@ -1457,26 +1526,27 @@ app.patch<{ Params: { userId: string } }>('/api/admin/users/:userId', async (req
     select: { id: true, email: true, isPlatformAdmin: true }
   });
   if (!target) return reply.code(404).send({ error: 'Usuário não encontrado.' });
-  if (target.isPlatformAdmin || Boolean(bootstrapAdminEmail && target.email.toLowerCase() === bootstrapAdminEmail)) {
+  if (bootstrapAdminEmail && target.email.toLowerCase() === bootstrapAdminEmail) {
     return reply.code(403).send({ error: 'Contas administradoras da plataforma não podem ser editadas por esta ação.' });
   }
 
   const email = parsed.data.email.toLowerCase();
   const emailChanged = email !== target.email.toLowerCase();
+  const isPlatformAdminChanged = parsed.data.isPlatformAdmin !== target.isPlatformAdmin;
   const emailInUse = await prisma.user.findFirst({ where: { email, id: { not: target.id } }, select: { id: true } });
   if (emailInUse) return reply.code(409).send({ error: 'Este e-mail já está sendo usado por outra conta.' });
 
   await prisma.$transaction([
     prisma.user.update({
       where: { id: target.id },
-      data: { displayName: parsed.data.displayName, email }
+      data: { displayName: parsed.data.displayName, email, isPlatformAdmin: parsed.data.isPlatformAdmin }
     }),
-    ...(emailChanged ? [
+    ...(emailChanged || isPlatformAdminChanged ? [
       prisma.session.deleteMany({ where: { userId: target.id } }),
-      prisma.passwordResetToken.deleteMany({ where: { userId: target.id } })
+      ...(emailChanged ? [prisma.passwordResetToken.deleteMany({ where: { userId: target.id } })] : [])
     ] : [])
   ]);
-  return { ok: true, emailChanged };
+  return { ok: true, emailChanged, isPlatformAdminChanged };
 });
 
 app.post<{ Params: { userId: string } }>('/api/admin/users/:userId/require-password-reset', async (request, reply) => {
@@ -1575,6 +1645,8 @@ app.post('/api/account/profile', async (request, reply) => {
   const emailInUse = await prisma.user.findFirst({ where: { email, id: { not: auth.user.id } }, select: { id: true } });
   if (emailInUse) return reply.code(409).send({ error: 'Este e-mail ja esta sendo usado por outra conta.' });
 
+  const isBootstrapAdmin = Boolean(bootstrapAdminEmail && currentUser.email.toLowerCase() === bootstrapAdminEmail);
+
   try {
     const updatedUser = await prisma.user.update({
       where: { id: auth.user.id },
@@ -1587,17 +1659,42 @@ app.post('/api/account/profile', async (request, reply) => {
         whatsappNotifications: parsed.data.whatsappNotifications
       },
       select: {
-        id: true, email: true, displayName: true, avatarDataUrl: true, whatsappNumber: true,
-        emailNotifications: true, whatsappNotifications: true
+        id: true,
+        email: true,
+        displayName: true,
+        avatarDataUrl: true,
+        whatsappNumber: true,
+        emailNotifications: true,
+        whatsappNotifications: true,
+        emailVerifiedAt: true,
+        isPlatformAdmin: true
       }
     });
-    return { user: updatedUser };
+    return { user: toAccountProfile({
+      ...updatedUser,
+      isPlatformAdmin: updatedUser.isPlatformAdmin || isBootstrapAdmin,
+      isBootstrapAdmin
+    }) };
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') {
       return reply.code(409).send({ error: 'Este e-mail ja esta sendo usado por outra conta.' });
     }
     throw error;
   }
+});
+
+app.post('/api/account/notification-preferences', async (request, reply) => {
+  const auth = await requireCsrf(request, reply);
+  if (!auth) return;
+  const parsed = updateNotificationPreferencesSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Confira o número do WhatsApp e as preferências de notificação.' });
+
+  const preferences = await prisma.user.update({
+    where: { id: auth.user.id },
+    data: parsed.data,
+    select: { whatsappNumber: true, emailNotifications: true, whatsappNotifications: true }
+  });
+  return { preferences };
 });
 
 app.get('/api/account/alert-sounds', async (request, reply) => {
@@ -1811,10 +1908,17 @@ app.get('/api/devices', async (request, reply) => {
       deviceLink: { select: { userId: true } }
     }
   });
+  const canUseDemoSensor = canUseDemoSensorForUser({
+    isPlatformAdmin: auth.user.isPlatformAdmin,
+    isBootstrapAdmin: auth.user.isBootstrapAdmin,
+    demoSensorEnabled,
+    demoSensorAdminOnly
+  });
   return {
-    devices: devices.map(({ ownerUserId, deviceLink, ...device }) => ({
+    devices: devices.filter((device) => canUseDemoSensor || !isDemoSensorExternalId(device.externalId))
+      .map(({ ownerUserId, deviceLink, ...device }) => ({
       ...device,
-      canSimulate: device.externalId === simulatedDeviceExternalId && ownerUserId === auth.user.id,
+      canSimulate: isDemoSensorExternalId(device.externalId) && ownerUserId === auth.user.id,
       canEditAlias: ownerUserId === auth.user.id || deviceLink?.userId === auth.user.id || canManageWorkspace(activeWorkspaceRole)
     }))
   };
@@ -2013,7 +2117,15 @@ app.post<{ Params: { id: string } }>('/api/devices/:id/simulation', async (reque
     where: { id: request.params.id, workspaceId: auth.user.activeWorkspaceId }
   });
   if (!device) return reply.code(404).send({ error: 'Aparelho não encontrado neste ambiente.' });
-  if (device.externalId !== simulatedDeviceExternalId || device.ownerUserId !== auth.user.id) {
+  const canSimulateDemoSensor = isDemoSensorExternalId(device.externalId)
+    && device.ownerUserId === auth.user.id
+    && canUseDemoSensorForUser({
+      isPlatformAdmin: auth.user.isPlatformAdmin,
+      isBootstrapAdmin: auth.user.isBootstrapAdmin,
+      demoSensorEnabled,
+      demoSensorAdminOnly
+    });
+  if (!canSimulateDemoSensor) {
     return reply.code(403).send({ error: 'A simulação está disponível apenas para o aparelho fictício da sua conta.' });
   }
 

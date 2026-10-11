@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   alertAudioUploadSchema,
   alertSoundPreferencesSchema,
+  adminUserUpdateSchema,
   changePasswordSchema,
   assignWorkspaceDeviceSchema,
   createWorkspaceSchema,
@@ -23,6 +24,7 @@ import {
   workspaceNotificationPreferencesSchema,
   updateWorkspaceSchema,
   updateProfileSchema,
+  updateNotificationPreferencesSchema,
   whatsappNotificationSettingsSchema,
   whatsappFavoriteMediaSchema,
   whatsappCloudSettingsSchema,
@@ -83,11 +85,24 @@ test('valida ambientes, convites e politica de cadastro', () => {
   assert.equal(joinWorkspaceSchema.safeParse({ code: 'abc' }).success, false);
   assert.equal(inviteWorkspaceMemberSchema.safeParse({ email: 'membro@example.com' }).success, true);
   assert.equal(updateWorkspaceMemberSchema.safeParse({ userId: 'usr_1', role: 'admin' }).success, true);
+  assert.equal(adminUserUpdateSchema.safeParse({ displayName: 'Usuário', email: 'user@example.com', isPlatformAdmin: true }).success, true);
+  assert.equal(adminUserUpdateSchema.safeParse({ displayName: 'Usuário', email: 'user@example.com', isPlatformAdmin: 'true' }).success, false);
   assert.equal(registrationSettingSchema.safeParse({ enabled: false }).success, true);
 });
 
 test('valida notificacoes gerais e canais por aparelho no ambiente', () => {
-  assert.equal(workspaceNotificationPreferencesSchema.safeParse({ notifyAllDevices: true, devices: [] }).success, true);
+  const defaults = workspaceNotificationPreferencesSchema.safeParse({ notifyAllDevices: true, devices: [] });
+  assert.equal(defaults.success, true);
+  if (defaults.success) {
+    assert.equal(defaults.data.emailNotificationsEnabled, true);
+    assert.equal(defaults.data.whatsappNotificationsEnabled, true);
+  }
+  assert.equal(workspaceNotificationPreferencesSchema.safeParse({
+    notifyAllDevices: false,
+    emailNotificationsEnabled: false,
+    whatsappNotificationsEnabled: true,
+    devices: []
+  }).success, true);
   assert.equal(workspaceNotificationPreferencesSchema.safeParse({
     notifyAllDevices: false,
     devices: [{ deviceId: 'device-1', emailEnabled: true, whatsappEnabled: false }]
@@ -253,6 +268,16 @@ test('valida autenticacao para listar ambientes disponiveis ao ESP32', () => {
 });
 
 test('valida perfil, troca de senha e recuperacao', () => {
+  assert.equal(updateNotificationPreferencesSchema.safeParse({
+    whatsappNumber: '+5521999999999',
+    emailNotifications: true,
+    whatsappNotifications: true
+  }).success, true);
+  assert.equal(updateNotificationPreferencesSchema.safeParse({
+    whatsappNumber: null,
+    emailNotifications: true,
+    whatsappNotifications: true
+  }).success, false);
   assert.equal(updateProfileSchema.safeParse({
     displayName: 'Pessoa Usuaria',
     email: 'pessoa@example.com',

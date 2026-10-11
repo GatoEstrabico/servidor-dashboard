@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import argon2 from 'argon2';
 import { PrismaClient } from '@prisma/client';
+import { buildDemoSensorExternalId, canUseDemoSensorForUser, LEGACY_DEMO_SENSOR_EXTERNAL_ID } from '../src/lib/demo-sensor.js';
 
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../..', '.env') });
 
@@ -38,7 +39,15 @@ async function main() {
     const workspace = await prisma.workspace.create({
       data: { name: 'Laboratório Central', accessCode, memberships: { create: { userId: admin.id, role: 'owner' } } }
     });
-    membership = { workspaceId: workspace.id, userId: admin.id, role: 'owner', notifyAllDevices: true, createdAt: workspace.createdAt };
+    membership = {
+      workspaceId: workspace.id,
+      userId: admin.id,
+      role: 'owner',
+      notifyAllDevices: true,
+      emailNotificationsEnabled: true,
+      whatsappNotificationsEnabled: true,
+      createdAt: workspace.createdAt
+    };
   } else if (membership.role !== 'owner') {
     membership = await prisma.workspaceMember.update({
       where: { workspaceId_userId: { workspaceId: membership.workspaceId, userId: admin.id } },
@@ -55,6 +64,35 @@ async function main() {
       conflict = await prisma.workspace.findUnique({ where: { accessCode: candidate }, select: { id: true } });
     }
     await prisma.workspace.update({ where: { id: workspace.id }, data: { accessCode: candidate } });
+  }
+
+  const demoSensorEnabled = (process.env.DEMO_SENSOR_ENABLED ?? 'true') === 'true';
+  const demoSensorAdminOnly = (process.env.DEMO_SENSOR_ADMIN_ONLY ?? 'false') === 'true';
+  if (demoSensorEnabled && canUseDemoSensorForUser({ isPlatformAdmin: admin.isPlatformAdmin, isBootstrapAdmin: true, demoSensorEnabled: true, demoSensorAdminOnly: demoSensorAdminOnly })) {
+    const existingDemoSensor = await prisma.device.findFirst({
+      where: {
+        ownerUserId: admin.id,
+        OR: [
+          { externalId: LEGACY_DEMO_SENSOR_EXTERNAL_ID },
+          { externalId: { startsWith: 'demo-sensor-' } }
+        ]
+      },
+      select: { id: true }
+    });
+    if (!existingDemoSensor) {
+      await prisma.device.create({
+        data: {
+          externalId: buildDemoSensorExternalId(admin.id),
+          name: 'Sensor de teste',
+          alias: 'Sensor de teste',
+          workspaceId: membership.workspaceId,
+          ownerUserId: admin.id,
+          status: 'online',
+          lastSeenAt: new Date(),
+          location: 'Simulação'
+        }
+      });
+    }
   }
 
   await prisma.user.update({ where: { id: admin.id }, data: { activeWorkspaceId: membership.workspaceId } });

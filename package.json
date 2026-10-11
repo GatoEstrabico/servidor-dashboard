@@ -2,11 +2,15 @@
   "name": "monitoramento-laboratorio",
   "private": true,
   "version": "1.0.0",
-  "engines": { "node": ">=22.0.0" },
-  "workspaces": ["apps/*"],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "concurrently -k --raw \"npm run dev -w @monitoramento/api\" \"npm run dev -w @monitoramento/dashboard\"",
-    "demo": "concurrently -k --raw \"npm run dev -w @monitoramento/api\" \"npm run dev -w @monitoramento/dashboard\" \"npm run simulate:device -w @monitoramento/api\"",
+    "dev": "concurrently -k --raw \"npm run dev -w @monitoramento/api\" \"wait-on http-get://127.0.0.1:3000/health && npm run dev -w @monitoramento/dashboard\"",
+    "demo": "concurrently -k --raw \"npm run dev -w @monitoramento/api\" \"wait-on http-get://127.0.0.1:3000/health && npm run dev -w @monitoramento/dashboard\" \"wait-on http-get://127.0.0.1:3000/health && npm run simulate:device -w @monitoramento/api\"",
     "build": "npm run build -w @monitoramento/api && npm run build -w @monitoramento/dashboard",
     "db:generate": "npm run db:generate -w @monitoramento/api",
     "db:push": "npm run db:push -w @monitoramento/api",
@@ -15,6 +19,7 @@
     "test": "npm run test -w @monitoramento/api"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "wait-on": "^9.5.1"
   }
 }

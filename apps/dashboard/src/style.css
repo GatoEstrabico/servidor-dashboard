@@ -67,6 +67,7 @@ button:disabled { cursor: wait; opacity: .7; }
 
 .app-shell { display: flex; min-height: 100vh; }
 .mobile-nav { display: none; }
+.mobile-account-logout { display: none; }
 .sidebar { position: fixed; z-index: 2; display: flex; width: 246px; height: 100vh; flex-direction: column; padding: 24px 15px 14px; color: #d4e0d9; background: #172e2c; }
 .brand { gap: 9px; padding: 0 6px; color: #f0f4ef; font-size: 12px; }
 .brand-light { color: #94afa1; font-weight: 500; }
@@ -314,6 +315,14 @@ button:disabled { cursor: wait; opacity: .7; }
 .settings-pane { display: grid; min-width: 0; align-content: start; gap: 14px; }
 .workspace-admin-panel { display: grid; gap: 10px; padding: 12px; border: 1px solid #e6ebe5; border-radius: 5px; background: #f8faf7; }
 .user-management-panel { display: grid; gap: 18px; }
+.notification-settings-panel { display: grid; gap: 18px; }
+.notification-settings-form { width: min(100%, 760px); gap: 13px; }
+.notification-section-tabs { margin-top: -7px; }
+.notification-workspaces-panel { display: grid; align-content: start; gap: 14px; }
+.notification-workspace-selector { display: grid; max-width: 760px; gap: 6px; color: #46534b; font-size: 11px; font-weight: 600; }
+.notification-workspace-config { display: grid; width: min(100%, 760px); gap: 13px; }
+.notification-workspace-config .settings-section-heading { margin: 0 0 2px; }
+.notification-workspace-config .settings-section-heading h3 { font-size: 16px; }
 .user-management-card { padding: 18px; border: 1px solid #e5e9e3; border-radius: 5px; background: #fff; }
 .whatsapp-management-panel { display: grid; gap: 18px; }
 .email-management-panel { min-width: 0; }
@@ -505,7 +514,7 @@ button:disabled { cursor: wait; opacity: .7; }
 .account-settings-form { display: grid; gap: 9px; }
 .whatsapp-phone-fields { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(180px, 1fr); gap: 10px; }
 .whatsapp-phone-fields label { display: grid; min-width: 0; gap: 6px; color: #46534b; font-size: 11px; font-weight: 600; }
-.password-settings-form { padding-top: 15px; border-top: 1px solid #e9ede8; }
+.password-settings-form { padding-top: 15px; padding-bottom: 15px; border-top: 1px solid #e9ede8; border-bottom: 1px solid #e9ede8; }
 .settings-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 2px; }
 .notification-preferences-heading { margin-top: 8px; }
 .settings-section-heading h3 { margin: 0; color: #304037; font-family: Manrope, sans-serif; font-size: 14px; }
@@ -562,7 +571,6 @@ button:disabled { cursor: wait; opacity: .7; }
   .whatsapp-manager-section { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 14px; }
   .whatsapp-manager-copy { width: 100%; }
   .whatsapp-qr-panel, .whatsapp-qr-placeholder { width: min(100%, 280px); }
-  .app-shell-whatsapp-admin .mobile-nav { grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .user-management-card { gap: 14px; padding: 12px; }
   .invite-form { grid-template-columns: minmax(0, 1fr); }
   .member-list { gap: 8px; }
@@ -599,6 +607,7 @@ button:disabled { cursor: wait; opacity: .7; }
   .heading-sub { max-width: 260px; font-size: 10px; line-height: 1.5; }
   .secondary-button { height: 31px; padding: 0 8px; font-size: 0; }
   .secondary-button svg { width: 16px; }
+  .account-settings-form .secondary-button { font-size: 11px; }
   .metrics-grid { gap: 8px; }
   .metric { min-height: 108px; padding: 11px 10px; }
   .metric-top { font-size: 9px; }
@@ -644,8 +653,9 @@ button:disabled { cursor: wait; opacity: .7; }
     right: 0;
     bottom: 0;
     left: 0;
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
+    justify-content: space-around;
+    gap: 4px;
     padding: 7px 8px max(8px, env(safe-area-inset-bottom));
     border-top: 1px solid #e5eae4;
     background: rgba(255, 255, 255, .97);
@@ -654,8 +664,10 @@ button:disabled { cursor: wait; opacity: .7; }
   }
   .mobile-nav-item {
     display: flex;
+    flex: 1 1 0;
     min-width: 0;
     min-height: 50px;
+    max-width: 112px;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -672,6 +684,7 @@ button:disabled { cursor: wait; opacity: .7; }
   .mobile-nav-item.active { color: #246d53; background: #edf5ef; }
   .mobile-nav-item:active { background: #e6f0e8; }
   .mobile-nav-item:disabled { opacity: .5; }
+  .mobile-account-logout { display: flex; width: 100%; min-height: 42px; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; font-size: 11px; }
   html { scroll-behavior: smooth; scroll-padding-top: 62px; }
 }
 @media print {
@@ -860,6 +873,8 @@ button:disabled { cursor: wait; opacity: .7; }
 :root.dark-mode .settings-section-heading > span { color: #a0aea5; }
 :root.dark-mode .settings-section-heading h3,
 :root.dark-mode .account-settings-form > label { color: #d6e1d9; }
+:root.dark-mode .notification-workspace-selector { color: #d6e1d9; }
+:root.dark-mode .password-settings-form { border-color: #354139; }
 :root.dark-mode .settings-input { border-color: #39463e; color: #e3eae5; background: #202a25; }
 :root.dark-mode .whatsapp-phone-fields label { color: #d6e1d9; }
 :root.dark-mode .settings-help { color: #a0aea5; }

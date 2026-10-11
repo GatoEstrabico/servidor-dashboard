@@ -36,7 +36,7 @@ type AccountLinkedDevice = {
   canAssign: boolean;
 };
 type WorkspaceMember = { id: string; email: string; displayName: string; role: string; emailVerifiedAt: string | null; isPlatformAdmin: boolean; createdAt: string };
-type AdminUser = { id: string; email: string; displayName: string; isPlatformAdmin: boolean; emailVerifiedAt: string | null; passwordResetRequired: boolean; createdAt: string; workspaces: Workspace[] };
+type AdminUser = { id: string; email: string; displayName: string; isPlatformAdmin: boolean; isBootstrapAdmin: boolean; emailVerifiedAt: string | null; passwordResetRequired: boolean; createdAt: string; workspaces: Workspace[] };
 type WorkspaceInvitation = { id: string; email: string; role: string; expiresAt: string; createdAt: string };
 type WhatsAppWebStatus = { state: 'disconnected' | 'connecting' | 'qr' | 'connected'; qrDataUrl: string | null; phoneNumber: string | null };
 type WhatsAppWebLogEntry = { id: number; createdAt: string; level: 'info' | 'success' | 'error'; event: string; details: string };
@@ -83,7 +83,12 @@ type DeviceNotification = {
   read: boolean;
 };
 type WorkspaceDeviceAlertPreference = { deviceId: string; name: string; emailEnabled: boolean; whatsappEnabled: boolean };
-type WorkspaceAlertPreferences = { notifyAllDevices: boolean; devices: WorkspaceDeviceAlertPreference[] };
+type WorkspaceAlertPreferences = {
+  notifyAllDevices: boolean;
+  emailNotificationsEnabled: boolean;
+  whatsappNotificationsEnabled: boolean;
+  devices: WorkspaceDeviceAlertPreference[];
+};
 type Language = 'pt-BR' | 'en';
 type AlertAudioOption = { id: string; name: string; mimeType: string; url: string; isDefault: boolean };
 type AlertSoundPreferences = { online: string; warning: string; offline: string };
@@ -136,6 +141,7 @@ const accountDevicesMessage = ref('');
 const workspaceDeviceTargetId = ref<string | null>(null);
 const activeWorkspaceId = ref<string | null>(null);
 const activeWorkspace = computed(() => workspaces.value.find((workspace) => workspace.id === activeWorkspaceId.value) ?? null);
+const notificationWorkspace = computed(() => workspaces.value.find((workspace) => workspace.id === notificationWorkspaceId.value) ?? null);
 const activeWorkspaceCode = computed(() => activeWorkspace.value?.accessCode ?? '');
 const canManageActiveWorkspace = computed(() => ['owner', 'admin'].includes(activeWorkspace.value?.role ?? ''));
 const workspaceMembers = ref<WorkspaceMember[]>([]);
@@ -157,12 +163,13 @@ const userDeletionMessage = ref('');
 const accountEditTarget = ref<AdminUser | null>(null);
 const accountEditName = ref('');
 const accountEditEmail = ref('');
+const accountEditIsPlatformAdmin = ref(false);
 const accountEditSaving = ref(false);
 const accountEditError = ref('');
 const registrationEnabled = ref(false);
 const isWhatsAppDashboardAdmin = computed(() => Boolean(user.value?.isBootstrapAdmin));
 const canManageUserAccounts = computed(() => Boolean(user.value?.isPlatformAdmin));
-const managementTab = ref<'overview' | 'users' | 'whatsapp' | 'email'>('overview');
+const managementTab = ref<'overview' | 'notifications' | 'users' | 'whatsapp' | 'email'>('overview');
 const userManagementTab = ref<'members' | 'accounts' | 'registration'>('members');
 const whatsappTab = ref<'log' | 'configuration' | 'notifications' | 'profile' | 'connection'>('log');
 const emailTab = ref<'log' | 'configuration' | 'notifications' | 'connection'>('log');
@@ -257,7 +264,7 @@ const resetMessage = ref('');
 const resetError = ref('');
 const resetToken = ref('');
 const settingsOpen = ref(false);
-const settingsTab = ref<'preferences' | 'account' | 'notifications' | 'sounds'>('preferences');
+const settingsTab = ref<'preferences' | 'account' | 'sounds'>('preferences');
 const workspaceMenuOpen = ref(false);
 const mobileWorkspaceSelectorOpen = ref(false);
 const workspaceDialogOpen = ref(false);
@@ -298,10 +305,17 @@ const profileWhatsappCountry = ref<CountryCode>('BR');
 const profileWhatsappNumber = ref('');
 const profileEmailNotifications = ref(true);
 const profileWhatsappNotifications = ref(false);
-const notificationCurrentPassword = ref('');
 const notificationMessage = ref('');
 const notificationError = ref('');
-const workspaceAlertPreferences = ref<WorkspaceAlertPreferences>({ notifyAllDevices: true, devices: [] });
+const workspaceAlertPreferences = ref<WorkspaceAlertPreferences>({
+  notifyAllDevices: true,
+  emailNotificationsEnabled: true,
+  whatsappNotificationsEnabled: true,
+  devices: []
+});
+const notificationWorkspaceId = ref<string | null>(null);
+const notificationSectionTab = ref<'configuration' | 'workspaces'>('configuration');
+const workspaceAlertPreferencesLoading = ref(false);
 const workspaceAlertPreferencesSaving = ref(false);
 const workspaceAlertPreferencesMessage = ref('');
 const workspaceAlertPreferencesError = ref('');
@@ -357,6 +371,7 @@ const englishText: Record<string, string> = {
   'API conectada': 'API connected',
   'Atualizacao automatica': 'Automatic updates',
   'Sair': 'Sign out',
+  'Sair da conta': 'Sign out of account',
   'Monitoramento': 'Monitoring',
   'Atualizado': 'Updated',
   'Notificações': 'Notifications',
@@ -464,6 +479,16 @@ const englishText: Record<string, string> = {
   'Nome': 'Name',
   'Alertas de alarmes': 'Alarm notifications',
   'Preferências de envio': 'Delivery preferences',
+  'Configure como e quando receber alertas.': 'Choose how and when to receive alerts.',
+  'Aparelhos e ambiente': 'Devices and workspace',
+  'Ativar e-mail neste ambiente': 'Enable email for this workspace',
+  'Ativar WhatsApp neste ambiente': 'Enable WhatsApp for this workspace',
+  'Os canais também precisam estar ativos em Configurações.': 'Channels must also be enabled in Settings.',
+  'Selecione um ambiente': 'Select a workspace',
+  'Nenhum ambiente disponível.': 'No workspaces available.',
+  'Desative para escolher aparelhos individualmente.': 'Turn off to choose devices individually.',
+  'Salvamento automático': 'Auto-save',
+  'Carregando...': 'Loading...',
   'Notificações por e-mail': 'Email notifications',
   'Enviadas para ': 'Sent to ',
   'o e-mail da conta': 'the account email',
@@ -563,6 +588,7 @@ const englishText: Record<string, string> = {
   'Habilitado na tela de login': 'Enabled on the sign-in screen',
   'Desabilitado': 'Disabled',
   'Convite enviado por e-mail.': 'Invitation sent by email.',
+  'Este e-mail já possui uma conta na plataforma e não pode receber um convite.': 'This email already has a platform account and cannot receive an invitation.',
   'Informe um e-mail válido.': 'Enter a valid email address.',
   'Sem permissão para convidar pessoas para este ambiente.': 'You do not have permission to invite people to this workspace.',
   'Sem permissão para gerenciar este ambiente.': 'You do not have permission to manage this workspace.',
@@ -583,6 +609,9 @@ const englishText: Record<string, string> = {
   'Contas cadastradas': 'Registered accounts',
   'Usuários cadastrados': 'Registered users',
   'Editar usuário': 'Edit user',
+  'Tipo de conta': 'Account type',
+  'Usuário promovido a administrador da plataforma.': 'User promoted to platform administrator.',
+  'Usuário alterado para membro.': 'User changed to member.',
   'A senha não pode ser alterada por aqui. Use a ação de redefinição para exigir uma nova senha.': 'The password cannot be changed here. Use the reset action to require a new password.',
   'Usuário atualizado.': 'User updated.',
   'Usuário atualizado. O e-mail de acesso foi alterado.': 'User updated. The sign-in email was changed.',
@@ -1117,9 +1146,10 @@ async function loadAdminUsers() {
 }
 
 function openUserManagement() {
+  if (!canManageUserAccounts.value) return;
   managementTab.value = 'users';
-  userManagementTab.value = canManageUserAccounts.value ? 'accounts' : 'members';
-  if (canManageUserAccounts.value) void loadAdminUsers();
+  userManagementTab.value = 'accounts';
+  void loadAdminUsers();
 }
 
 async function loadAccountDevices() {
@@ -2235,8 +2265,18 @@ function openSettings() {
   alertSoundError.value = '';
   alertSoundMessage.value = '';
   currentPassword.value = '';
-  notificationCurrentPassword.value = '';
   settingsOpen.value = true;
+}
+
+function openNotificationSettings() {
+  managementTab.value = 'notifications';
+  activeMobileTab.value = 'notifications';
+  notificationSectionTab.value = 'configuration';
+  if (!workspaces.value.some((workspace) => workspace.id === notificationWorkspaceId.value)) {
+    notificationWorkspaceId.value = activeWorkspaceId.value ?? workspaces.value[0]?.id ?? null;
+  }
+  notificationMessage.value = '';
+  notificationError.value = '';
 }
 
 async function updateProfile() {
@@ -2258,7 +2298,7 @@ async function updateProfile() {
         currentPassword: currentPassword.value
       })
     });
-    user.value = result.user;
+    user.value = { ...user.value, ...result.user };
     accountMessage.value = 'Perfil atualizado.';
     currentPassword.value = '';
   } catch (error) {
@@ -2272,10 +2312,6 @@ async function updateNotificationPreferences() {
   if (!user.value) return;
   notificationMessage.value = '';
   notificationError.value = '';
-  if (!notificationCurrentPassword.value) {
-    notificationError.value = 'Informe sua senha atual para salvar.';
-    return;
-  }
   const parsedWhatsappNumber = profileWhatsappNumber.value.trim()
     ? parsePhoneNumberFromString(profileWhatsappNumber.value, profileWhatsappCountry.value)
     : undefined;
@@ -2289,21 +2325,16 @@ async function updateNotificationPreferences() {
   }
   accountSaving.value = true;
   try {
-    const result = await api<{ user: User }>('/api/account/profile', {
+    const result = await api<{ preferences: Pick<User, 'whatsappNumber' | 'emailNotifications' | 'whatsappNotifications'> }>('/api/account/notification-preferences', {
       method: 'POST',
       headers: { 'X-CSRF-Token': csrfToken.value },
       body: JSON.stringify({
-        displayName: user.value.displayName,
-        email: user.value.email,
-        avatarDataUrl: user.value.avatarDataUrl,
         whatsappNumber: parsedWhatsappNumber?.number ?? null,
         emailNotifications: profileEmailNotifications.value,
-        whatsappNotifications: profileWhatsappNotifications.value,
-        currentPassword: notificationCurrentPassword.value
+        whatsappNotifications: profileWhatsappNotifications.value
       })
     });
-    user.value = result.user;
-    notificationCurrentPassword.value = '';
+    user.value = { ...user.value, ...result.preferences };
     notificationMessage.value = 'Preferências de notificações salvas.';
   } catch (error) {
     notificationError.value = error instanceof Error ? t(error.message) : t('Nao foi possivel atualizar o perfil.');
@@ -2313,36 +2344,62 @@ async function updateNotificationPreferences() {
 }
 
 async function loadWorkspaceAlertPreferences() {
+  const workspaceId = notificationWorkspaceId.value;
   workspaceAlertPreferencesMessage.value = '';
   workspaceAlertPreferencesError.value = '';
-  if (!activeWorkspaceId.value) {
-    workspaceAlertPreferences.value = { notifyAllDevices: true, devices: [] };
+  if (!workspaceId) {
+    workspaceAlertPreferences.value = { notifyAllDevices: true, emailNotificationsEnabled: true, whatsappNotificationsEnabled: true, devices: [] };
+    workspaceAlertPreferencesLoading.value = false;
     return;
   }
+  workspaceAlertPreferences.value = { notifyAllDevices: true, emailNotificationsEnabled: true, whatsappNotificationsEnabled: true, devices: [] };
+  workspaceAlertPreferencesLoading.value = true;
   try {
-    workspaceAlertPreferences.value = await api<WorkspaceAlertPreferences>(`/api/workspaces/${activeWorkspaceId.value}/notification-preferences`);
+    const preferences = await api<WorkspaceAlertPreferences>(`/api/workspaces/${workspaceId}/notification-preferences`);
+    if (notificationWorkspaceId.value === workspaceId) workspaceAlertPreferences.value = preferences;
   } catch (error) {
-    workspaceAlertPreferencesError.value = error instanceof Error ? t(error.message) : t('Não foi possível carregar as preferências deste ambiente.');
+    if (notificationWorkspaceId.value === workspaceId) {
+      workspaceAlertPreferencesError.value = error instanceof Error ? t(error.message) : t('Não foi possível carregar as preferências deste ambiente.');
+    }
+  } finally {
+    if (notificationWorkspaceId.value === workspaceId) workspaceAlertPreferencesLoading.value = false;
   }
 }
 
 async function saveWorkspaceAlertPreferences() {
-  if (!activeWorkspaceId.value) return;
+  const workspaceId = notificationWorkspaceId.value;
+  if (!workspaceId || workspaceAlertPreferencesSaving.value || workspaceAlertPreferencesLoading.value) return;
   workspaceAlertPreferencesSaving.value = true;
   workspaceAlertPreferencesMessage.value = '';
   workspaceAlertPreferencesError.value = '';
   try {
-    await api(`/api/workspaces/${activeWorkspaceId.value}/notification-preferences`, {
+    await api(`/api/workspaces/${workspaceId}/notification-preferences`, {
       method: 'POST',
       headers: { 'X-CSRF-Token': csrfToken.value },
-      body: JSON.stringify(workspaceAlertPreferences.value)
+      body: JSON.stringify({
+        notifyAllDevices: workspaceAlertPreferences.value.notifyAllDevices,
+        emailNotificationsEnabled: workspaceAlertPreferences.value.emailNotificationsEnabled,
+        whatsappNotificationsEnabled: workspaceAlertPreferences.value.whatsappNotificationsEnabled,
+        devices: workspaceAlertPreferences.value.devices.map(({ deviceId, emailEnabled, whatsappEnabled }) => ({
+          deviceId,
+          emailEnabled,
+          whatsappEnabled
+        }))
+      })
     });
-    workspaceAlertPreferencesMessage.value = 'Preferências deste ambiente salvas.';
+    if (notificationWorkspaceId.value === workspaceId) workspaceAlertPreferencesMessage.value = 'Preferências deste ambiente salvas.';
   } catch (error) {
-    workspaceAlertPreferencesError.value = error instanceof Error ? t(error.message) : t('Não foi possível salvar as preferências deste ambiente.');
+    if (notificationWorkspaceId.value === workspaceId) {
+      workspaceAlertPreferencesError.value = error instanceof Error ? t(error.message) : t('Não foi possível salvar as preferências deste ambiente.');
+    }
   } finally {
     workspaceAlertPreferencesSaving.value = false;
   }
+}
+
+function toggleWorkspaceAlertChannel(channel: 'emailNotificationsEnabled' | 'whatsappNotificationsEnabled', event: Event) {
+  workspaceAlertPreferences.value[channel] = (event.target as HTMLInputElement).checked;
+  void saveWorkspaceAlertPreferences();
 }
 
 function toggleWorkspaceAlertMode(event: Event) {
@@ -2549,11 +2606,12 @@ async function requireUserPasswordReset(account: AdminUser) {
 }
 
 function editAdminUser(account: AdminUser) {
-  if (!canManageUserAccounts.value || account.isPlatformAdmin || account.email === user.value?.email) return;
+  if (!canManageUserAccounts.value || account.isBootstrapAdmin || account.email === user.value?.email) return;
   memberActionsOpenId.value = null;
   accountEditTarget.value = account;
   accountEditName.value = account.displayName;
   accountEditEmail.value = account.email;
+  accountEditIsPlatformAdmin.value = account.isPlatformAdmin;
   accountEditError.value = '';
 }
 
@@ -2569,16 +2627,17 @@ async function saveAdminUserEdit() {
   accountEditSaving.value = true;
   accountEditError.value = '';
   adminUsersMessage.value = '';
+  const isPlatformAdmin = accountEditIsPlatformAdmin.value;
   try {
-    const result = await api<{ emailChanged: boolean }>(`/api/admin/users/${target.id}`, {
+    const result = await api<{ emailChanged: boolean; isPlatformAdminChanged: boolean }>(`/api/admin/users/${target.id}`, {
       method: 'PATCH',
       headers: { 'X-CSRF-Token': csrfToken.value },
-      body: JSON.stringify({ displayName: accountEditName.value, email: accountEditEmail.value })
+      body: JSON.stringify({ displayName: accountEditName.value, email: accountEditEmail.value, isPlatformAdmin })
     });
     accountEditTarget.value = null;
-    adminUsersMessage.value = result.emailChanged
-      ? 'Usuário atualizado. O e-mail de acesso foi alterado.'
-      : 'Usuário atualizado.';
+    adminUsersMessage.value = result.isPlatformAdminChanged
+      ? isPlatformAdmin ? 'Usuário promovido a administrador da plataforma.' : 'Usuário alterado para membro.'
+      : result.emailChanged ? 'Usuário atualizado. O e-mail de acesso foi alterado.' : 'Usuário atualizado.';
     await loadAdminUsers();
   } catch (error) {
     accountEditError.value = error instanceof Error ? t(error.message) : t('Não foi possível atualizar o usuário.');
@@ -2757,8 +2816,8 @@ watch([managementTab, whatsappTab], ([tab, subtab]) => {
   }
 });
 
-watch([activeWorkspaceId, settingsTab], ([, tab]) => {
-  if (tab === 'notifications') void loadWorkspaceAlertPreferences();
+watch([notificationWorkspaceId, notificationSectionTab, managementTab], ([workspaceId, sectionTab, mainTab]) => {
+  if (mainTab === 'notifications' && sectionTab === 'workspaces') void loadWorkspaceAlertPreferences();
 });
 
 watch(activeWorkspaceId, (workspaceId) => {
@@ -2929,8 +2988,11 @@ onUnmounted(() => {
       <div class="nav-label">{{ t('GERENCIAMENTO') }}</div>
       <nav>
         <a class="nav-link" :class="{ active: managementTab === 'overview' }" href="#inicio" @click="managementTab = 'overview'"><LayoutDashboard :size="17" /><span>{{ t('Visao geral') }}</span><span class="nav-count">{{ devices.length }}</span></a>
-        <button v-if="canManageActiveWorkspace" class="nav-link" :class="{ active: managementTab === 'users' }" type="button" @click="openUserManagement">
-          <Settings :size="17" /><span>{{ t('Usuários') }}</span>
+        <button class="nav-link" :class="{ active: managementTab === 'notifications' }" type="button" @click="openNotificationSettings">
+          <Bell :size="17" /><span>{{ t('Notificações') }}</span>
+        </button>
+        <button v-if="canManageUserAccounts" class="nav-link" :class="{ active: managementTab === 'users' }" type="button" @click="openUserManagement">
+          <UsersRound :size="17" /><span>{{ t('Usuários') }}</span>
         </button>
         <button v-if="isWhatsAppDashboardAdmin" class="nav-link" :class="{ active: managementTab === 'whatsapp' }" type="button" @click="managementTab = 'whatsapp'">
           <MessageCircle :size="17" /><span>{{ t('WhatsApp API') }}</span>
@@ -2947,7 +3009,7 @@ onUnmounted(() => {
 
     <section class="main-area">
       <header class="topbar">
-        <div class="breadcrumb"><img class="dashboard-logo" src="/logo.jpg" alt="UERJ" /><span>{{ t('Monitoramento') }}</span><span>/</span><strong>{{ t(managementTab === 'users' ? 'Usuários' : managementTab === 'whatsapp' ? 'WhatsApp API' : managementTab === 'email' ? 'E-mail API' : 'Visao geral') }}</strong></div>
+        <div class="breadcrumb"><img class="dashboard-logo" src="/logo.jpg" alt="UERJ" /><span>{{ t('Monitoramento') }}</span><span>/</span><strong>{{ t(managementTab === 'notifications' ? 'Notificações' : managementTab === 'users' ? 'Usuários' : managementTab === 'whatsapp' ? 'WhatsApp API' : managementTab === 'email' ? 'E-mail API' : 'Visao geral') }}</strong></div>
         <div class="top-actions">
           <span class="last-update"><span class="live-dot"></span> {{ t('Atualizado') }} {{ formatRefreshTime() }}</span>
           <div class="language-flags" role="group" :aria-label="t('Idioma')">
@@ -3002,10 +3064,9 @@ onUnmounted(() => {
       </header>
 
       <main id="inicio" class="dashboard-content">
-        <div v-if="managementTab === 'users' && canManageActiveWorkspace" class="user-management-panel">
+        <div v-if="managementTab === 'users' && canManageUserAccounts" class="user-management-panel">
           <div class="page-heading">
             <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h1>{{ t('Usuários') }}</h1><p class="heading-sub">{{ t('Gerencie membros, papéis e convites do ambiente ativo.') }}</p></div>
-            <button class="secondary-button" type="button" @click="managementTab = 'overview'">{{ t('Voltar') }}</button>
           </div>
           <nav class="settings-tabs whatsapp-tabs user-management-tabs" role="tablist" :aria-label="t('Usuários')">
             <button class="settings-tab" :class="{ active: userManagementTab === 'members' }" type="button" role="tab" :aria-selected="userManagementTab === 'members'" @click="userManagementTab = 'members'"><UsersRound :size="15" />{{ t('Membros') }}</button>
@@ -3035,12 +3096,14 @@ onUnmounted(() => {
                 </div>
                 <span v-if="account.isPlatformAdmin" class="protected-member-role"><LockKeyhole :size="14" />{{ t('Administrador da plataforma') }}</span>
                 <span v-else class="admin-account-status">{{ account.passwordResetRequired ? t('Redefinição de senha exigida') : account.emailVerifiedAt ? t('Conta ativa') : t('E-mail pendente') }}</span>
-                <div v-if="!account.isPlatformAdmin && account.email !== user?.email" class="member-actions">
+                <div v-if="!account.isBootstrapAdmin && account.email !== user?.email" class="member-actions">
                   <button class="icon-button member-actions-button" type="button" :aria-label="t('Abrir ações da conta')" :aria-expanded="memberActionsOpenId === `account-${account.id}`" :title="t('Ações')" @click="toggleMemberActions(`account-${account.id}`)"><EllipsisVertical :size="18" /></button>
                   <div v-if="memberActionsOpenId === `account-${account.id}`" class="member-actions-menu admin-account-actions" role="menu">
                     <button type="button" role="menuitem" @click="editAdminUser(account)"><Pencil :size="14" />{{ t('Editar usuário') }}</button>
-                    <button type="button" role="menuitem" :disabled="adminUserActionId === account.id || account.passwordResetRequired" @click="memberActionsOpenId = null; requireUserPasswordReset(account)"><LockKeyhole :size="14" />{{ account.passwordResetRequired ? t('Redefinição já exigida') : t('Remover senha e exigir nova senha') }}</button>
-                    <button class="member-remove-action" type="button" role="menuitem" @click="requestUserDeletion(account)"><Trash2 :size="14" />{{ t('Excluir usuário permanentemente') }}</button>
+                    <template v-if="!account.isPlatformAdmin">
+                      <button type="button" role="menuitem" :disabled="adminUserActionId === account.id || account.passwordResetRequired" @click="memberActionsOpenId = null; requireUserPasswordReset(account)"><LockKeyhole :size="14" />{{ account.passwordResetRequired ? t('Redefinição já exigida') : t('Remover senha e exigir nova senha') }}</button>
+                      <button class="member-remove-action" type="button" role="menuitem" @click="requestUserDeletion(account)"><Trash2 :size="14" />{{ t('Excluir usuário permanentemente') }}</button>
+                    </template>
                   </div>
                 </div>
               </div>
@@ -3100,6 +3163,84 @@ onUnmounted(() => {
                 <span>{{ new Date(invitation.expiresAt).toLocaleDateString('pt-BR') }}</span>
               </div>
             </div>
+          </section>
+        </div>
+        <div v-else-if="managementTab === 'notifications'" class="notification-settings-panel">
+          <div class="page-heading">
+            <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h1>{{ t('Notificações') }}</h1><p class="heading-sub">{{ t('Configure como e quando receber alertas.') }}</p></div>
+          </div>
+          <nav class="settings-tabs whatsapp-tabs notification-section-tabs" role="tablist" :aria-label="t('Notificações')">
+            <button id="notificationConfigurationTab" class="settings-tab" :class="{ active: notificationSectionTab === 'configuration' }" type="button" role="tab" :aria-selected="notificationSectionTab === 'configuration'" aria-controls="notificationConfigurationPanel" @click="notificationSectionTab = 'configuration'"><Settings :size="15" />{{ t('Configurações') }}</button>
+            <button id="notificationWorkspacesTab" class="settings-tab" :class="{ active: notificationSectionTab === 'workspaces' }" type="button" role="tab" :aria-selected="notificationSectionTab === 'workspaces'" aria-controls="notificationWorkspacesPanel" @click="notificationSectionTab = 'workspaces'"><Building2 :size="15" />{{ t('Aparelhos e ambiente') }}</button>
+          </nav>
+          <section v-if="notificationSectionTab === 'configuration'" id="notificationConfigurationPanel" class="whatsapp-config-section" role="tabpanel" aria-labelledby="notificationConfigurationTab">
+          <form class="settings-pane account-settings-form notification-settings-form" @submit.prevent="updateNotificationPreferences">
+            <div class="settings-section-heading"><h3>{{ t('Alertas de alarmes') }}</h3><span>{{ t('Preferências de envio') }}</span></div>
+            <label class="theme-setting">
+              <span class="theme-setting-icon"><Mail :size="18" /></span>
+              <span class="theme-setting-copy"><strong>{{ t('Notificações por e-mail') }}</strong><small>{{ t('Enviadas para ') }}{{ profileEmail || t('o e-mail da conta') }}</small></span>
+              <input v-model="profileEmailNotifications" class="theme-switch" type="checkbox" />
+            </label>
+            <label class="theme-setting">
+              <span class="theme-setting-icon"><MessageCircle :size="18" /></span>
+              <span class="theme-setting-copy"><strong>{{ t('Notificações por WhatsApp') }}</strong><small>{{ t('É necessário cadastrar o número e ativar o canal') }}</small></span>
+              <input v-model="profileWhatsappNotifications" class="theme-switch" type="checkbox" />
+            </label>
+            <div class="whatsapp-phone-fields">
+              <label for="profileWhatsappCountry">{{ t('País e código do WhatsApp') }}
+                <select id="profileWhatsappCountry" v-model="profileWhatsappCountry" class="settings-input" autocomplete="country" @change="reformatWhatsappNumberForCountry">
+                  <option v-for="country in whatsappCountries" :key="country.country" :value="country.country">{{ country.name }} ({{ country.dialCode }})</option>
+                </select>
+              </label>
+              <label for="profileWhatsappNumber">{{ t('Número do WhatsApp') }}
+                <input id="profileWhatsappNumber" class="settings-input" type="tel" maxlength="24" autocomplete="tel-national" :placeholder="profileWhatsappCountry === 'BR' ? '(00) 00000-0000' : ''" :value="profileWhatsappNumber" @input="formatWhatsappNumberInput" />
+              </label>
+            </div>
+            <p class="settings-help">{{ t('Digite o número local com DDD.') }} {{ t('O WhatsApp requer uma conta conectada pelo administrador.') }}</p>
+            <div v-if="notificationError" class="error-message" role="alert">{{ t(notificationError) }}</div>
+            <div v-if="notificationMessage" class="success-message" role="status">{{ t(notificationMessage) }}</div>
+            <button class="primary-button settings-save-button" type="submit" :disabled="accountSaving">{{ accountSaving ? t('Salvando...') : t('Salvar notificações') }}</button>
+          </form>
+          </section>
+          <section v-else id="notificationWorkspacesPanel" class="whatsapp-config-section notification-workspaces-panel" role="tabpanel" aria-labelledby="notificationWorkspacesTab">
+            <label class="notification-workspace-selector" for="notificationWorkspaceSelect">
+              <span>{{ t('Ambiente') }}</span>
+              <select id="notificationWorkspaceSelect" v-model="notificationWorkspaceId" class="settings-input" :disabled="workspaceAlertPreferencesLoading || workspaceAlertPreferencesSaving">
+                <option v-for="workspace in workspaces" :key="workspace.id" :value="workspace.id">{{ workspace.name }}</option>
+              </select>
+            </label>
+            <div v-if="workspaceAlertPreferencesLoading" class="workspace-device-empty">{{ t('Carregando...') }}</div>
+            <div v-else-if="notificationWorkspace" class="notification-workspace-config">
+              <div class="settings-section-heading"><h3>{{ notificationWorkspace.name }}</h3><span>{{ t('Salvamento automático') }}</span></div>
+              <p class="settings-help">{{ t('Os canais também precisam estar ativos em Configurações.') }}</p>
+              <label class="theme-setting">
+                <span class="theme-setting-icon"><Mail :size="18" /></span>
+                <span class="theme-setting-copy"><strong>{{ t('Ativar e-mail neste ambiente') }}</strong><small>{{ t('Notificações por e-mail') }}</small></span>
+                <input class="theme-switch" type="checkbox" :checked="workspaceAlertPreferences.emailNotificationsEnabled" :disabled="workspaceAlertPreferencesSaving || workspaceAlertPreferencesLoading" @change="toggleWorkspaceAlertChannel('emailNotificationsEnabled', $event)" />
+              </label>
+              <label class="theme-setting">
+                <span class="theme-setting-icon"><MessageCircle :size="18" /></span>
+                <span class="theme-setting-copy"><strong>{{ t('Ativar WhatsApp neste ambiente') }}</strong><small>{{ t('Notificações por WhatsApp') }}</small></span>
+                <input class="theme-switch" type="checkbox" :checked="workspaceAlertPreferences.whatsappNotificationsEnabled" :disabled="workspaceAlertPreferencesSaving || workspaceAlertPreferencesLoading" @change="toggleWorkspaceAlertChannel('whatsappNotificationsEnabled', $event)" />
+              </label>
+              <label class="theme-setting">
+                <span class="theme-setting-icon"><Bell :size="18" /></span>
+                <span class="theme-setting-copy"><strong>{{ t('Receber alertas de todos os aparelhos') }}</strong><small>{{ t('Desative para escolher aparelhos individualmente.') }}</small></span>
+                <input class="theme-switch" type="checkbox" :checked="workspaceAlertPreferences.notifyAllDevices" :disabled="workspaceAlertPreferencesSaving || workspaceAlertPreferencesLoading" @change="toggleWorkspaceAlertMode" />
+              </label>
+              <div v-if="!workspaceAlertPreferences.notifyAllDevices" class="notification-device-list">
+                <div v-for="device in workspaceAlertPreferences.devices" :key="device.deviceId" class="notification-device-row">
+                  <strong>{{ device.name }}</strong>
+                  <label><span>{{ t('E-mail') }}</span><input class="theme-switch" type="checkbox" :aria-label="`${t('E-mail')} - ${device.name}`" :checked="device.emailEnabled" :disabled="workspaceAlertPreferencesSaving" @change="toggleDeviceAlertChannel(device.deviceId, 'emailEnabled', $event)" /></label>
+                  <label><span>{{ t('WhatsApp') }}</span><input class="theme-switch" type="checkbox" :aria-label="`${t('WhatsApp')} - ${device.name}`" :checked="device.whatsappEnabled" :disabled="workspaceAlertPreferencesSaving" @change="toggleDeviceAlertChannel(device.deviceId, 'whatsappEnabled', $event)" /></label>
+                </div>
+                <div v-if="!workspaceAlertPreferences.devices.length" class="workspace-device-empty">{{ t('Nenhum aparelho neste ambiente.') }}</div>
+              </div>
+              <p v-if="workspaceAlertPreferencesError" class="error-message" role="alert">{{ t(workspaceAlertPreferencesError) }}</p>
+              <p v-if="workspaceAlertPreferencesMessage" class="success-message" role="status">{{ t(workspaceAlertPreferencesMessage) }}</p>
+              <p v-if="workspaceAlertPreferencesSaving" class="settings-help">{{ t('Salvando...') }}</p>
+            </div>
+            <div v-else class="workspace-device-empty">{{ t('Nenhum ambiente disponível.') }}</div>
           </section>
         </div>
         <div v-else-if="managementTab === 'whatsapp' && isWhatsAppDashboardAdmin" class="whatsapp-management-panel">
@@ -3505,13 +3646,16 @@ onUnmounted(() => {
       <a class="mobile-nav-item" :class="{ active: managementTab === 'overview' && activeMobileTab === 'home' }" href="#inicio" :aria-current="activeMobileTab === 'home' ? 'page' : undefined" @click.prevent="navigateMobileSection('home')">
         <LayoutDashboard :size="20" /><span>{{ t('Inicio') }}</span>
       </a>
+      <button class="mobile-nav-item" :class="{ active: managementTab === 'notifications' }" type="button" @click="openNotificationSettings">
+        <Bell :size="19" /><span>{{ t('Notificações') }}</span>
+      </button>
       <button class="mobile-nav-item" type="button" @click="mobileWorkspaceSelectorOpen = true">
         <Building2 :size="19" /><span>{{ t('Ambientes') }}</span>
       </button>
       <a class="mobile-nav-item" :class="{ active: managementTab === 'overview' && activeMobileTab === 'devices' }" href="#aparelhos" :aria-current="activeMobileTab === 'devices' ? 'page' : undefined" @click.prevent="navigateMobileSection('devices')">
         <Cpu :size="20" /><span>{{ t('Aparelhos') }}</span>
       </a>
-      <button v-if="canManageActiveWorkspace" class="mobile-nav-item" :class="{ active: managementTab === 'users' }" type="button" @click="managementTab = 'users'; activeMobileTab = 'users'">
+      <button v-if="canManageUserAccounts" class="mobile-nav-item" :class="{ active: managementTab === 'users' }" type="button" @click="openUserManagement(); activeMobileTab = 'users'">
         <UsersRound :size="19" /><span>{{ t('Usuários') }}</span>
       </button>
       <button v-if="isWhatsAppDashboardAdmin" class="mobile-nav-item" :class="{ active: managementTab === 'whatsapp' }" type="button" @click="managementTab = 'whatsapp'; activeMobileTab = 'whatsapp'">
@@ -3519,9 +3663,6 @@ onUnmounted(() => {
       </button>
       <button v-if="isWhatsAppDashboardAdmin" class="mobile-nav-item" :class="{ active: managementTab === 'email' }" type="button" @click="managementTab = 'email'; activeMobileTab = 'email'">
         <Mail :size="19" /><span>{{ t('E-mail API') }}</span>
-      </button>
-      <button class="mobile-nav-item" type="button" @click="logout">
-        <LogOut :size="19" /><span>{{ t('Sair') }}</span>
       </button>
     </nav>
 
@@ -3632,7 +3773,7 @@ onUnmounted(() => {
           <p class="workspace-device-note">{{ t('O aparelho será associado ao ambiente selecionado acima.') }}</p>
         </div>
 
-        <div v-else class="settings-pane workspace-manager-pane">
+        <div v-else-if="workspaceDialogAction === 'share'" class="settings-pane workspace-manager-pane">
           <template v-if="activeWorkspace">
             <div class="workspace-share-card">
               <span class="workspace-icon-preview"><img v-if="activeWorkspace.iconDataUrl" :src="activeWorkspace.iconDataUrl" alt="" /><span v-else>{{ activeWorkspace.name.slice(0, 1).toUpperCase() }}</span></span>
@@ -3672,6 +3813,11 @@ onUnmounted(() => {
           <div><p class="eyebrow">{{ t('GERENCIAMENTO') }}</p><h2 id="accountEditTitle">{{ t('Editar usuário') }}</h2></div>
           <button class="icon-button" type="button" :disabled="accountEditSaving" :aria-label="t('Fechar')" @click="cancelAdminUserEdit"><X :size="19" /></button>
         </header>
+        <label for="accountEditRole">{{ t('Tipo de conta') }}</label>
+        <select id="accountEditRole" v-model="accountEditIsPlatformAdmin" class="settings-input select-input">
+          <option :value="false">{{ t('Membro') }}</option>
+          <option :value="true">{{ t('Administrador') }}</option>
+        </select>
         <label for="accountEditName">{{ t('Nome') }}</label>
         <input id="accountEditName" v-model="accountEditName" class="settings-input" type="text" maxlength="80" autocomplete="off" required />
         <label for="accountEditEmail">{{ t('E-mail') }}</label>
@@ -3695,7 +3841,6 @@ onUnmounted(() => {
         <nav class="settings-tabs" role="tablist" :aria-label="t('Configurações')">
           <button class="settings-tab" :class="{ active: settingsTab === 'preferences' }" type="button" role="tab" :aria-selected="settingsTab === 'preferences'" @click="settingsTab = 'preferences'">{{ t('Preferências') }}</button>
           <button class="settings-tab" :class="{ active: settingsTab === 'account' }" type="button" role="tab" :aria-selected="settingsTab === 'account'" @click="settingsTab = 'account'">{{ t('Conta') }}</button>
-          <button class="settings-tab" :class="{ active: settingsTab === 'notifications' }" type="button" role="tab" :aria-selected="settingsTab === 'notifications'" @click="settingsTab = 'notifications'">{{ t('Notificações') }}</button>
           <button class="settings-tab" :class="{ active: settingsTab === 'sounds' }" type="button" role="tab" :aria-selected="settingsTab === 'sounds'" @click="settingsTab = 'sounds'">{{ t('Sons') }}</button>
         </nav>
 
@@ -3713,7 +3858,7 @@ onUnmounted(() => {
             <div class="avatar-editor">
               <img v-if="profileAvatar" class="settings-avatar" :src="profileAvatar" :alt="t('Foto do perfil')" />
               <span v-else class="settings-avatar settings-avatar-fallback">{{ profileName.slice(0, 1).toUpperCase() || '?' }}</span>
-              <label class="secondary-button avatar-upload-button" for="avatarFile">{{ t('Alterar foto') }}</label>
+              <label class="secondary-button avatar-upload-button" for="avatarFile"><ImagePlus :size="15" />{{ t('Alterar foto') }}</label>
               <input id="avatarFile" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" @change="selectAvatar" />
               <button v-if="profileAvatar" class="text-button remove-avatar-button" type="button" @click="profileAvatar = null">{{ t('Remover foto') }}</button>
             </div>
@@ -3736,57 +3881,8 @@ onUnmounted(() => {
             <input id="newPasswordConfirm" v-model="newPasswordConfirm" class="settings-input" type="password" minlength="12" autocomplete="new-password" required />
             <button class="secondary-button settings-save-button" type="submit" :disabled="accountSaving">{{ t('Alterar senha') }}</button>
           </form>
+          <button class="secondary-button mobile-account-logout" type="button" @click="logout"><LogOut :size="17" />{{ t('Sair da conta') }}</button>
         </div>
-
-        <form v-else-if="settingsTab === 'notifications'" class="settings-pane account-settings-form" @submit.prevent="updateNotificationPreferences">
-          <div class="settings-section-heading"><h3>{{ t('Alertas de alarmes') }}</h3><span>{{ t('Preferências de envio') }}</span></div>
-          <label class="theme-setting">
-            <span class="theme-setting-icon"><Mail :size="18" /></span>
-            <span class="theme-setting-copy"><strong>{{ t('Notificações por e-mail') }}</strong><small>{{ t('Enviadas para ') }}{{ profileEmail || t('o e-mail da conta') }}</small></span>
-            <input v-model="profileEmailNotifications" class="theme-switch" type="checkbox" />
-          </label>
-          <label class="theme-setting">
-            <span class="theme-setting-icon"><MessageCircle :size="18" /></span>
-            <span class="theme-setting-copy"><strong>{{ t('Notificações por WhatsApp') }}</strong><small>{{ t('É necessário cadastrar o número e ativar o canal') }}</small></span>
-            <input v-model="profileWhatsappNotifications" class="theme-switch" type="checkbox" />
-          </label>
-          <div class="whatsapp-phone-fields">
-            <label for="profileWhatsappCountry">{{ t('País e código do WhatsApp') }}
-              <select id="profileWhatsappCountry" v-model="profileWhatsappCountry" class="settings-input" autocomplete="country" @change="reformatWhatsappNumberForCountry">
-                <option v-for="country in whatsappCountries" :key="country.country" :value="country.country">{{ country.name }} ({{ country.dialCode }})</option>
-              </select>
-            </label>
-            <label for="profileWhatsappNumber">{{ t('Número do WhatsApp') }}
-              <input id="profileWhatsappNumber" class="settings-input" type="tel" maxlength="24" autocomplete="tel-national" :placeholder="profileWhatsappCountry === 'BR' ? '(00) 00000-0000' : ''" :value="profileWhatsappNumber" @input="formatWhatsappNumberInput" />
-            </label>
-          </div>
-          <p class="settings-help">{{ t('Digite o número local com DDD.') }} {{ t('O WhatsApp requer uma conta conectada pelo administrador.') }}</p>
-          <section v-if="activeWorkspace" class="workspace-notification-settings">
-            <div class="settings-section-heading"><h3>{{ t('Escopo dos alertas') }}</h3><span>{{ activeWorkspace.name }}</span></div>
-            <label class="theme-setting">
-              <span class="theme-setting-icon"><Bell :size="18" /></span>
-              <span class="theme-setting-copy"><strong>{{ t('Receber alertas de todos os aparelhos') }}</strong><small>{{ t('Usa os canais de e-mail e WhatsApp ativados acima.') }}</small></span>
-              <input class="theme-switch" type="checkbox" :checked="workspaceAlertPreferences.notifyAllDevices" :disabled="workspaceAlertPreferencesSaving" @change="toggleWorkspaceAlertMode" />
-            </label>
-            <div v-if="!workspaceAlertPreferences.notifyAllDevices" class="notification-device-list">
-              <div v-for="device in workspaceAlertPreferences.devices" :key="device.deviceId" class="notification-device-row">
-                <strong>{{ device.name }}</strong>
-                <label><span>{{ t('E-mail') }}</span><input class="theme-switch" type="checkbox" :checked="device.emailEnabled" :disabled="workspaceAlertPreferencesSaving" @change="toggleDeviceAlertChannel(device.deviceId, 'emailEnabled', $event)" /></label>
-                <label><span>{{ t('WhatsApp') }}</span><input class="theme-switch" type="checkbox" :checked="device.whatsappEnabled" :disabled="workspaceAlertPreferencesSaving" @change="toggleDeviceAlertChannel(device.deviceId, 'whatsappEnabled', $event)" /></label>
-              </div>
-              <div v-if="!workspaceAlertPreferences.devices.length" class="workspace-device-empty">{{ t('Nenhum aparelho neste ambiente.') }}</div>
-            </div>
-            <p v-if="workspaceAlertPreferencesError" class="error-message" role="alert">{{ t(workspaceAlertPreferencesError) }}</p>
-            <p v-if="workspaceAlertPreferencesMessage" class="success-message" role="status">{{ t(workspaceAlertPreferencesMessage) }}</p>
-            <p v-if="workspaceAlertPreferencesSaving" class="settings-help">{{ t('Salvando...') }}</p>
-          </section>
-          <p v-else class="settings-help">{{ t('Crie ou importe um ambiente para configurar alertas dos aparelhos.') }}</p>
-          <label for="notificationCurrentPassword">{{ t('Senha atual') }}</label>
-          <input id="notificationCurrentPassword" v-model="notificationCurrentPassword" class="settings-input" type="password" autocomplete="current-password" required />
-          <div v-if="notificationError" class="error-message" role="alert">{{ t(notificationError) }}</div>
-          <div v-if="notificationMessage" class="success-message" role="status">{{ t(notificationMessage) }}</div>
-          <button class="primary-button settings-save-button" type="submit" :disabled="accountSaving">{{ accountSaving ? t('Salvando...') : t('Salvar notificações') }}</button>
-        </form>
 
         <div v-else class="settings-pane">
           <section class="alert-sound-settings" aria-labelledby="alertSoundTitle">

@@ -67,7 +67,7 @@ const brazilDateTime = new Intl.DateTimeFormat('pt-BR', {
 
 function formatBrazilDateTime(timestamp: string): string {
   const parts = new Map(brazilDateTime.formatToParts(new Date(timestamp)).map(({ type, value }) => [type, value]));
-  return `${parts.get('day')}-${parts.get('month')}-${parts.get('year')} | ${parts.get('hour')}:${parts.get('minute')}:${parts.get('second')}`;
+  return `${parts.get('day')}-${parts.get('month')}-${parts.get('year')} ${parts.get('hour')}:${parts.get('minute')}:${parts.get('second')}`;
 }
 
 function colorize(value: string, color: string): string {

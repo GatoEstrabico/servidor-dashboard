@@ -17,6 +17,11 @@ Para compilar e carregar o firmware, além dos itens acima:
 - Placa ESP32 compatível e cabo USB de dados
 - Sensor DHT11, módulo de gás MQ-2 e os demais componentes usados na montagem
 
+Para gerar o aplicativo Android:
+
+- Android Studio com Android SDK e JDK compatíveis com a versão do Capacitor
+- Um backend acessível pelo celular por HTTPS
+
 ## 2. Baixe o projeto
 
 Clone o repositório e entre na pasta criada. Substitua `<URL_DO_REPOSITORIO>` pelo endereço HTTPS ou SSH do GitHub:
@@ -193,6 +198,36 @@ npm.cmd run build
 ```
 
 O build do painel fica em `apps/dashboard/dist`. O build da API é gerado em `apps/api/dist`.
+
+## Android APK
+
+O app Android usa Capacitor para empacotar o mesmo dashboard Vue; o uso no navegador não muda. O APK contém a interface, não a API nem o PostgreSQL. Publique a API em HTTPS antes de instalar o app em outros dispositivos.
+
+Na raiz do projeto, instale as dependências e gere o projeto Android uma única vez:
+
+```powershell
+npm.cmd install
+npm.cmd run android:add -w @monitoramento/dashboard
+```
+
+Configure a origem Android no `.env` da API. Para cookies de sessão entre o WebView e a API HTTPS, use:
+
+```dotenv
+ANDROID_APP_ORIGIN="https://localhost"
+COOKIE_SAME_SITE=none
+COOKIE_SECURE=true
+```
+
+No PowerShell, informe a URL HTTPS pública da API e compile o APK de depuração:
+
+```powershell
+$env:VITE_API_BASE_URL = "https://api.seu-dominio.com"
+npm.cmd run android:build:debug -w @monitoramento/dashboard
+```
+
+O arquivo será gerado em `apps/dashboard/android/app/build/outputs/apk/debug/app-debug.apk`. Para abrir o projeto no Android Studio, use `npm.cmd run android:open -w @monitoramento/dashboard`. Builds posteriores podem usar `android:build:debug`, que recompila os arquivos web e sincroniza o projeto nativo antes de compilar.
+
+Quando `VITE_API_BASE_URL` não for definido, o dashboard continua chamando a API na mesma origem, como antes. Não coloque senhas, chaves de sessão ou a chave de ingestão nessa variável nem no app; somente a URL pública da API deve estar no bundle.
 
 ## 9. Firmware ESP32 (opcional)
 

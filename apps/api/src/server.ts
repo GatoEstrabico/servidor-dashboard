@@ -110,9 +110,11 @@ const envSchema = z.object({
   DEMO_SENSOR_ADMIN_ONLY: z.enum(['true', 'false']).default('false'),
   DASHBOARD_ORIGIN: z.string().url(),
   DASHBOARD_PUBLIC_URL: z.string().url().refine((value) => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
+  ANDROID_APP_ORIGIN: z.string().url().default('https://localhost'),
   SESSION_SECRET: z.string().min(32),
   INGESTION_API_KEY: z.string().min(32),
   COOKIE_SECURE: z.enum(['true', 'false']).default('true'),
+  COOKIE_SAME_SITE: z.enum(['lax', 'none']).default('lax'),
   BOOTSTRAP_ADMIN_EMAIL: z.string().email().optional(),
   BOOTSTRAP_ADMIN_PASSWORD: z.string().min(12).optional(),
   SMTP_HOST: z.string().min(1).optional(),
@@ -141,12 +143,19 @@ const envSchema = z.object({
       message: 'Configure WHATSAPP_ACCESS_TOKEN e WHATSAPP_PHONE_NUMBER_ID juntos.'
     });
   }
+  if (value.COOKIE_SAME_SITE === 'none' && value.COOKIE_SECURE !== 'true') {
+    context.addIssue({
+      code: 'custom',
+      path: ['COOKIE_SECURE'],
+      message: 'COOKIE_SECURE=true e obrigatorio quando COOKIE_SAME_SITE=none.'
+    });
+  }
 });
 const env = envSchema.parse(process.env);
 const alertAudioUploadEnabled = env.ALERT_AUDIO_UPLOAD_ENABLED === 'true';
 const demoSensorEnabled = env.DEMO_SENSOR_ENABLED === 'true';
 const demoSensorAdminOnly = env.DEMO_SENSOR_ADMIN_ONLY === 'true';
-const dashboardOrigins = [...new Set([env.DASHBOARD_ORIGIN, env.DASHBOARD_PUBLIC_URL].filter((value): value is string => Boolean(value)).map((value) => new URL(value).origin))];
+const dashboardOrigins = [...new Set([env.DASHBOARD_ORIGIN, env.DASHBOARD_PUBLIC_URL, env.ANDROID_APP_ORIGIN].filter((value): value is string => Boolean(value)).map((value) => new URL(value).origin))];
 const parsedSmtpFrom = env.SMTP_FROM?.match(/^(.*?)\s*<([^<>]+)>$/);
 await initializeEmailService({
   smtpHost: env.SMTP_HOST ?? '',
@@ -1039,7 +1048,7 @@ app.post('/api/auth/login', { config: { rateLimit: { max: 5, timeWindow: '15 min
   return reply.setCookie(cookieName, rawToken, {
     httpOnly: true,
     secure: secureCookie,
-    sameSite: 'lax',
+    sameSite: env.COOKIE_SAME_SITE,
     path: '/',
     maxAge: sessionDurationMs / 1000
   }).send({
@@ -1837,7 +1846,7 @@ app.post('/api/auth/logout', async (request, reply) => {
   const auth = await requireCsrf(request, reply);
   if (!auth) return;
   await prisma.session.delete({ where: { id: auth.session.id } });
-  return reply.clearCookie(cookieName, { path: '/', secure: secureCookie, sameSite: 'lax', httpOnly: true }).send({ ok: true });
+  return reply.clearCookie(cookieName, { path: '/', secure: secureCookie, sameSite: env.COOKIE_SAME_SITE, httpOnly: true }).send({ ok: true });
 });
 
 app.post('/api/device-links/workspaces', { config: { rateLimit: { max: 5, timeWindow: '15 minutes' } } }, async (request, reply) => {

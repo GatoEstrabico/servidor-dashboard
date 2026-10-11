@@ -4,6 +4,8 @@ Servidor da plataforma: API REST em Fastify, PostgreSQL com Prisma e painel aute
 
 Para clonar, configurar e executar todos os componentes, consulte o [guia de instalação](install.md).
 
+O painel web continua funcionando no navegador. Para gerar e instalar o APK Android a partir do mesmo dashboard, consulte o [tutorial de compilacao Android](ANDROID_APK.md).
+
 ## Requisitos
 
 - Node.js 22 ou superior e npm

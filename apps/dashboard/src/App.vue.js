@@ -873,8 +873,9 @@ const warningCount = computed(() => devices.value.filter((device) => device.stat
 const offlineCount = computed(() => devices.value.filter((device) => device.status === 'offline').length);
 const latestReadings = computed(() => devices.value.reduce((total, device) => total + device.readings.length, 0));
 const unreadNotificationCount = computed(() => notifications.value.filter((notification) => !notification.read).length);
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 async function api(path, options = {}) {
-    const response = await fetch(path, {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
         ...options,
         credentials: 'include',
         headers: {
@@ -1105,14 +1106,119 @@ function openUserManagement() {
     userManagementTab.value = 'accounts';
     void loadAdminUsers();
 }
+function resetAccountSessionState() {
+    settingsOpen.value = false;
+    workspaceMenuOpen.value = false;
+    workspaceDialogOpen.value = false;
+    mobileWorkspaceSelectorOpen.value = false;
+    notificationOpen.value = false;
+    managementTab.value = 'overview';
+    activeMobileTab.value = 'home';
+    notificationSectionTab.value = 'configuration';
+    userManagementTab.value = 'members';
+    whatsappTab.value = 'log';
+    emailTab.value = 'log';
+    workspaces.value = [];
+    activeWorkspaceId.value = null;
+    workspaceMembers.value = [];
+    workspaceInvitations.value = [];
+    devices.value = [];
+    simulationValues.value = {};
+    simulationSavingId.value = null;
+    simulationMessages.value = {};
+    pageError.value = '';
+    notifications.value = [];
+    accountLinkedDevices.value = [];
+    accountDevicesLoading.value = false;
+    accountDevicesError.value = '';
+    accountDevicesMessage.value = '';
+    accountDeviceUnlinkingId.value = null;
+    workspaceDeviceTargetId.value = null;
+    workspaceSaving.value = false;
+    search.value = '';
+    expandedDeviceIds.value = [];
+    editingDeviceAliasId.value = null;
+    deviceAliasDraft.value = '';
+    deviceAliasSavingId.value = null;
+    inviteEmail.value = '';
+    inviteRole.value = 'member';
+    inviteError.value = '';
+    inviteMessage.value = '';
+    memberActionsOpenId.value = null;
+    editingMemberId.value = null;
+    editingMemberRole.value = 'member';
+    memberSavingId.value = null;
+    adminUsers.value = [];
+    adminUsersLoading.value = false;
+    adminUsersError.value = '';
+    adminUsersMessage.value = '';
+    adminUserActionId.value = null;
+    userDeletionTarget.value = null;
+    userDeletionConfirmation.value = '';
+    userDeletionError.value = '';
+    userDeletionSaving.value = false;
+    userDeletionMessage.value = '';
+    accountEditTarget.value = null;
+    accountEditName.value = '';
+    accountEditEmail.value = '';
+    accountEditIsPlatformAdmin.value = false;
+    accountEditSaving.value = false;
+    accountEditError.value = '';
+    workspaceDialogAction.value = 'create';
+    workspaceName.value = '';
+    workspaceIconDataUrl.value = null;
+    workspaceIconError.value = '';
+    importWorkspaceCode.value = '';
+    workspaceShareMessage.value = '';
+    profileName.value = '';
+    profileEmail.value = '';
+    profileAvatar.value = null;
+    profileWhatsappCountry.value = 'BR';
+    profileWhatsappNumber.value = '';
+    profileEmailNotifications.value = true;
+    profileWhatsappNotifications.value = false;
+    currentPassword.value = '';
+    newPassword.value = '';
+    newPasswordConfirm.value = '';
+    accountMessage.value = '';
+    accountError.value = '';
+    accountSaving.value = false;
+    notificationMessage.value = '';
+    notificationError.value = '';
+    notificationWorkspaceId.value = null;
+    workspaceAlertPreferences.value = { notifyAllDevices: true, emailNotificationsEnabled: true, whatsappNotificationsEnabled: true, devices: [] };
+    workspaceAlertPreferencesLoading.value = false;
+    workspaceAlertPreferencesSaving.value = false;
+    workspaceAlertPreferencesMessage.value = '';
+    workspaceAlertPreferencesError.value = '';
+    alertSounds.value = [];
+    alertSoundPreferences.value = { online: 'default', warning: 'default', offline: 'default' };
+    alertSoundDraftPreferences.value = { ...alertSoundPreferences.value };
+    alertAudioUploadDataUrl.value = '';
+    alertAudioUploadName.value = '';
+    alertSoundSaving.value = false;
+    alertAudioUploading.value = false;
+    alertSoundError.value = '';
+    alertSoundMessage.value = '';
+    stopAlertSoundPreview();
+    favoriteMediaName.value = '';
+    favoriteMediaDataUrl.value = '';
+    whatsappCloudAccessToken.value = '';
+    whatsappCloudClearAccessToken.value = false;
+    emailPassword.value = '';
+    emailClearPassword.value = false;
+    avatarError.value = '';
+}
 async function loadAccountDevices() {
     accountDevicesLoading.value = true;
     accountDevicesError.value = '';
+    accountLinkedDevices.value = [];
     try {
         const result = await api('/api/account/devices');
         accountLinkedDevices.value = result.devices;
     }
     catch (error) {
+        accountLinkedDevices.value = [];
         accountDevicesError.value = error instanceof Error ? t(error.message) : t('Falha ao carregar aparelhos vinculados.');
     }
     finally {
@@ -2206,6 +2312,7 @@ async function checkSession() {
             api('/api/auth/me'),
             api('/api/auth/registration-settings')
         ]);
+        resetAccountSessionState();
         user.value = meResult.user;
         csrfToken.value = meResult.csrfToken;
         registrationEnabled.value = settingsResult.enabled;
@@ -2217,6 +2324,8 @@ async function checkSession() {
     }
     catch {
         user.value = null;
+        csrfToken.value = '';
+        resetAccountSessionState();
         try {
             const settingsResult = await api('/api/auth/registration-settings');
             registrationEnabled.value = settingsResult.enabled;
@@ -2237,8 +2346,10 @@ async function login() {
             method: 'POST',
             body: JSON.stringify({ email: email.value, password: password.value })
         });
+        resetAccountSessionState();
         user.value = result.user;
         csrfToken.value = result.csrfToken;
+        syncProfileForm();
         password.value = '';
         await loadWorkspaces();
         await loadAlertSoundPreference();
@@ -2728,20 +2839,9 @@ async function logout() {
     try {
         await api('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken.value } });
         user.value = null;
-        workspaces.value = [];
-        activeWorkspaceId.value = null;
-        workspaceMembers.value = [];
-        workspaceInvitations.value = [];
-        registrationEnabled.value = false;
-        devices.value = [];
-        notifications.value = [];
-        alertSounds.value = [];
-        alertSoundPreferences.value = { online: 'default', warning: 'default', offline: 'default' };
-        alertSoundDraftPreferences.value = { ...alertSoundPreferences.value };
-        alertAudioUploadDataUrl.value = '';
-        alertAudioUploadName.value = '';
-        notificationOpen.value = false;
         csrfToken.value = '';
+        resetAccountSessionState();
+        registrationEnabled.value = false;
         pageError.value = '';
     }
     catch (error) {

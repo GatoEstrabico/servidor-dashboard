@@ -3,8 +3,9 @@ dist/
 /android/
 apps/api/.data/
 .data/logs/
-!.env
+.env
 !.env.*
+.env.android.local
 !.env.example
 !.env.android.example
 !.env.production.example

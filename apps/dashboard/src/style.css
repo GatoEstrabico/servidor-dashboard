@@ -236,6 +236,33 @@ button:disabled { cursor: wait; opacity: .7; }
 .device-meta > span svg { grid-row: span 2; color: #718f7b; }
 .device-meta strong { color: #87918b; font-size: 9px; font-weight: 500; }
 .device-readings-detail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.sensor-history { --history-temperature: #d75d49; --history-humidity: #248b83; --history-gas: #c58c32; display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid #e8ece7; }
+.history-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
+.history-heading-copy { display: grid; min-width: max-content; gap: 3px; }
+.history-heading-copy strong { color: #33423a; font-family: Manrope, sans-serif; font-size: 12px; }
+.history-heading-copy span, .history-date-range { color: #87928b; font-size: 9px; }
+.history-range-control { display: flex; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 3px; }
+.history-range-button { min-height: 27px; padding: 0 8px; border: 1px solid #e0e6df; border-radius: 4px; color: #68766d; background: #fff; font-size: 9px; font-weight: 600; cursor: pointer; }
+.history-range-button:hover { border-color: #9bb8a2; color: #286c50; }
+.history-range-button.active { border-color: #3b8061; color: #fff; background: #3b8061; }
+.history-message { display: flex; min-height: 72px; align-items: center; justify-content: center; gap: 8px; color: #7f8b83; font-size: 11px; }
+.history-message.history-error { color: #b34e42; }
+.history-charts { display: grid; gap: 8px; }
+.history-series { display: grid; gap: 2px; }
+.history-series-heading { display: flex; align-items: baseline; gap: 6px; color: #647168; font-size: 10px; }
+.history-series-heading strong { color: #37463d; font-size: 10px; }
+.history-series-temperature .history-series-heading strong { color: var(--history-temperature); }
+.history-series-humidity .history-series-heading strong { color: var(--history-humidity); }
+.history-series-gas .history-series-heading strong { color: var(--history-gas); }
+.history-chart-layout { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: stretch; gap: 5px; }
+.history-scale { display: flex; flex-direction: column; justify-content: space-between; padding: 7px 0 15px; color: #8b968f; font-size: 8px; text-align: right; }
+.history-chart { display: block; width: 100%; height: 92px; overflow: visible; }
+.history-grid-line { stroke: #e6ebe6; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.history-chart-line { fill: none; stroke: #526a5a; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.history-series-temperature .history-chart-line { stroke: var(--history-temperature); }
+.history-series-humidity .history-chart-line { stroke: var(--history-humidity); }
+.history-series-gas .history-chart-line { stroke: var(--history-gas); }
+.history-date-range { display: flex; justify-content: space-between; gap: 12px; margin-left: 47px; }
 .demo-simulation-panel { display: grid; gap: 12px; padding: 13px; border: 1px solid #dce8de; border-top: 2px solid #478d70; border-radius: 5px; background: #f8faf7; }
 .demo-simulation-heading { display: flex; align-items: center; justify-content: space-between; color: #47715a; }
 .demo-simulation-heading > div { display: grid; gap: 3px; }
@@ -649,6 +676,13 @@ button:disabled { cursor: wait; opacity: .7; }
   .device-details { gap: 10px; padding: 11px 10px; }
   .device-meta { grid-template-columns: 1fr; gap: 8px; }
   .device-readings-detail { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .history-header { align-items: flex-start; flex-direction: column; }
+  .history-heading-copy { min-width: 0; }
+  .history-range-control { justify-content: flex-start; }
+  .history-range-button { min-height: 28px; padding: 0 7px; font-size: 8px; }
+  .history-chart-layout { grid-template-columns: 34px minmax(0, 1fr); gap: 4px; }
+  .history-chart { height: 78px; }
+  .history-date-range { margin-left: 38px; font-size: 8px; }
   .demo-simulation-panel { padding: 10px; }
   .demo-simulation-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .demo-simulation-actions { align-items: stretch; flex-direction: column; }
@@ -762,6 +796,18 @@ button:disabled { cursor: wait; opacity: .7; }
 :root.dark-mode .device-details,
 :root.dark-mode .password-settings-form { border-color: #303b35; }
 :root.dark-mode .device-details { background: #1a231f; }
+:root.dark-mode .sensor-history { border-color: #303b35; }
+:root.dark-mode .history-heading-copy strong,
+:root.dark-mode .history-series-heading strong { color: #d6e1d9; }
+:root.dark-mode .history-range-button { border-color: #39463e; color: #b5c2b9; background: #202a25; }
+:root.dark-mode .history-range-button:hover { border-color: #5b886c; color: #a5d6b4; }
+:root.dark-mode .history-range-button.active { border-color: #4b9970; color: #fff; background: #397a5b; }
+:root.dark-mode .history-grid-line { stroke: #354139; }
+:root.dark-mode .history-scale,
+:root.dark-mode .history-heading-copy span,
+:root.dark-mode .history-date-range { color: #a0aea5; }
+:root.dark-mode .history-message { color: #a0aea5; }
+:root.dark-mode .history-series-heading { color: #a0aea5; }
 :root.dark-mode .section-heading p,
 :root.dark-mode .table-count,
 :root.dark-mode .table-footer,

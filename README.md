@@ -32,7 +32,7 @@ O painel web continua funcionando no navegador. Para gerar e instalar o APK Andr
    ```
 
 4. Instale dependencias com `npm.cmd install`. No PowerShell, use o sufixo `.cmd` se a politica de execucao bloquear o script `npm.ps1`; alternativamente, use Prompt de Comando (cmd).
-5. Gere o Prisma Client e crie as tabelas: `npm.cmd run db:generate` e `npm.cmd run db:push`.
+5. Crie/atualize as tabelas e gere o Prisma Client: `npm.cmd run db:push`.
 6. Crie/atualize o usuario administrador: `npm.cmd run db:seed`.
 7. Inicie API e painel: `npm.cmd run dev`.
 
@@ -61,7 +61,7 @@ O Docker Compose incluído é opcional e não é necessário para executar o pro
 - Configure as variáveis SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`) para recuperação de senha e alertas de alarme por e-mail.
 - Alertas de alarme são disparados quando o estado do aparelho muda. E-mail vai para contas com essa opção ativada; WhatsApp é opcional e configurado individualmente no perfil.
 - Para WhatsApp, configure `WHATSAPP_ACCESS_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID` da Meta Cloud API no `.env`, crie/aprove um modelo Utility chamado `lab_monitor_alarm` com o corpo `Alerta de monitoramento: {{1}} está {{2}}. Localização: {{3}}.` e idioma `pt_BR`. O usuário precisa informar o número internacional e ativar WhatsApp no perfil. A Meta pode aplicar preços/limites conforme a conta e a política vigente.
-- Depois de alterar o schema Prisma, execute `npm.cmd run db:generate` e `npm.cmd run db:push`. A atualização adiciona os campos de número e preferência de notificação às contas existentes.
+- Depois de alterar o schema Prisma, execute `npm.cmd run db:push`; o comando atualiza as tabelas e gera o Prisma Client. Para gerar o client sem alterar o banco, execute `npm.cmd run db:generate`.
 - O perfil permite alterar nome, e-mail, foto e preferências de notificação; essas alterações e a troca de senha exigem a senha atual. A redefinição pelo link encerra todas as sessões existentes.
 
 ## API

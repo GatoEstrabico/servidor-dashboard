@@ -1,5 +1,6 @@
 node_modules/
 dist/
+apps/api/src/generated/
 /android/
 apps/api/.data/
 .data/logs/

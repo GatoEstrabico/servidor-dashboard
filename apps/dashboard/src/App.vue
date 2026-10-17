@@ -60,6 +60,10 @@ type EmailNotificationDraft = Pick<EmailNotificationSettings, 'onlineMessage' | 
 type EmailSmtpDraft = Pick<EmailNotificationSettings, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'senderName' | 'senderEmail'> & { passwordConfigured: boolean };
 type EmailLogEntry = { id: number; createdAt: string; level: 'info' | 'success' | 'error'; event: string; details: string };
 type Reading = { id: string; type: string; value: number; unit: string; alert: boolean; recordedAt: string };
+type SensorHistoryRange = 'all' | '6m' | '30d' | '15d' | '7d' | '1d';
+type SensorHistoryKey = 'temperature' | 'humidity' | 'gas';
+type SensorHistoryPoint = { recordedAt: string; temperature: number | null; humidity: number | null; gas: number | null };
+type DeviceHistory = { loading: boolean; error: string; from: string | null; to: string; points: SensorHistoryPoint[] };
 type Device = {
   id: string;
   externalId: string;
@@ -326,6 +330,9 @@ const avatarError = ref('');
 const refreshedAt = ref(new Date());
 const activeMobileTab = ref('home');
 const expandedDeviceIds = ref<string[]>([]);
+const selectedHistoryRange = ref<SensorHistoryRange>('30d');
+const deviceHistories = ref<Record<string, DeviceHistory>>({});
+const historyRequestVersions = new Map<string, number>();
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let deviceEvents: EventSource | null = null;
 let deviceRefreshInProgress = false;
@@ -423,6 +430,19 @@ const englishText: Record<string, string> = {
   'Identificador': 'Identifier',
   'Ultimo contato': 'Last seen',
   'Sem leitura': 'No reading',
+  'Histórico de variações': 'Sensor history',
+  'Período do histórico': 'History period',
+  'Tudo': 'All time',
+  '6 meses': '6 months',
+  '30 dias': '30 days',
+  '15 dias': '15 days',
+  '7 dias': '7 days',
+  '1 dia': '1 day',
+  'Carregando histórico...': 'Loading history...',
+  'Nenhuma leitura neste período.': 'No readings in this period.',
+  'Não foi possível carregar o histórico.': 'Could not load history.',
+  'pontos no período': 'points in period',
+  'Gás (ADC)': 'Gas (ADC)',
   'Nenhum aparelho encontrado': 'No devices found',
   'Nenhum aparelho conectado': 'No connected devices',
   'Tente outro termo de busca.': 'Try another search term.',
@@ -1118,6 +1138,7 @@ async function openDeviceNotification(notification: DeviceNotification) {
   if (!expandedDeviceIds.value.includes(notification.deviceId)) {
     expandedDeviceIds.value = [...expandedDeviceIds.value, notification.deviceId];
   }
+  void loadDeviceHistory(notification.deviceId);
   window.setTimeout(() => {
     document.getElementById(`device-${notification.deviceId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, 0);
@@ -1233,6 +1254,8 @@ function resetAccountSessionState() {
   workspaceMembers.value = [];
   workspaceInvitations.value = [];
   devices.value = [];
+  deviceHistories.value = {};
+  historyRequestVersions.clear();
   simulationValues.value = {};
   simulationSavingId.value = null;
   simulationMessages.value = {};
@@ -2964,9 +2987,113 @@ function isDeviceExpanded(deviceId: string) {
 }
 
 function toggleDevice(deviceId: string) {
-  expandedDeviceIds.value = isDeviceExpanded(deviceId)
-    ? expandedDeviceIds.value.filter((id) => id !== deviceId)
-    : [...expandedDeviceIds.value, deviceId];
+  if (isDeviceExpanded(deviceId)) {
+    historyRequestVersions.set(deviceId, (historyRequestVersions.get(deviceId) ?? 0) + 1);
+    expandedDeviceIds.value = expandedDeviceIds.value.filter((id) => id !== deviceId);
+    return;
+  }
+  expandedDeviceIds.value = [...expandedDeviceIds.value, deviceId];
+  void loadDeviceHistory(deviceId);
+}
+
+async function loadDeviceHistory(deviceId: string, range = selectedHistoryRange.value) {
+  const requestVersion = (historyRequestVersions.get(deviceId) ?? 0) + 1;
+  const workspaceId = activeWorkspaceId.value;
+  historyRequestVersions.set(deviceId, requestVersion);
+  const previous = deviceHistories.value[deviceId];
+  deviceHistories.value = {
+    ...deviceHistories.value,
+    [deviceId]: {
+      loading: true,
+      error: '',
+      from: previous?.from ?? null,
+      to: previous?.to ?? new Date().toISOString(),
+      points: previous?.points ?? []
+    }
+  };
+  try {
+    const result = await api<{ from: string | null; to: string; points: SensorHistoryPoint[] }>(
+      `/api/devices/${encodeURIComponent(deviceId)}/history?range=${range}`
+    );
+    if (historyRequestVersions.get(deviceId) !== requestVersion || selectedHistoryRange.value !== range || activeWorkspaceId.value !== workspaceId) return;
+    deviceHistories.value = { ...deviceHistories.value, [deviceId]: { loading: false, error: '', ...result } };
+  } catch (error) {
+    if (historyRequestVersions.get(deviceId) !== requestVersion || selectedHistoryRange.value !== range || activeWorkspaceId.value !== workspaceId) return;
+    deviceHistories.value = {
+      ...deviceHistories.value,
+      [deviceId]: {
+        loading: false,
+        error: error instanceof Error ? error.message : t('Não foi possível carregar o histórico.'),
+        from: previous?.from ?? null,
+        to: previous?.to ?? new Date().toISOString(),
+        points: previous?.points ?? []
+      }
+    };
+  }
+}
+
+function changeHistoryRange(range: SensorHistoryRange) {
+  if (selectedHistoryRange.value === range) return;
+  selectedHistoryRange.value = range;
+  for (const deviceId of expandedDeviceIds.value) void loadDeviceHistory(deviceId, range);
+}
+
+const historyRanges: Array<{ value: SensorHistoryRange; label: string }> = [
+  { value: 'all', label: 'Tudo' },
+  { value: '6m', label: '6 meses' },
+  { value: '30d', label: '30 dias' },
+  { value: '15d', label: '15 dias' },
+  { value: '7d', label: '7 dias' },
+  { value: '1d', label: '1 dia' }
+];
+
+const sensorHistorySeries = computed(() => [
+  { key: 'temperature' as const, label: t('Temperatura'), unit: '°C', className: 'temperature' },
+  { key: 'humidity' as const, label: t('Umidade'), unit: '%', className: 'humidity' },
+  { key: 'gas' as const, label: t('Gás'), unit: 'ADC', className: 'gas' }
+]);
+
+function sensorHistoryChart(history: DeviceHistory, key: SensorHistoryKey) {
+  const points = history.points;
+  const values = points.map((point) => point[key]).filter((value): value is number => value !== null && Number.isFinite(value));
+  if (!values.length) return { path: '', minimum: null, maximum: null, count: 0 };
+  const startTime = Date.parse(history.from ?? points[0].recordedAt);
+  const endTime = Date.parse(history.to);
+  const timeSpan = Math.max(1, endTime - startTime);
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const padding = minimum === maximum ? Math.abs(minimum) * 0.04 || 1 : 0;
+  const lower = minimum - padding;
+  const span = maximum - minimum + padding * 2 || 1;
+  const segments: string[] = [];
+  let segment: string[] = [];
+  points.forEach((point) => {
+    const value = point[key];
+    if (value === null || !Number.isFinite(value)) {
+      if (segment.length) segments.push(segment.join(' '));
+      segment = [];
+      return;
+    }
+    const pointTime = Date.parse(point.recordedAt);
+    const timeRatio = Number.isFinite(pointTime) ? (pointTime - startTime) / timeSpan : 0;
+    const x = 54 + Math.min(1, Math.max(0, timeRatio)) * 686;
+    const y = 102 - (value - lower) / span * 84;
+    segment.push(`${segment.length ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`);
+  });
+  if (segment.length) segments.push(segment.join(' '));
+  return { path: segments.join(' '), minimum, maximum, count: values.length };
+}
+
+function formatHistoryValue(value: number | null, key: SensorHistoryKey) {
+  if (value === null) return '--';
+  return new Intl.NumberFormat(dateLocale.value, {
+    maximumFractionDigits: key === 'gas' ? 0 : 1
+  }).format(value);
+}
+
+function formatHistoryDate(timestamp: string | undefined) {
+  if (!timestamp) return '--';
+  return new Intl.DateTimeFormat(dateLocale.value, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(timestamp));
 }
 
 function deviceStatusIcon(status: Device['status']) {
@@ -3874,6 +4001,43 @@ onUnmounted(() => {
                     <span v-if="sensor.reading" class="sensor-reading-time">{{ formatTime(sensor.reading.recordedAt) }}</span>
                   </article>
                 </div>
+                <section class="sensor-history" :aria-label="t('Histórico de variações')">
+                  <header class="history-header">
+                    <div class="history-heading-copy">
+                      <strong>{{ t('Histórico de variações') }}</strong>
+                      <span v-if="deviceHistories[device.id] && !deviceHistories[device.id].loading">{{ deviceHistories[device.id].points.length }} {{ t('pontos no período') }}</span>
+                    </div>
+                    <div class="history-range-control" role="group" :aria-label="t('Período do histórico')">
+                      <button
+                        v-for="range in historyRanges"
+                        :key="range.value"
+                        class="history-range-button"
+                        :class="{ active: selectedHistoryRange === range.value }"
+                        type="button"
+                        :aria-pressed="selectedHistoryRange === range.value"
+                        @click.stop="changeHistoryRange(range.value)"
+                      >{{ t(range.label) }}</button>
+                    </div>
+                  </header>
+                  <div v-if="deviceHistories[device.id]?.loading" class="history-message" role="status"><LoaderCircle class="spin" :size="15" />{{ t('Carregando histórico...') }}</div>
+                  <div v-else-if="deviceHistories[device.id]?.error" class="history-message history-error" role="alert">{{ t(deviceHistories[device.id].error) }}</div>
+                  <div v-else-if="!deviceHistories[device.id]?.points.length" class="history-message">{{ t('Nenhuma leitura neste período.') }}</div>
+                  <div v-else class="history-charts">
+                    <article v-for="series in sensorHistorySeries" :key="series.key" class="history-series" :class="`history-series-${series.className}`">
+                      <div class="history-series-heading"><strong>{{ series.label }}</strong><span>{{ series.unit }}</span></div>
+                      <div class="history-chart-layout">
+                        <div class="history-scale"><span>{{ formatHistoryValue(sensorHistoryChart(deviceHistories[device.id], series.key).maximum, series.key) }}</span><span>{{ formatHistoryValue(sensorHistoryChart(deviceHistories[device.id], series.key).minimum, series.key) }}</span></div>
+                        <svg class="history-chart" viewBox="0 0 760 118" preserveAspectRatio="none" role="img" :aria-label="`${t('Histórico de variações')}: ${series.label}`">
+                          <line class="history-grid-line" x1="52" y1="16" x2="740" y2="16" />
+                          <line class="history-grid-line" x1="52" y1="59" x2="740" y2="59" />
+                          <line class="history-grid-line" x1="52" y1="102" x2="740" y2="102" />
+                          <path class="history-chart-line" :d="sensorHistoryChart(deviceHistories[device.id], series.key).path" />
+                        </svg>
+                      </div>
+                    </article>
+                    <div class="history-date-range"><span>{{ formatHistoryDate(deviceHistories[device.id].from ?? undefined) }}</span><span>{{ formatHistoryDate(deviceHistories[device.id].to) }}</span></div>
+                  </div>
+                </section>
                 <section v-if="device.canSimulate && simulationValues[device.id]" class="demo-simulation-panel" :aria-label="t('Simular leituras')">
                   <div class="demo-simulation-heading"><div><strong>{{ t('Simular leituras') }}</strong><small>{{ deviceDisplayName(device) }}</small></div><Cpu :size="17" /></div>
                   <div class="demo-simulation-fields">

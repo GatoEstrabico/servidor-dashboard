@@ -1,7 +1,6 @@
 import dotenv from 'dotenv';
 import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import argon2 from 'argon2';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
@@ -31,6 +30,7 @@ import {
   createWorkspaceSchema,
   deviceLinkLoginSchema,
   forgotPasswordSchema,
+  historicalIngestionSchema,
   ingestionSchema,
   inviteWorkspaceMemberSchema,
   joinWorkspaceSchema,
@@ -38,6 +38,7 @@ import {
   registrationSchema,
   registrationSettingSchema,
   resetPasswordSchema,
+  sensorHistoryRangeSchema,
   simulateDemoDeviceSchema,
   tokenSchema,
   deviceLinkWorkspacesSchema,
@@ -99,7 +100,7 @@ import {
   saveWhatsAppCloudSettings
 } from './lib/whatsapp-cloud-service.js';
 
-dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env') });
+dotenv.config({ path: resolve(process.cwd(), '../../.env') });
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -1974,6 +1975,69 @@ app.get('/api/devices', async (request, reply) => {
   };
 });
 
+app.get<{ Params: { deviceId: string } }>('/api/devices/:deviceId/history', async (request, reply) => {
+  const auth = await requireSession(request, reply);
+  if (!auth) return;
+  const workspaceId = auth.user.activeWorkspaceId;
+  if (!workspaceId) return reply.code(409).send({ error: 'Selecione ou crie um ambiente.' });
+
+  const parsedQuery = sensorHistoryRangeSchema.safeParse(request.query);
+  if (!parsedQuery.success) return reply.code(400).send({ error: 'Intervalo de historico invalido.' });
+  const { range } = parsedQuery.data;
+  const device = await prisma.device.findFirst({
+    where: { id: request.params.deviceId, workspaceId },
+    select: { id: true }
+  });
+  if (!device) return reply.code(404).send({ error: 'Aparelho nao encontrado neste ambiente.' });
+
+  const now = new Date();
+  const earliestReading = await prisma.reading.aggregate({
+    where: { deviceId: device.id, type: { in: ['temperatura', 'umidade', 'gas_adc'] }, recordedAt: { lte: now } },
+    _min: { recordedAt: true }
+  });
+  if (!earliestReading._min.recordedAt) {
+    return { range, from: null, to: now.toISOString(), bucketSeconds: 60, points: [] };
+  }
+
+  const requestedStart = new Date(now);
+  if (range === '6m') requestedStart.setUTCMonth(requestedStart.getUTCMonth() - 6);
+  if (range === '30d') requestedStart.setUTCDate(requestedStart.getUTCDate() - 30);
+  if (range === '15d') requestedStart.setUTCDate(requestedStart.getUTCDate() - 15);
+  if (range === '7d') requestedStart.setUTCDate(requestedStart.getUTCDate() - 7);
+  if (range === '1d') requestedStart.setUTCDate(requestedStart.getUTCDate() - 1);
+  const from = range === 'all' || earliestReading._min.recordedAt > requestedStart
+    ? earliestReading._min.recordedAt
+    : requestedStart;
+  const durationSeconds = Math.max(1, Math.ceil((now.getTime() - from.getTime()) / 1000));
+  const bucketSeconds = Math.max(60, Math.ceil(durationSeconds / 500 / 60) * 60);
+  const groupedReadings = await prisma.$queryRaw<Array<{ type: string; bucketEpoch: bigint; value: number }>>`
+    SELECT "type",
+      (FLOOR(EXTRACT(EPOCH FROM "recordedAt") / ${bucketSeconds}) * ${bucketSeconds})::bigint AS "bucketEpoch",
+      AVG("value")::double precision AS "value"
+    FROM "Reading"
+    WHERE "deviceId" = ${device.id}
+      AND "type" IN ('temperatura', 'umidade', 'gas_adc')
+      AND "recordedAt" >= ${from}
+      AND "recordedAt" <= ${now}
+    GROUP BY "type", "bucketEpoch"
+    ORDER BY "bucketEpoch" ASC
+  `;
+  const pointsByBucket = new Map<number, { recordedAt: string; temperature: number | null; humidity: number | null; gas: number | null }>();
+  for (const reading of groupedReadings) {
+    const epoch = Number(reading.bucketEpoch);
+    let point = pointsByBucket.get(epoch);
+    if (!point) {
+      point = { recordedAt: new Date(epoch * 1000).toISOString(), temperature: null, humidity: null, gas: null };
+      pointsByBucket.set(epoch, point);
+    }
+    if (reading.type === 'temperatura') point.temperature = reading.value;
+    if (reading.type === 'umidade') point.humidity = reading.value;
+    if (reading.type === 'gas_adc') point.gas = reading.value;
+  }
+
+  return { range, from: from.toISOString(), to: now.toISOString(), bucketSeconds, points: [...pointsByBucket.values()] };
+});
+
 app.get('/api/notifications', async (request, reply) => {
   const auth = await requireSession(request, reply);
   if (!auth) return;
@@ -2326,6 +2390,49 @@ app.post('/api/ingest/devices', async (request, reply) => {
     await notifyAlarmStatusChange(device, device.status);
   }
   return reply.code(201).send({ device, readingsStored: payload.readings.length });
+});
+
+app.post('/api/ingest/devices/history', async (request, reply) => {
+  const authorization = request.headers.authorization ?? '';
+  const suppliedToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  const deviceLink = suppliedToken
+    ? await prisma.deviceLink.findUnique({ where: { tokenHash: hash(suppliedToken) }, include: { device: true } })
+    : null;
+  if (!deviceLink) return reply.code(401).send({ error: 'Chave de ingestao invalida.' });
+
+  const parsed = historicalIngestionSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'Lote historico invalido.', details: parsed.error.flatten() });
+  const payload = parsed.data;
+  if (deviceLink.device.externalId !== payload.externalId) {
+    return reply.code(403).send({ error: 'Este token nao pode enviar dados para outro aparelho.' });
+  }
+
+  const timestamps = [...new Set(payload.readings.map((reading) => new Date(reading.recordedAt).getTime()))].map((timestamp) => new Date(timestamp));
+  const existingReadings = await prisma.reading.findMany({
+    where: { deviceId: deviceLink.deviceId, type: { in: ['temperatura', 'umidade', 'gas_adc'] }, recordedAt: { in: timestamps } },
+    select: { type: true, recordedAt: true }
+  });
+  const existingKeys = new Set(existingReadings.map((reading) => `${reading.type}:${reading.recordedAt.getTime()}`));
+  const newReadings = payload.readings.filter((reading) => {
+    const key = `${reading.type}:${new Date(reading.recordedAt).getTime()}`;
+    if (existingKeys.has(key)) return false;
+    existingKeys.add(key);
+    return true;
+  });
+  if (newReadings.length) {
+    await prisma.reading.createMany({
+      data: newReadings.map((reading) => ({
+        deviceId: deviceLink.deviceId,
+        type: reading.type,
+        value: reading.value,
+        unit: reading.unit,
+        alert: reading.alert,
+        recordedAt: new Date(reading.recordedAt)
+      }))
+    });
+    publishDeviceUpdate(deviceLink.device.workspaceId);
+  }
+  return reply.code(201).send({ readingsStored: newReadings.length, duplicatesSkipped: payload.readings.length - newReadings.length });
 });
 
 app.setErrorHandler((error, _request, reply) => {

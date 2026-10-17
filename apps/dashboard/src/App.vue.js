@@ -233,6 +233,9 @@ const avatarError = ref('');
 const refreshedAt = ref(new Date());
 const activeMobileTab = ref('home');
 const expandedDeviceIds = ref([]);
+const selectedHistoryRange = ref('30d');
+const deviceHistories = ref({});
+const historyRequestVersions = new Map();
 let refreshTimer;
 let deviceEvents = null;
 let deviceRefreshInProgress = false;
@@ -329,6 +332,19 @@ const englishText = {
     'Identificador': 'Identifier',
     'Ultimo contato': 'Last seen',
     'Sem leitura': 'No reading',
+    'Histórico de variações': 'Sensor history',
+    'Período do histórico': 'History period',
+    'Tudo': 'All time',
+    '6 meses': '6 months',
+    '30 dias': '30 days',
+    '15 dias': '15 days',
+    '7 dias': '7 days',
+    '1 dia': '1 day',
+    'Carregando histórico...': 'Loading history...',
+    'Nenhuma leitura neste período.': 'No readings in this period.',
+    'Não foi possível carregar o histórico.': 'Could not load history.',
+    'pontos no período': 'points in period',
+    'Gás (ADC)': 'Gas (ADC)',
     'Nenhum aparelho encontrado': 'No devices found',
     'Nenhum aparelho conectado': 'No connected devices',
     'Tente outro termo de busca.': 'Try another search term.',
@@ -1024,6 +1040,7 @@ async function openDeviceNotification(notification) {
     if (!expandedDeviceIds.value.includes(notification.deviceId)) {
         expandedDeviceIds.value = [...expandedDeviceIds.value, notification.deviceId];
     }
+    void loadDeviceHistory(notification.deviceId);
     window.setTimeout(() => {
         document.getElementById(`device-${notification.deviceId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 0);
@@ -1142,6 +1159,8 @@ function resetAccountSessionState() {
     workspaceMembers.value = [];
     workspaceInvitations.value = [];
     devices.value = [];
+    deviceHistories.value = {};
+    historyRequestVersions.clear();
     simulationValues.value = {};
     simulationSavingId.value = null;
     simulationMessages.value = {};
@@ -2960,9 +2979,114 @@ function isDeviceExpanded(deviceId) {
     return expandedDeviceIds.value.includes(deviceId);
 }
 function toggleDevice(deviceId) {
-    expandedDeviceIds.value = isDeviceExpanded(deviceId)
-        ? expandedDeviceIds.value.filter((id) => id !== deviceId)
-        : [...expandedDeviceIds.value, deviceId];
+    if (isDeviceExpanded(deviceId)) {
+        historyRequestVersions.set(deviceId, (historyRequestVersions.get(deviceId) ?? 0) + 1);
+        expandedDeviceIds.value = expandedDeviceIds.value.filter((id) => id !== deviceId);
+        return;
+    }
+    expandedDeviceIds.value = [...expandedDeviceIds.value, deviceId];
+    void loadDeviceHistory(deviceId);
+}
+async function loadDeviceHistory(deviceId, range = selectedHistoryRange.value) {
+    const requestVersion = (historyRequestVersions.get(deviceId) ?? 0) + 1;
+    const workspaceId = activeWorkspaceId.value;
+    historyRequestVersions.set(deviceId, requestVersion);
+    const previous = deviceHistories.value[deviceId];
+    deviceHistories.value = {
+        ...deviceHistories.value,
+        [deviceId]: {
+            loading: true,
+            error: '',
+            from: previous?.from ?? null,
+            to: previous?.to ?? new Date().toISOString(),
+            points: previous?.points ?? []
+        }
+    };
+    try {
+        const result = await api(`/api/devices/${encodeURIComponent(deviceId)}/history?range=${range}`);
+        if (historyRequestVersions.get(deviceId) !== requestVersion || selectedHistoryRange.value !== range || activeWorkspaceId.value !== workspaceId)
+            return;
+        deviceHistories.value = { ...deviceHistories.value, [deviceId]: { loading: false, error: '', ...result } };
+    }
+    catch (error) {
+        if (historyRequestVersions.get(deviceId) !== requestVersion || selectedHistoryRange.value !== range || activeWorkspaceId.value !== workspaceId)
+            return;
+        deviceHistories.value = {
+            ...deviceHistories.value,
+            [deviceId]: {
+                loading: false,
+                error: error instanceof Error ? error.message : t('Não foi possível carregar o histórico.'),
+                from: previous?.from ?? null,
+                to: previous?.to ?? new Date().toISOString(),
+                points: previous?.points ?? []
+            }
+        };
+    }
+}
+function changeHistoryRange(range) {
+    if (selectedHistoryRange.value === range)
+        return;
+    selectedHistoryRange.value = range;
+    for (const deviceId of expandedDeviceIds.value)
+        void loadDeviceHistory(deviceId, range);
+}
+const historyRanges = [
+    { value: 'all', label: 'Tudo' },
+    { value: '6m', label: '6 meses' },
+    { value: '30d', label: '30 dias' },
+    { value: '15d', label: '15 dias' },
+    { value: '7d', label: '7 dias' },
+    { value: '1d', label: '1 dia' }
+];
+const sensorHistorySeries = computed(() => [
+    { key: 'temperature', label: t('Temperatura'), unit: '°C', className: 'temperature' },
+    { key: 'humidity', label: t('Umidade'), unit: '%', className: 'humidity' },
+    { key: 'gas', label: t('Gás'), unit: 'ADC', className: 'gas' }
+]);
+function sensorHistoryChart(history, key) {
+    const points = history.points;
+    const values = points.map((point) => point[key]).filter((value) => value !== null && Number.isFinite(value));
+    if (!values.length)
+        return { path: '', minimum: null, maximum: null, count: 0 };
+    const startTime = Date.parse(history.from ?? points[0].recordedAt);
+    const endTime = Date.parse(history.to);
+    const timeSpan = Math.max(1, endTime - startTime);
+    const minimum = Math.min(...values);
+    const maximum = Math.max(...values);
+    const padding = minimum === maximum ? Math.abs(minimum) * 0.04 || 1 : 0;
+    const lower = minimum - padding;
+    const span = maximum - minimum + padding * 2 || 1;
+    const segments = [];
+    let segment = [];
+    points.forEach((point) => {
+        const value = point[key];
+        if (value === null || !Number.isFinite(value)) {
+            if (segment.length)
+                segments.push(segment.join(' '));
+            segment = [];
+            return;
+        }
+        const pointTime = Date.parse(point.recordedAt);
+        const timeRatio = Number.isFinite(pointTime) ? (pointTime - startTime) / timeSpan : 0;
+        const x = 54 + Math.min(1, Math.max(0, timeRatio)) * 686;
+        const y = 102 - (value - lower) / span * 84;
+        segment.push(`${segment.length ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`);
+    });
+    if (segment.length)
+        segments.push(segment.join(' '));
+    return { path: segments.join(' '), minimum, maximum, count: values.length };
+}
+function formatHistoryValue(value, key) {
+    if (value === null)
+        return '--';
+    return new Intl.NumberFormat(dateLocale.value, {
+        maximumFractionDigits: key === 'gas' ? 0 : 1
+    }).format(value);
+}
+function formatHistoryDate(timestamp) {
+    if (!timestamp)
+        return '--';
+    return new Intl.DateTimeFormat(dateLocale.value, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(timestamp));
 }
 function deviceStatusIcon(status) {
     if (status === 'online')
@@ -9075,6 +9199,158 @@ else {
                             (__VLS_ctx.formatTime(sensor.reading.recordedAt));
                         }
                     }
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+                        ...{ class: "sensor-history" },
+                        'aria-label': (__VLS_ctx.t('Histórico de variações')),
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.header, __VLS_intrinsicElements.header)({
+                        ...{ class: "history-header" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        ...{ class: "history-heading-copy" },
+                    });
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                    (__VLS_ctx.t('Histórico de variações'));
+                    if (__VLS_ctx.deviceHistories[device.id] && !__VLS_ctx.deviceHistories[device.id].loading) {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                        (__VLS_ctx.deviceHistories[device.id].points.length);
+                        (__VLS_ctx.t('pontos no período'));
+                    }
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                        ...{ class: "history-range-control" },
+                        role: "group",
+                        'aria-label': (__VLS_ctx.t('Período do histórico')),
+                    });
+                    for (const [range] of __VLS_getVForSourceType((__VLS_ctx.historyRanges))) {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                            ...{ onClick: (...[$event]) => {
+                                    if (!!(__VLS_ctx.loading))
+                                        return;
+                                    if (!!(__VLS_ctx.serverUnavailable))
+                                        return;
+                                    if (!!(!__VLS_ctx.user))
+                                        return;
+                                    if (!!(__VLS_ctx.managementTab === 'users' && __VLS_ctx.canManageUserAccounts))
+                                        return;
+                                    if (!!(__VLS_ctx.managementTab === 'notifications'))
+                                        return;
+                                    if (!!(__VLS_ctx.managementTab === 'whatsapp' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                                        return;
+                                    if (!!(__VLS_ctx.managementTab === 'email' && __VLS_ctx.isWhatsAppDashboardAdmin))
+                                        return;
+                                    if (!(__VLS_ctx.filteredDevices.length))
+                                        return;
+                                    if (!(__VLS_ctx.isDeviceExpanded(device.id)))
+                                        return;
+                                    __VLS_ctx.changeHistoryRange(range.value);
+                                } },
+                            key: (range.value),
+                            ...{ class: "history-range-button" },
+                            ...{ class: ({ active: __VLS_ctx.selectedHistoryRange === range.value }) },
+                            type: "button",
+                            'aria-pressed': (__VLS_ctx.selectedHistoryRange === range.value),
+                        });
+                        (__VLS_ctx.t(range.label));
+                    }
+                    if (__VLS_ctx.deviceHistories[device.id]?.loading) {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                            ...{ class: "history-message" },
+                            role: "status",
+                        });
+                        const __VLS_534 = {}.LoaderCircle;
+                        /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
+                        // @ts-ignore
+                        const __VLS_535 = __VLS_asFunctionalComponent(__VLS_534, new __VLS_534({
+                            ...{ class: "spin" },
+                            size: (15),
+                        }));
+                        const __VLS_536 = __VLS_535({
+                            ...{ class: "spin" },
+                            size: (15),
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_535));
+                        (__VLS_ctx.t('Carregando histórico...'));
+                    }
+                    else if (__VLS_ctx.deviceHistories[device.id]?.error) {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                            ...{ class: "history-message history-error" },
+                            role: "alert",
+                        });
+                        (__VLS_ctx.t(__VLS_ctx.deviceHistories[device.id].error));
+                    }
+                    else if (!__VLS_ctx.deviceHistories[device.id]?.points.length) {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                            ...{ class: "history-message" },
+                        });
+                        (__VLS_ctx.t('Nenhuma leitura neste período.'));
+                    }
+                    else {
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                            ...{ class: "history-charts" },
+                        });
+                        for (const [series] of __VLS_getVForSourceType((__VLS_ctx.sensorHistorySeries))) {
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.article, __VLS_intrinsicElements.article)({
+                                key: (series.key),
+                                ...{ class: "history-series" },
+                                ...{ class: (`history-series-${series.className}`) },
+                            });
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                                ...{ class: "history-series-heading" },
+                            });
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+                            (series.label);
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                            (series.unit);
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                                ...{ class: "history-chart-layout" },
+                            });
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                                ...{ class: "history-scale" },
+                            });
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                            (__VLS_ctx.formatHistoryValue(__VLS_ctx.sensorHistoryChart(__VLS_ctx.deviceHistories[device.id], series.key).maximum, series.key));
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                            (__VLS_ctx.formatHistoryValue(__VLS_ctx.sensorHistoryChart(__VLS_ctx.deviceHistories[device.id], series.key).minimum, series.key));
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.svg, __VLS_intrinsicElements.svg)({
+                                ...{ class: "history-chart" },
+                                viewBox: "0 0 760 118",
+                                preserveAspectRatio: "none",
+                                role: "img",
+                                'aria-label': (`${__VLS_ctx.t('Histórico de variações')}: ${series.label}`),
+                            });
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.line)({
+                                ...{ class: "history-grid-line" },
+                                x1: "52",
+                                y1: "16",
+                                x2: "740",
+                                y2: "16",
+                            });
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.line)({
+                                ...{ class: "history-grid-line" },
+                                x1: "52",
+                                y1: "59",
+                                x2: "740",
+                                y2: "59",
+                            });
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.line)({
+                                ...{ class: "history-grid-line" },
+                                x1: "52",
+                                y1: "102",
+                                x2: "740",
+                                y2: "102",
+                            });
+                            __VLS_asFunctionalElement(__VLS_intrinsicElements.path)({
+                                ...{ class: "history-chart-line" },
+                                d: (__VLS_ctx.sensorHistoryChart(__VLS_ctx.deviceHistories[device.id], series.key).path),
+                            });
+                        }
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                            ...{ class: "history-date-range" },
+                        });
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                        (__VLS_ctx.formatHistoryDate(__VLS_ctx.deviceHistories[device.id].from ?? undefined));
+                        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                        (__VLS_ctx.formatHistoryDate(__VLS_ctx.deviceHistories[device.id].to));
+                    }
                     if (device.canSimulate && __VLS_ctx.simulationValues[device.id]) {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
                             ...{ class: "demo-simulation-panel" },
@@ -9088,15 +9364,15 @@ else {
                         (__VLS_ctx.t('Simular leituras'));
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
                         (__VLS_ctx.deviceDisplayName(device));
-                        const __VLS_534 = {}.Cpu;
+                        const __VLS_538 = {}.Cpu;
                         /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                         // @ts-ignore
-                        const __VLS_535 = __VLS_asFunctionalComponent(__VLS_534, new __VLS_534({
+                        const __VLS_539 = __VLS_asFunctionalComponent(__VLS_538, new __VLS_538({
                             size: (17),
                         }));
-                        const __VLS_536 = __VLS_535({
+                        const __VLS_540 = __VLS_539({
                             size: (17),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_535));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_539));
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                             ...{ class: "demo-simulation-fields" },
                         });
@@ -9191,17 +9467,17 @@ else {
                             disabled: (__VLS_ctx.simulationSavingId === device.id),
                         });
                         if (__VLS_ctx.simulationSavingId === device.id) {
-                            const __VLS_538 = {}.LoaderCircle;
+                            const __VLS_542 = {}.LoaderCircle;
                             /** @type {[typeof __VLS_components.LoaderCircle, ]} */ ;
                             // @ts-ignore
-                            const __VLS_539 = __VLS_asFunctionalComponent(__VLS_538, new __VLS_538({
+                            const __VLS_543 = __VLS_asFunctionalComponent(__VLS_542, new __VLS_542({
                                 ...{ class: "spin" },
                                 size: (16),
                             }));
-                            const __VLS_540 = __VLS_539({
+                            const __VLS_544 = __VLS_543({
                                 ...{ class: "spin" },
                                 size: (16),
-                            }, ...__VLS_functionalComponentArgsRest(__VLS_539));
+                            }, ...__VLS_functionalComponentArgsRest(__VLS_543));
                         }
                         (__VLS_ctx.t('Aplicar simulação'));
                     }
@@ -9215,15 +9491,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "empty-icon" },
             });
-            const __VLS_542 = {}.Cpu;
+            const __VLS_546 = {}.Cpu;
             /** @type {[typeof __VLS_components.Cpu, ]} */ ;
             // @ts-ignore
-            const __VLS_543 = __VLS_asFunctionalComponent(__VLS_542, new __VLS_542({
+            const __VLS_547 = __VLS_asFunctionalComponent(__VLS_546, new __VLS_546({
                 size: (22),
             }));
-            const __VLS_544 = __VLS_543({
+            const __VLS_548 = __VLS_547({
                 size: (22),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_543));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_547));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
             (__VLS_ctx.t(__VLS_ctx.search ? 'Nenhum aparelho encontrado' : 'Nenhum aparelho conectado'));
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -9271,15 +9547,15 @@ else {
         href: "#inicio",
         'aria-current': (__VLS_ctx.activeMobileTab === 'home' ? 'page' : undefined),
     });
-    const __VLS_546 = {}.LayoutDashboard;
+    const __VLS_550 = {}.LayoutDashboard;
     /** @type {[typeof __VLS_components.LayoutDashboard, ]} */ ;
     // @ts-ignore
-    const __VLS_547 = __VLS_asFunctionalComponent(__VLS_546, new __VLS_546({
+    const __VLS_551 = __VLS_asFunctionalComponent(__VLS_550, new __VLS_550({
         size: (20),
     }));
-    const __VLS_548 = __VLS_547({
+    const __VLS_552 = __VLS_551({
         size: (20),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_547));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_551));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Inicio'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
@@ -9288,15 +9564,15 @@ else {
         ...{ class: ({ active: __VLS_ctx.managementTab === 'notifications' }) },
         type: "button",
     });
-    const __VLS_550 = {}.Bell;
+    const __VLS_554 = {}.Bell;
     /** @type {[typeof __VLS_components.Bell, ]} */ ;
     // @ts-ignore
-    const __VLS_551 = __VLS_asFunctionalComponent(__VLS_550, new __VLS_550({
+    const __VLS_555 = __VLS_asFunctionalComponent(__VLS_554, new __VLS_554({
         size: (19),
     }));
-    const __VLS_552 = __VLS_551({
+    const __VLS_556 = __VLS_555({
         size: (19),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_551));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_555));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Notificações'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
@@ -9312,15 +9588,15 @@ else {
         ...{ class: "mobile-nav-item" },
         type: "button",
     });
-    const __VLS_554 = {}.Building2;
+    const __VLS_558 = {}.Building2;
     /** @type {[typeof __VLS_components.Building2, ]} */ ;
     // @ts-ignore
-    const __VLS_555 = __VLS_asFunctionalComponent(__VLS_554, new __VLS_554({
+    const __VLS_559 = __VLS_asFunctionalComponent(__VLS_558, new __VLS_558({
         size: (19),
     }));
-    const __VLS_556 = __VLS_555({
+    const __VLS_560 = __VLS_559({
         size: (19),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_555));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_559));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Ambientes'));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.a, __VLS_intrinsicElements.a)({
@@ -9338,15 +9614,15 @@ else {
         href: "#aparelhos",
         'aria-current': (__VLS_ctx.activeMobileTab === 'devices' ? 'page' : undefined),
     });
-    const __VLS_558 = {}.Cpu;
+    const __VLS_562 = {}.Cpu;
     /** @type {[typeof __VLS_components.Cpu, ]} */ ;
     // @ts-ignore
-    const __VLS_559 = __VLS_asFunctionalComponent(__VLS_558, new __VLS_558({
+    const __VLS_563 = __VLS_asFunctionalComponent(__VLS_562, new __VLS_562({
         size: (20),
     }));
-    const __VLS_560 = __VLS_559({
+    const __VLS_564 = __VLS_563({
         size: (20),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_559));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_563));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
     (__VLS_ctx.t('Aparelhos'));
     if (__VLS_ctx.canManageUserAccounts) {
@@ -9367,15 +9643,15 @@ else {
             ...{ class: ({ active: __VLS_ctx.managementTab === 'users' }) },
             type: "button",
         });
-        const __VLS_562 = {}.UsersRound;
+        const __VLS_566 = {}.UsersRound;
         /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
         // @ts-ignore
-        const __VLS_563 = __VLS_asFunctionalComponent(__VLS_562, new __VLS_562({
+        const __VLS_567 = __VLS_asFunctionalComponent(__VLS_566, new __VLS_566({
             size: (19),
         }));
-        const __VLS_564 = __VLS_563({
+        const __VLS_568 = __VLS_567({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_563));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_567));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('Usuários'));
     }
@@ -9397,15 +9673,15 @@ else {
             ...{ class: ({ active: __VLS_ctx.managementTab === 'whatsapp' }) },
             type: "button",
         });
-        const __VLS_566 = {}.MessageCircle;
+        const __VLS_570 = {}.MessageCircle;
         /** @type {[typeof __VLS_components.MessageCircle, ]} */ ;
         // @ts-ignore
-        const __VLS_567 = __VLS_asFunctionalComponent(__VLS_566, new __VLS_566({
+        const __VLS_571 = __VLS_asFunctionalComponent(__VLS_570, new __VLS_570({
             size: (19),
         }));
-        const __VLS_568 = __VLS_567({
+        const __VLS_572 = __VLS_571({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_567));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_571));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('WhatsApp API'));
     }
@@ -9427,15 +9703,15 @@ else {
             ...{ class: ({ active: __VLS_ctx.managementTab === 'email' }) },
             type: "button",
         });
-        const __VLS_570 = {}.Mail;
+        const __VLS_574 = {}.Mail;
         /** @type {[typeof __VLS_components.Mail, ]} */ ;
         // @ts-ignore
-        const __VLS_571 = __VLS_asFunctionalComponent(__VLS_570, new __VLS_570({
+        const __VLS_575 = __VLS_asFunctionalComponent(__VLS_574, new __VLS_574({
             size: (19),
         }));
-        const __VLS_572 = __VLS_571({
+        const __VLS_576 = __VLS_575({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_571));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_575));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         (__VLS_ctx.t('E-mail API'));
     }
@@ -9488,15 +9764,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar seleção de ambientes')),
         });
-        const __VLS_574 = {}.X;
+        const __VLS_578 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_575 = __VLS_asFunctionalComponent(__VLS_574, new __VLS_574({
+        const __VLS_579 = __VLS_asFunctionalComponent(__VLS_578, new __VLS_578({
             size: (19),
         }));
-        const __VLS_576 = __VLS_575({
+        const __VLS_580 = __VLS_579({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_575));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_579));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "workspace-list workspace-selector-list" },
         });
@@ -9539,15 +9815,15 @@ else {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
             (__VLS_ctx.workspaceRoleLabel(workspace.role));
             if (workspace.id === __VLS_ctx.activeWorkspaceId) {
-                const __VLS_578 = {}.Check;
+                const __VLS_582 = {}.Check;
                 /** @type {[typeof __VLS_components.Check, ]} */ ;
                 // @ts-ignore
-                const __VLS_579 = __VLS_asFunctionalComponent(__VLS_578, new __VLS_578({
+                const __VLS_583 = __VLS_asFunctionalComponent(__VLS_582, new __VLS_582({
                     size: (16),
                 }));
-                const __VLS_580 = __VLS_579({
+                const __VLS_584 = __VLS_583({
                     size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_579));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_583));
             }
         }
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
@@ -9566,15 +9842,15 @@ else {
             ...{ class: "workspace-manage-button workspace-selector-manage" },
             type: "button",
         });
-        const __VLS_582 = {}.Plus;
+        const __VLS_586 = {}.Plus;
         /** @type {[typeof __VLS_components.Plus, ]} */ ;
         // @ts-ignore
-        const __VLS_583 = __VLS_asFunctionalComponent(__VLS_582, new __VLS_582({
+        const __VLS_587 = __VLS_asFunctionalComponent(__VLS_586, new __VLS_586({
             size: (15),
         }));
-        const __VLS_584 = __VLS_583({
+        const __VLS_588 = __VLS_587({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_583));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_587));
         (__VLS_ctx.t('Adicionar/editar ambiente'));
     }
     if (__VLS_ctx.workspaceDialogOpen) {
@@ -9626,15 +9902,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar gerenciamento de ambientes')),
         });
-        const __VLS_586 = {}.X;
+        const __VLS_590 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_587 = __VLS_asFunctionalComponent(__VLS_586, new __VLS_586({
+        const __VLS_591 = __VLS_asFunctionalComponent(__VLS_590, new __VLS_590({
             size: (19),
         }));
-        const __VLS_588 = __VLS_587({
+        const __VLS_592 = __VLS_591({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_587));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_591));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.nav, __VLS_intrinsicElements.nav)({
             ...{ class: "settings-tabs workspace-manager-tabs" },
             role: "tablist",
@@ -9658,15 +9934,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'create'),
         });
-        const __VLS_590 = {}.Plus;
+        const __VLS_594 = {}.Plus;
         /** @type {[typeof __VLS_components.Plus, ]} */ ;
         // @ts-ignore
-        const __VLS_591 = __VLS_asFunctionalComponent(__VLS_590, new __VLS_590({
+        const __VLS_595 = __VLS_asFunctionalComponent(__VLS_594, new __VLS_594({
             size: (14),
         }));
-        const __VLS_592 = __VLS_591({
+        const __VLS_596 = __VLS_595({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_591));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_595));
         (__VLS_ctx.t('Criar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
@@ -9686,15 +9962,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'edit'),
         });
-        const __VLS_594 = {}.Pencil;
+        const __VLS_598 = {}.Pencil;
         /** @type {[typeof __VLS_components.Pencil, ]} */ ;
         // @ts-ignore
-        const __VLS_595 = __VLS_asFunctionalComponent(__VLS_594, new __VLS_594({
+        const __VLS_599 = __VLS_asFunctionalComponent(__VLS_598, new __VLS_598({
             size: (14),
         }));
-        const __VLS_596 = __VLS_595({
+        const __VLS_600 = __VLS_599({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_595));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_599));
         (__VLS_ctx.t('Editar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
@@ -9714,15 +9990,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'import'),
         });
-        const __VLS_598 = {}.ArrowDownToLine;
+        const __VLS_602 = {}.ArrowDownToLine;
         /** @type {[typeof __VLS_components.ArrowDownToLine, ]} */ ;
         // @ts-ignore
-        const __VLS_599 = __VLS_asFunctionalComponent(__VLS_598, new __VLS_598({
+        const __VLS_603 = __VLS_asFunctionalComponent(__VLS_602, new __VLS_602({
             size: (14),
         }));
-        const __VLS_600 = __VLS_599({
+        const __VLS_604 = __VLS_603({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_599));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_603));
         (__VLS_ctx.t('Importar'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
@@ -9742,15 +10018,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'devices'),
         });
-        const __VLS_602 = {}.Cpu;
+        const __VLS_606 = {}.Cpu;
         /** @type {[typeof __VLS_components.Cpu, ]} */ ;
         // @ts-ignore
-        const __VLS_603 = __VLS_asFunctionalComponent(__VLS_602, new __VLS_602({
+        const __VLS_607 = __VLS_asFunctionalComponent(__VLS_606, new __VLS_606({
             size: (14),
         }));
-        const __VLS_604 = __VLS_603({
+        const __VLS_608 = __VLS_607({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_603));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_607));
         (__VLS_ctx.t('Aparelhos'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
             ...{ onClick: (...[$event]) => {
@@ -9770,15 +10046,15 @@ else {
             role: "tab",
             'aria-selected': (__VLS_ctx.workspaceDialogAction === 'share'),
         });
-        const __VLS_606 = {}.Share2;
+        const __VLS_610 = {}.Share2;
         /** @type {[typeof __VLS_components.Share2, ]} */ ;
         // @ts-ignore
-        const __VLS_607 = __VLS_asFunctionalComponent(__VLS_606, new __VLS_606({
+        const __VLS_611 = __VLS_asFunctionalComponent(__VLS_610, new __VLS_610({
             size: (14),
         }));
-        const __VLS_608 = __VLS_607({
+        const __VLS_612 = __VLS_611({
             size: (14),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_607));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_611));
         (__VLS_ctx.t('Compartilhar'));
         if (__VLS_ctx.canManageActiveWorkspace) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
@@ -9801,15 +10077,15 @@ else {
                 role: "tab",
                 'aria-selected': (__VLS_ctx.workspaceDialogAction === 'members'),
             });
-            const __VLS_610 = {}.UsersRound;
+            const __VLS_614 = {}.UsersRound;
             /** @type {[typeof __VLS_components.UsersRound, ]} */ ;
             // @ts-ignore
-            const __VLS_611 = __VLS_asFunctionalComponent(__VLS_610, new __VLS_610({
+            const __VLS_615 = __VLS_asFunctionalComponent(__VLS_614, new __VLS_614({
                 size: (14),
             }));
-            const __VLS_612 = __VLS_611({
+            const __VLS_616 = __VLS_615({
                 size: (14),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_611));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_615));
             (__VLS_ctx.t('Membros'));
         }
         if (__VLS_ctx.workspaceDialogAction === 'create' || __VLS_ctx.workspaceDialogAction === 'edit') {
@@ -9856,15 +10132,15 @@ else {
                     ...{ class: "secondary-button workspace-icon-upload" },
                     for: "workspaceIconFile",
                 });
-                const __VLS_614 = {}.ImagePlus;
+                const __VLS_618 = {}.ImagePlus;
                 /** @type {[typeof __VLS_components.ImagePlus, ]} */ ;
                 // @ts-ignore
-                const __VLS_615 = __VLS_asFunctionalComponent(__VLS_614, new __VLS_614({
+                const __VLS_619 = __VLS_asFunctionalComponent(__VLS_618, new __VLS_618({
                     size: (15),
                 }));
-                const __VLS_616 = __VLS_615({
+                const __VLS_620 = __VLS_619({
                     size: (15),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_615));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_619));
                 (__VLS_ctx.t('Escolher imagem'));
                 __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
                     ...{ onChange: (__VLS_ctx.selectWorkspaceIcon) },
@@ -9982,15 +10258,15 @@ else {
                         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                             ...{ class: "protected-member-role" },
                         });
-                        const __VLS_618 = {}.LockKeyhole;
+                        const __VLS_622 = {}.LockKeyhole;
                         /** @type {[typeof __VLS_components.LockKeyhole, ]} */ ;
                         // @ts-ignore
-                        const __VLS_619 = __VLS_asFunctionalComponent(__VLS_618, new __VLS_618({
+                        const __VLS_623 = __VLS_asFunctionalComponent(__VLS_622, new __VLS_622({
                             size: (14),
                         }));
-                        const __VLS_620 = __VLS_619({
+                        const __VLS_624 = __VLS_623({
                             size: (14),
-                        }, ...__VLS_functionalComponentArgsRest(__VLS_619));
+                        }, ...__VLS_functionalComponentArgsRest(__VLS_623));
                         (__VLS_ctx.t('Administrador da plataforma'));
                     }
                     else {
@@ -10108,15 +10384,15 @@ else {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                         ...{ class: "workspace-device-icon" },
                     });
-                    const __VLS_622 = {}.Cpu;
+                    const __VLS_626 = {}.Cpu;
                     /** @type {[typeof __VLS_components.Cpu, ]} */ ;
                     // @ts-ignore
-                    const __VLS_623 = __VLS_asFunctionalComponent(__VLS_622, new __VLS_622({
+                    const __VLS_627 = __VLS_asFunctionalComponent(__VLS_626, new __VLS_626({
                         size: (17),
                     }));
-                    const __VLS_624 = __VLS_623({
+                    const __VLS_628 = __VLS_627({
                         size: (17),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_623));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_627));
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                     (device.name);
@@ -10304,15 +10580,15 @@ else {
                     title: (__VLS_ctx.t('Copiar código do ambiente')),
                     'aria-label': (__VLS_ctx.t('Copiar código do ambiente')),
                 });
-                const __VLS_626 = {}.Copy;
+                const __VLS_630 = {}.Copy;
                 /** @type {[typeof __VLS_components.Copy, ]} */ ;
                 // @ts-ignore
-                const __VLS_627 = __VLS_asFunctionalComponent(__VLS_626, new __VLS_626({
+                const __VLS_631 = __VLS_asFunctionalComponent(__VLS_630, new __VLS_630({
                     size: (16),
                 }));
-                const __VLS_628 = __VLS_627({
+                const __VLS_632 = __VLS_631({
                     size: (16),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_627));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_631));
                 if (__VLS_ctx.workspaceShareMessage) {
                     __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
                         ...{ class: "success-message" },
@@ -10363,15 +10639,15 @@ else {
             disabled: (__VLS_ctx.userDeletionSaving),
             'aria-label': (__VLS_ctx.t('Fechar')),
         });
-        const __VLS_630 = {}.X;
+        const __VLS_634 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_631 = __VLS_asFunctionalComponent(__VLS_630, new __VLS_630({
+        const __VLS_635 = __VLS_asFunctionalComponent(__VLS_634, new __VLS_634({
             size: (19),
         }));
-        const __VLS_632 = __VLS_631({
+        const __VLS_636 = __VLS_635({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_631));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_635));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
             ...{ class: "form-subtitle" },
         });
@@ -10448,15 +10724,15 @@ else {
             disabled: (__VLS_ctx.accountEditSaving),
             'aria-label': (__VLS_ctx.t('Fechar')),
         });
-        const __VLS_634 = {}.X;
+        const __VLS_638 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_635 = __VLS_asFunctionalComponent(__VLS_634, new __VLS_634({
+        const __VLS_639 = __VLS_asFunctionalComponent(__VLS_638, new __VLS_638({
             size: (19),
         }));
-        const __VLS_636 = __VLS_635({
+        const __VLS_640 = __VLS_639({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_635));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_639));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
             for: "accountEditRole",
         });
@@ -10578,15 +10854,15 @@ else {
             type: "button",
             'aria-label': (__VLS_ctx.t('Fechar configuracoes')),
         });
-        const __VLS_638 = {}.X;
+        const __VLS_642 = {}.X;
         /** @type {[typeof __VLS_components.X, ]} */ ;
         // @ts-ignore
-        const __VLS_639 = __VLS_asFunctionalComponent(__VLS_638, new __VLS_638({
+        const __VLS_643 = __VLS_asFunctionalComponent(__VLS_642, new __VLS_642({
             size: (19),
         }));
-        const __VLS_640 = __VLS_639({
+        const __VLS_644 = __VLS_643({
             size: (19),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_639));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_643));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "settings-pane" },
         });
@@ -10620,15 +10896,15 @@ else {
             ...{ class: "secondary-button avatar-upload-button" },
             for: "avatarFile",
         });
-        const __VLS_642 = {}.ImagePlus;
+        const __VLS_646 = {}.ImagePlus;
         /** @type {[typeof __VLS_components.ImagePlus, ]} */ ;
         // @ts-ignore
-        const __VLS_643 = __VLS_asFunctionalComponent(__VLS_642, new __VLS_642({
+        const __VLS_647 = __VLS_asFunctionalComponent(__VLS_646, new __VLS_646({
             size: (15),
         }));
-        const __VLS_644 = __VLS_643({
+        const __VLS_648 = __VLS_647({
             size: (15),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_643));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_647));
         (__VLS_ctx.t('Alterar foto'));
         __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
             ...{ onChange: (__VLS_ctx.selectAvatar) },
@@ -10768,15 +11044,15 @@ else {
             ...{ class: "secondary-button mobile-account-logout" },
             type: "button",
         });
-        const __VLS_646 = {}.LogOut;
+        const __VLS_650 = {}.LogOut;
         /** @type {[typeof __VLS_components.LogOut, ]} */ ;
         // @ts-ignore
-        const __VLS_647 = __VLS_asFunctionalComponent(__VLS_646, new __VLS_646({
+        const __VLS_651 = __VLS_asFunctionalComponent(__VLS_650, new __VLS_650({
             size: (17),
         }));
-        const __VLS_648 = __VLS_647({
+        const __VLS_652 = __VLS_651({
             size: (17),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_647));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_651));
         (__VLS_ctx.t('Sair da conta'));
     }
 }
@@ -11429,6 +11705,27 @@ else {
 /** @type {__VLS_StyleScopedClasses['sensor-detail-card']} */ ;
 /** @type {__VLS_StyleScopedClasses['sensor-detail-label']} */ ;
 /** @type {__VLS_StyleScopedClasses['sensor-reading-time']} */ ;
+/** @type {__VLS_StyleScopedClasses['sensor-history']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-header']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-heading-copy']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-range-control']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-range-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-error']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-message']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-charts']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-series']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-series-heading']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-chart-layout']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-scale']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-chart']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-grid-line']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-grid-line']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-grid-line']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-chart-line']} */ ;
+/** @type {__VLS_StyleScopedClasses['history-date-range']} */ ;
 /** @type {__VLS_StyleScopedClasses['demo-simulation-panel']} */ ;
 /** @type {__VLS_StyleScopedClasses['demo-simulation-heading']} */ ;
 /** @type {__VLS_StyleScopedClasses['demo-simulation-fields']} */ ;
@@ -11838,6 +12135,8 @@ const __VLS_self = (await import('vue')).defineComponent({
             workspaceAlertPreferencesError: workspaceAlertPreferencesError,
             avatarError: avatarError,
             activeMobileTab: activeMobileTab,
+            selectedHistoryRange: selectedHistoryRange,
+            deviceHistories: deviceHistories,
             t: t,
             workspaceRoleLabel: workspaceRoleLabel,
             dateLocale: dateLocale,
@@ -11944,6 +12243,12 @@ const __VLS_self = (await import('vue')).defineComponent({
             latestSensorReadings: latestSensorReadings,
             isDeviceExpanded: isDeviceExpanded,
             toggleDevice: toggleDevice,
+            changeHistoryRange: changeHistoryRange,
+            historyRanges: historyRanges,
+            sensorHistorySeries: sensorHistorySeries,
+            sensorHistoryChart: sensorHistoryChart,
+            formatHistoryValue: formatHistoryValue,
+            formatHistoryDate: formatHistoryDate,
             deviceStatusIcon: deviceStatusIcon,
             deviceStatusLabel: deviceStatusLabel,
             navigateMobileSection: navigateMobileSection,

@@ -2,12 +2,10 @@ import dotenv from 'dotenv';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import argon2 from 'argon2';
-import { PrismaClient } from '@prisma/client';
 import { buildDemoSensorExternalId, canUseDemoSensorForUser, LEGACY_DEMO_SENSOR_EXTERNAL_ID } from '../src/lib/demo-sensor.js';
+import { prisma } from '../src/lib/prisma.js';
 
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../..', '.env') });
-
-const prisma = new PrismaClient();
 
 async function main() {
   const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();

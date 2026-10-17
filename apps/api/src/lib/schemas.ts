@@ -216,6 +216,18 @@ export const ingestionSchema = z.object({
   readings: z.array(readingSchema).max(100).default([])
 }).strict();
 
+export const historicalIngestionSchema = z.object({
+  externalId: trimmed(128),
+  readings: z.array(readingSchema.extend({
+    type: z.enum(['temperatura', 'umidade', 'gas_adc']),
+    recordedAt: z.string().datetime({ offset: true })
+  })).min(1).max(100)
+}).strict();
+
+export const sensorHistoryRangeSchema = z.object({
+  range: z.enum(['all', '6m', '30d', '15d', '7d', '1d']).default('30d')
+}).strict();
+
 export const simulateDemoDeviceSchema = z.object({
   status: z.enum(['online', 'warning', 'offline']),
   temperature: z.number().finite().min(-50).max(150),

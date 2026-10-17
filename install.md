@@ -147,13 +147,12 @@ Se a senha tiver caracteres reservados de URL, como `@`, `:`, `/` ou `#`, codifi
 Com o PostgreSQL ativo e o `.env` preenchido, execute na raiz:
 
 ```powershell
-npm.cmd run db:generate
 npm.cmd run db:push
 npm.cmd run db:seed
 ```
 
-- `db:generate` gera o Prisma Client.
-- `db:push` cria ou atualiza as tabelas do banco conforme `apps/api/prisma/schema.prisma`.
+- `db:generate` gera o Prisma Client sem alterar o banco.
+- `db:push` cria ou atualiza as tabelas conforme `apps/api/prisma/schema.prisma` e gera o Prisma Client.
 - `db:seed` cria ou atualiza a conta definida em `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD`.
 
 Ao atualizar para esta versão, execute `db:generate` e `db:push` para adicionar à tabela de usuários o número de WhatsApp e as preferências dos canais. A mudança preserva os usuários atuais; notificações por e-mail ficam ativadas por padrão e WhatsApp desativado até adesão no perfil.

@@ -10,6 +10,7 @@ import {
   deviceLinkLoginSchema,
   deviceLinkWorkspacesSchema,
   forgotPasswordSchema,
+  historicalIngestionSchema,
   ingestionSchema,
   inviteWorkspaceMemberSchema,
   joinWorkspaceSchema,
@@ -17,6 +18,7 @@ import {
   registrationSchema,
   registrationSettingSchema,
   resetPasswordSchema,
+  sensorHistoryRangeSchema,
   simulateDemoDeviceSchema,
   tokenSchema,
   updateWorkspaceMemberSchema,
@@ -57,6 +59,21 @@ test('aceita um aparelho com leituras validas', () => {
 test('rejeita valores nao finitos e campos desconhecidos', () => {
   assert.equal(ingestionSchema.safeParse({ externalId: 's1', name: 'Sensor', value: Infinity }).success, false);
   assert.equal(ingestionSchema.safeParse({ externalId: 's1', name: 'Sensor', unexpected: true }).success, false);
+});
+
+test('valida os intervalos de consulta do historico', () => {
+  assert.equal(sensorHistoryRangeSchema.parse({}).range, '30d');
+  for (const range of ['all', '6m', '30d', '15d', '7d', '1d']) {
+    assert.equal(sensorHistoryRangeSchema.safeParse({ range }).success, true);
+  }
+  assert.equal(sensorHistoryRangeSchema.safeParse({ range: '90d' }).success, false);
+});
+
+test('valida lotes de leituras historicas com timestamp e tipo conhecido', () => {
+  const reading = { type: 'temperatura', value: 22.5, unit: 'C', recordedAt: '2026-10-16T12:30:00Z' };
+  assert.equal(historicalIngestionSchema.safeParse({ externalId: 'sensor-01', readings: [reading] }).success, true);
+  assert.equal(historicalIngestionSchema.safeParse({ externalId: 'sensor-01', readings: [{ ...reading, recordedAt: undefined }] }).success, false);
+  assert.equal(historicalIngestionSchema.safeParse({ externalId: 'sensor-01', readings: [{ ...reading, type: 'voltagem' }] }).success, false);
 });
 
 test('rejeita credenciais malformadas', () => {

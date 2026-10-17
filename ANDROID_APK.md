@@ -180,7 +180,7 @@ Nao execute `android:add` novamente se a pasta ja existir.
 
 ## 5. Build de teste HTTP na rede local
 
-Este modo e somente para uma rede Wi-Fi privada. O arquivo `.env.android.local` na raiz do projeto define a URL carregada pelo APK. Ele ja esta preparado nesta maquina para `192.168.1.100`; em outro PC, crie-o a partir do exemplo e troque pelo IP local daquele computador:
+Este modo e somente para uma rede Wi-Fi privada. O APK abre uma tela para digitar o IP do computador que esta executando o dashboard; o ultimo IP usado fica salvo como sugestao, mas pode ser trocado sempre que o app for aberto. A conexao usa HTTP na porta `5173`, sem precisar configurar `.env.android.local`:
 
 ```text
 .env.android.example
@@ -192,7 +192,7 @@ Conteudo do arquivo local:
 CAPACITOR_SERVER_URL=http://192.168.1.100:5173
 ```
 
-O arquivo `.env.android.local` e ignorado pelo Git. O Capacitor le esse arquivo da raiz durante a sincronizacao. O Vite encaminha `/api` para a API no PC, entao mantenha `VITE_API_BASE_URL` sem definir.
+O Vite encaminha `/api` para a API no PC, entao mantenha `VITE_API_BASE_URL` sem definir.
 
 No `.env` da API, confira que o CORS inclui o endereco do dashboard e que os cookies estao configurados para desenvolvimento HTTP:
 
@@ -223,9 +223,9 @@ O script compila o dashboard, sincroniza o Capacitor e chama o Gradle Wrapper ap
 android/app-debug.apk
 ```
 
-O app aponta para `http://192.168.1.100:5173`. O PC precisa continuar ligado, com API e Vite ativos, e o celular deve estar na mesma rede. Libere a porta TCP `5173` no firewall para a rede privada se necessario; nao e preciso expor a porta `3000` ao celular. HTTP nao criptografa credenciais, entao nao use esse APK fora de uma rede de teste confiavel.
+O app aponta para `http://<IP-digitado>:5173`. O PC precisa continuar ligado, com API e Vite ativos, e o celular deve estar na mesma rede. Libere a porta TCP `5173` no firewall para a rede privada se necessario; nao e preciso expor a porta `3000` ao celular. HTTP nao criptografa credenciais, entao nao use esse APK fora de uma rede de teste confiavel.
 
-Para conferir o acesso antes de instalar o APK, abra `http://192.168.1.100:5173` no navegador do celular.
+Para conferir o acesso antes de instalar o APK, abra `http://<IP-do-PC>:5173` no navegador do celular.
 
 ## 6. Instalar no celular ou emulador
 
